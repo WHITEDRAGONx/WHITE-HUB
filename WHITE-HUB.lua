@@ -473,11 +473,18 @@ local function ToggleUI()
     end
 end
 
+local btnVisible = true
+local function ToggleBtn_Visibility()
+    btnVisible = not btnVisible
+    ToggleBtn.Visible = btnVisible
+end
+
 ToggleBtn.MouseButton1Click:Connect(ToggleUI)
 CloseBtn.MouseButton1Click:Connect(ToggleUI)
 UserInputService.InputBegan:Connect(function(i, gp)
     if gp then return end
     if i.KeyCode == Enum.KeyCode.RightAlt then ToggleUI() end
+    if i.KeyCode == Enum.KeyCode.RightControl then ToggleBtn_Visibility() end
 end)
 
 -- =====================
