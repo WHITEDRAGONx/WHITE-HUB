@@ -122,7 +122,7 @@ local function SendWebhook(message)
 end
 
 -- =====================
--- CORES ESTILO XENON
+-- XENON STYLE COLORS
 -- =====================
 local C = {
     BG        = Color3.fromRGB(22, 29, 33),
@@ -187,7 +187,6 @@ MainGui.Parent = PlayerGui
 MainGui.ResetOnSpawn = false
 MainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Botao toggle acima do pop up
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(0, 100, 0, 28)
 ToggleBtn.Position = UDim2.new(0, 8, 1, -200)
@@ -205,7 +204,6 @@ tbs.Color = C.Stroke tbs.Transparency = 0 tbs.Thickness = 1.2
 ToggleBtn.MouseEnter:Connect(function() TweenService:Create(tbs, TweenInfo.new(0.1), {Color=C.StrokeHov}):Play() end)
 ToggleBtn.MouseLeave:Connect(function() TweenService:Create(tbs, TweenInfo.new(0.1), {Color=C.Stroke}):Play() end)
 
--- Frame principal
 local W, H = 260, 340
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, W, 0, H)
@@ -219,7 +217,6 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 local mfs = Instance.new("UIStroke", MainFrame)
 mfs.Color = C.Stroke mfs.Transparency = 0 mfs.Thickness = 1.5
 
--- Barra titulo
 local TitleBar = Instance.new("Frame")
 TitleBar.Size = UDim2.new(1, 0, 0, 38)
 TitleBar.BackgroundColor3 = C.BG2
@@ -252,7 +249,6 @@ CloseBtn.Text = "✕" CloseBtn.TextColor3 = C.White
 CloseBtn.TextScaled = true CloseBtn.Font = Enum.Font.GothamBold
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
 
--- Drag
 local dragging, dragStart, startPos = false, nil, nil
 TitleBar.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -271,7 +267,6 @@ UserInputService.InputChanged:Connect(function(i)
     end
 end)
 
--- Scroll
 local ScrollFrame = Instance.new("ScrollingFrame")
 ScrollFrame.Size = UDim2.new(1,-8,1,-96)
 ScrollFrame.Position = UDim2.new(0,4,0,42)
@@ -286,7 +281,6 @@ ListLayout.Padding = UDim.new(0, 3)
 local UIPad = Instance.new("UIPadding", ScrollFrame)
 UIPad.PaddingLeft = UDim.new(0,4) UIPad.PaddingRight = UDim.new(0,4) UIPad.PaddingTop = UDim.new(0,4)
 
--- Barra opcoes inferior
 local OptionsBar = Instance.new("Frame")
 OptionsBar.Size = UDim2.new(1,-8,0,50)
 OptionsBar.Position = UDim2.new(0,4,1,-54)
@@ -300,7 +294,6 @@ local OptLine = Instance.new("Frame", OptionsBar)
 OptLine.Size = UDim2.new(0,1,0.6,0) OptLine.Position = UDim2.new(0.5,0,0.2,0)
 OptLine.BackgroundColor3 = C.Stroke OptLine.BorderSizePixel = 0
 
--- Toggle helper estilo Xenon
 local function MakeToggle(parent, label, val, xPos, yLblPos, onChange)
     local lbl = Instance.new("TextLabel", parent)
     lbl.Size = UDim2.new(0.4,0,0,14) lbl.Position = UDim2.new(xPos,6,0,yLblPos)
@@ -351,7 +344,6 @@ MakeToggle(OptionsBar, "BuyLucky", BuyLucky, 0.52, 6, function()
     SaveConfig() return BuyLucky
 end)
 
--- Section label
 local function CreateSection(text)
     local f = Instance.new("Frame", ScrollFrame)
     f.Size = UDim2.new(1,-8,0,20) f.BackgroundColor3 = C.BG3 f.BorderSizePixel = 0
@@ -365,7 +357,6 @@ local function CreateSection(text)
     l.Font = Enum.Font.GothamBold l.TextXAlignment = Enum.TextXAlignment.Left
 end
 
--- Item row
 local function CreateItemRow(itemName, currentVal)
     local row = Instance.new("Frame", ScrollFrame)
     row.Size = UDim2.new(1,-8,0,30) row.BackgroundColor3 = C.BG2 row.BorderSizePixel = 0
@@ -432,7 +423,6 @@ ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     ScrollFrame.CanvasSize = UDim2.new(0,0,0,ListLayout.AbsoluteContentSize.Y+8)
 end)
 
--- Webhook input
 CreateSection("WEBHOOK")
 local whRow = Instance.new("Frame", ScrollFrame)
 whRow.Size = UDim2.new(1,-8,0,30) whRow.BackgroundColor3 = C.BG2 whRow.BorderSizePixel = 0
@@ -464,7 +454,6 @@ whBox.FocusLost:Connect(function()
     TweenService:Create(whStroke, TweenInfo.new(0.1), {Color=C.Stroke}):Play()
 end)
 
--- Open/close
 local uiOpen = false
 local function ToggleUI()
     uiOpen = not uiOpen
@@ -502,7 +491,6 @@ end)
 
 -- =====================
 -- CRASH BYPASS
--- FIX: pcall completo + wait maior antes do require
 -- =====================
 task.delay(3, function()
     pcall(function()
@@ -521,7 +509,7 @@ task.delay(3, function()
 end)
 
 -- =====================
--- AUTO REJOIN — qualquer kick
+-- AUTO REJOIN
 -- =====================
 CoreGui.DescendantAdded:Connect(function(child)
     if child.Name == "ErrorPrompt" then
@@ -552,22 +540,14 @@ pcall(function()
 end)
 
 -- =====================
--- MAP BYPASS REMOVIDO
--- Mover partes do mapa causava void — o noclip do personagem
--- já é suficiente via RunService.Stepped no character
-
--- =====================
 -- ITEM SPAWN FOLDER
 -- =====================
 local ItemSpawnFolder = nil
 pcall(function()
     local spawns = Workspace:WaitForChild("Item_Spawns", 15)
-    if spawns then
-        ItemSpawnFolder = spawns:WaitForChild("Items", 15)
-    end
+    if spawns then ItemSpawnFolder = spawns:WaitForChild("Items", 15) end
 end)
 if not ItemSpawnFolder then
-    warn("Item_Spawns not found, trying FindFirstChild...")
     pcall(function()
         local spawns = Workspace:FindFirstChild("Item_Spawns")
         if spawns then ItemSpawnFolder = spawns:FindFirstChild("Items") end
@@ -580,7 +560,7 @@ else
 end
 
 -- =====================
--- FUNÇÕES UTILITÁRIAS
+-- UTILITY FUNCTIONS
 -- =====================
 local function GetCharacter(Part)
     if Player.Character then
@@ -642,10 +622,29 @@ local function HasMaxItem(Item)
     return MaxItemAmounts[Item] and CountItem(Item) >= MaxItemAmounts[Item] or false
 end
 
-local function HasLuckyArrows() return CountItem("Lucky Arrow") >= 10 end
-local function IsMoneyMaxed()
+local function GetMoney()
     local ok, val = pcall(function() return Player.PlayerStats.Money.Value end)
-    return ok and val >= 1000000 or false
+    return ok and val or 0
+end
+
+-- =====================
+-- STOP CONDITIONS
+-- Para com 9+ Lucky Arrows + $1kk
+-- (YBA bug: game prevents buying the 10th Lucky Arrow)
+-- =====================
+local LUCKY_STOP = 9    -- stop at 9 (YBA bug prevents buying the 10th)
+local MONEY_STOP = 1000000
+
+local function HasEnoughLucky()
+    return CountItem("Lucky Arrow") >= LUCKY_STOP
+end
+
+local function IsMoneyMaxed()
+    return GetMoney() >= MONEY_STOP
+end
+
+local function ShouldStopFarming()
+    return HasEnoughLucky() and IsMoneyMaxed()
 end
 
 local function AllKeepItemsFull()
@@ -659,14 +658,8 @@ local function AllKeepItemsFull()
     return hasAny
 end
 
-local function ShouldStopFarming()
-    if AllKeepItemsFull() then return true end
-    if HasLuckyArrows() and IsMoneyMaxed() then return true end
-    return false
-end
-
 -- =====================
--- DETECÇÃO DE ITENS
+-- ITEM DETECTION
 -- =====================
 getgenv().SpawnedItems = {}
 
@@ -685,7 +678,6 @@ local function GetItemInfo(Model)
 end
 
 if ItemSpawnFolder then
-    -- Detecta itens já existentes no chão
     for _, Model in pairs(ItemSpawnFolder:GetChildren()) do
         pcall(function()
             if Model:IsA("Model") then
@@ -698,7 +690,6 @@ if ItemSpawnFolder then
         end)
     end
 
-    -- Detecta novos itens que spawnam
     ItemSpawnFolder.ChildAdded:Connect(function(Model)
         task.wait(1)
         pcall(function()
@@ -734,17 +725,14 @@ local ServerHop = loadstring(game:HttpGet("https://raw.githubusercontent.com/rin
 
 -- =====================
 -- SKIP LOADING SCREEN
--- FIX: cada pcall separado, sem dependência entre eles
 -- =====================
 task.wait(1)
-
 pcall(function()
     if not PlayerGui:FindFirstChild("HUD") then
         local HUD = ReplicatedStorage.Objects.HUD:Clone()
         HUD.Parent = PlayerGui
     end
 end)
-
 task.spawn(function()
     pcall(function() PlayerGui:WaitForChild("LoadingScreen1", 5):Destroy() end)
     task.wait(.5)
@@ -754,15 +742,14 @@ end)
 
 repeat task.wait() until GetCharacter() and GetCharacter("RemoteEvent")
 print("Character loaded successfully")
-
 pcall(function() GetCharacter("RemoteEvent"):FireServer("PressedPlay") end)
 
 print("Teleporting to safe spot...")
 TeleportTo(CFrame.new(978, -42, -49))
 task.wait(1)
 
-local HRP = GetCharacter("HumanoidRootPart")
-if HRP then print("Position: " .. tostring(HRP.Position))
+local HRP2 = GetCharacter("HumanoidRootPart")
+if HRP2 then print("Position: " .. tostring(HRP2.Position))
 else warn("HumanoidRootPart not found") end
 
 print("Waiting 5 seconds before starting farm...")
@@ -770,128 +757,153 @@ task.wait(5)
 print("Starting farm loop...")
 
 -- =====================
--- WEBHOOK TRIGGERS
--- Lucky Arrow em tempo real via ChildAdded
+-- WEBHOOK TRIGGER em tempo real
 -- =====================
 Player.Backpack.ChildAdded:Connect(function(tool)
     if tool.Name == "Lucky Arrow" then
-        if HasLuckyArrows() and IsMoneyMaxed() then
-            SendWebhook("✅ **Max Lucky Arrows & Max Money reached!**\nPlayer: `" .. Player.Name .. "`\nLucky Arrows: `" .. CountItem("Lucky Arrow") .. "/10`\nMoney: `$" .. tostring(Player.PlayerStats.Money.Value) .. "`")
+        if ShouldStopFarming() then
+            SendWebhook("✅ **Farm conditions met!**\nPlayer: `" .. Player.Name .. "`\nLucky Arrows: `" .. CountItem("Lucky Arrow") .. "/" .. LUCKY_STOP .. "`\nMoney: `$" .. tostring(GetMoney()) .. "`")
         end
     end
 end)
 
 -- =====================
--- FARM LOOP PRINCIPAL
+-- FARM LOOP
+-- Stops when $1kk + 9 Lucky Arrows are reached
+-- Does not sell when money is already maxed
+-- Keeps collecting Lucky Arrows from the ground even while paused
 -- =====================
-local cyclesCompleted = 0
-local maxCycles       = 1
-local maxCycleTime    = 60
+local NO_ITEM_TIMEOUT = 20
+local lastItemTime = tick()
+
+local function DoSell()
+    -- Skip sell if money is already maxed
+    if IsMoneyMaxed() then
+        print("Money maxed — skipping sell.")
+        return
+    end
+    if not AutoSell then return end
+    for Item, Sell in pairs(SellItems) do
+        if Sell and Player.Backpack and Player.Backpack:FindFirstChild(Item) then
+            pcall(function()
+                GetCharacter("Humanoid"):EquipTool(Player.Backpack:FindFirstChild(Item))
+                GetCharacter("RemoteEvent"):FireServer("EndDialogue", {
+                    NPC="Merchant", Dialogue="Dialogue5", Option="Option2"
+                })
+            end)
+            task.wait(.1)
+        end
+    end
+end
+
+local function DoBuyLucky()
+    -- Only buy if below 9 (avoids YBA bug on the 10th arrow)
+    if not BuyLucky then return end
+    if CountItem("Lucky Arrow") >= LUCKY_STOP then return end
+    local money = GetMoney()
+    if money < 75000 then return end
+    print("Buying Lucky Arrows... ($" .. money .. ")")
+    local attempts = 0
+    while GetMoney() >= 75000 and attempts < 15 do
+        pcall(function()
+            Player.Character.RemoteEvent:FireServer("PurchaseShopItem", {ItemName="1x Lucky Arrow"})
+        end)
+        task.wait(1)
+        attempts += 1
+        local count = CountItem("Lucky Arrow")
+        print("Lucky Arrows: " .. count .. "/" .. LUCKY_STOP)
+        -- Stop buying at 9 (YBA bug blocks the 10th)
+        if count >= LUCKY_STOP then
+            print("Reached " .. LUCKY_STOP .. " Lucky Arrows — stopping purchase (YBA bug prevents buying the last one)")
+            break
+        end
+    end
+end
+
+local function DoServerHop()
+    print("=== Server dry — switching servers ===")
+    local hopStart = tick()
+    ServerHop() task.wait(10)
+    if tick() - hopStart < 15 then
+        print("Hop failed, retrying...")
+        task.wait(5) ServerHop() task.wait(10)
+    end
+    lastItemTime = tick()
+end
+
+local function CollectItem(ItemInfo, Index)
+    local HumanoidRootPart = GetCharacter("HumanoidRootPart")
+    if not HumanoidRootPart then return end
+    getgenv().SpawnedItems[Index] = nil
+    if HasMaxItem(ItemInfo.Name) then return end
+    local BV = Instance.new("BodyVelocity")
+    BV.Parent = HumanoidRootPart
+    BV.Velocity = Vector3.new(0,0,0)
+    SetNoclip(true)
+    TeleportTo(CFrame.new(ItemInfo.Position.X, ItemInfo.Position.Y-25, ItemInfo.Position.Z))
+    task.wait(.5)
+    pcall(function() fireproximityprompt(ItemInfo.ProximityPrompt) end)
+    task.wait(.5)
+    BV:Destroy()
+    TeleportTo(CFrame.new(978,-42,-49))
+    task.wait(.3)
+    SetNoclip(false)
+    lastItemTime = tick()
+    print("Collected: " .. ItemInfo.Name)
+end
 
 while true do
+    -- Conditions met — wait but keep collecting Lucky Arrows from the ground
     if ShouldStopFarming() then
-        print("All conditions met, waiting...")
-        repeat task.wait(5) until not ShouldStopFarming()
-        print("Conditions changed, resuming farm!")
-        cyclesCompleted = 0
+        print("Conditions met ($1kk + " .. LUCKY_STOP .. " Lucky Arrows) — waiting...")
+        SendWebhook("🛑 **Farm paused — conditions met!**\nPlayer: `" .. Player.Name .. "`\nLucky Arrows: `" .. CountItem("Lucky Arrow") .. "/" .. LUCKY_STOP .. "`\nMoney: `$" .. tostring(GetMoney()) .. "`")
+
+        -- Stay in loop, only pick up Lucky Arrows that spawn
+        repeat
+            local snapshot = {}
+            for Index, ItemInfo in pairs(getgenv().SpawnedItems) do
+                if ItemInfo.Name == "Lucky Arrow" or ItemInfo.Name == "Lucky Stone Mask" then
+                    table.insert(snapshot, {Index=Index, ItemInfo=ItemInfo})
+                end
+            end
+            for _, entry in ipairs(snapshot) do
+                CollectItem(entry.ItemInfo, entry.Index)
+            end
+            task.wait(3)
+        until not ShouldStopFarming()
+
+        print("Conditions changed — resuming full farm!")
+        lastItemTime = tick()
     end
 
-    print("=== Cycle #" .. (cyclesCompleted+1) .. " ===")
-
-    -- Copia os itens antes de iterar para evitar corromper o pairs() ao setar nil
+    -- Collect all available items
     local itemSnapshot = {}
     for Index, ItemInfo in pairs(getgenv().SpawnedItems) do
-        table.insert(itemSnapshot, {Index = Index, ItemInfo = ItemInfo})
+        table.insert(itemSnapshot, {Index=Index, ItemInfo=ItemInfo})
     end
 
     for _, entry in ipairs(itemSnapshot) do
-        local Index    = entry.Index
-        local ItemInfo = entry.ItemInfo
-        local HumanoidRootPart = GetCharacter("HumanoidRootPart")
-        if HumanoidRootPart then
-            -- Remove da lista antes de tentar pegar
-            getgenv().SpawnedItems[Index] = nil
-            if not HasMaxItem(ItemInfo.Name) then
-                local ProximityPrompt = ItemInfo.ProximityPrompt
-                local Position = ItemInfo.Position
-                local BV = Instance.new("BodyVelocity")
-                BV.Parent = HumanoidRootPart
-                BV.Velocity = Vector3.new(0, 0, 0)
-                SetNoclip(true)
-                TeleportTo(CFrame.new(Position.X, Position.Y - 25, Position.Z))
-                task.wait(.5)
-                pcall(function() fireproximityprompt(ProximityPrompt) end)
-                task.wait(.5)
-                BV:Destroy()
-                TeleportTo(CFrame.new(978, -42, -49))
-                task.wait(.3)
-                SetNoclip(false)
-            end
-        end
+        CollectItem(entry.ItemInfo, entry.Index)
     end
 
-    task.wait(3)
-    local cycleStartTime = tick()
-    print("Farm done, starting sell...")
-
-    if AutoSell then
-        for Item, Sell in pairs(SellItems) do
-            if Sell and Player.Backpack and Player.Backpack:FindFirstChild(Item) then
-                pcall(function()
-                    GetCharacter("Humanoid"):EquipTool(Player.Backpack:FindFirstChild(Item))
-                    GetCharacter("RemoteEvent"):FireServer("EndDialogue", {
-                        NPC="Merchant", Dialogue="Dialogue5", Option="Option2"
-                    })
-                end)
-                task.wait(.1)
-            end
-        end
-    end
-
-    -- Buy Lucky Arrows
-    local okM, moneyVal = pcall(function() return Player.PlayerStats.Money.Value end)
-    if BuyLucky and not HasLuckyArrows() and okM then
-        print("Buying Lucky Arrows... ($" .. moneyVal .. ")")
-        local attempts = 0
-        while moneyVal >= 75000 and attempts < 15 do
-            pcall(function()
-                Player.Character.RemoteEvent:FireServer("PurchaseShopItem", {ItemName="1x Lucky Arrow"})
-            end)
-            task.wait(1)
-            attempts += 1
-            local count = CountItem("Lucky Arrow")
-            print("Lucky Arrows: " .. count .. "/10")
-            if count >= 10 then print("Max Lucky Arrows!") break end
-            if attempts > 3 and count == 9 then break end
-            okM, moneyVal = pcall(function() return Player.PlayerStats.Money.Value end)
-            if not okM then break end
-        end
-    end
-
-    cyclesCompleted += 1
-    print("Cycle completed (" .. cyclesCompleted .. "/" .. maxCycles .. ")")
-
-    if tick()-cycleStartTime > maxCycleTime then
-        print("TIMEOUT: forcing server hop...")
-        cyclesCompleted = 0 ServerHop() task.wait(10)
-    end
-
-    if cyclesCompleted >= maxCycles then
+    -- Check if server has dried up
+    local timeSinceLast = tick() - lastItemTime
+    if timeSinceLast > NO_ITEM_TIMEOUT then
+        print(string.format("No items for %.0fs — selling + hopping...", timeSinceLast))
+        DoSell()
+        DoBuyLucky()
         if ShouldStopFarming() then
-            SendWebhook("🛑 **Farm paused — conditions met!**\nPlayer: `" .. Player.Name .. "`\nLucky Arrows: `" .. CountItem("Lucky Arrow") .. "/10`")
-            print("All conditions met! Stopping server hop.")
-            cyclesCompleted = 0
+            -- Do not hop, just wait
+            lastItemTime = tick()
         else
-            print("=== Switching servers ===")
-            cyclesCompleted = 0
-            local hopStart = tick()
-            ServerHop() task.wait(10)
-            if tick()-hopStart < 15 then
-                print("Hop failed, retrying...")
-                task.wait(5) ServerHop() task.wait(10)
-            end
+            DoServerHop()
+        end
+    else
+        if #itemSnapshot == 0 then
+            local waiting = math.floor(NO_ITEM_TIMEOUT - timeSinceLast)
+            print("Waiting for items... (" .. waiting .. "s until hop)")
         end
     end
 
-    task.wait(2)
+    task.wait(1)
 end
