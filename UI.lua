@@ -7,6 +7,7 @@ local Players          = game:GetService("Players")
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local TextService      = game:GetService("TextService")
+local HttpService      = game:GetService("HttpService")
 
 local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -94,6 +95,7 @@ local _config      = nil
 local _webhook     = nil
 local _combatFarm  = nil
 local _serverHop   = nil
+local _whiteAI     = nil
 local _runtimeLog   = nil
 
 local toggleObjects = {}
@@ -116,6 +118,7 @@ function UI:Init(Modules)
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
     _serverHop   = Modules.ServerHop
+    _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
 end
 
@@ -709,6 +712,7 @@ function UI:Create()
     local QuestPage   = MakePage("QuestPage")
     local WebhookPage = MakePage("WebhookPage")
     local ConsolePage = MakePage("ConsolePage")
+    local AIPage      = MakePage("AIPage")
     local CreditsPage = MakePage("CreditsPage")
     FarmPage.Visible = true
 
@@ -718,6 +722,7 @@ function UI:Create()
         { name="Combat", page=QuestPage },
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
+        { name="AI DEBUG", page=AIPage },
         { name="Credits", page=CreditsPage },
     }
     local tabButtons = {}
@@ -1307,6 +1312,100 @@ function UI:Create()
 
     refreshConsole()
     AutoCanvas(ConsolePage)
+
+    -- =====================
+    -- WHITE AI DEBUG PAGE (NO AGENT CODE EXECUTION)
+    -- =====================
+    MakeSection(AIPage, "WHITE AI V1 - DIAGNOSTICS")
+
+    local aiDescription = Instance.new("TextLabel", AIPage)
+    aiDescription.BackgroundTransparency = 1
+    aiDescription.Size = UDim2.new(1, -8, 0, 55)
+    aiDescription.TextWrapped = true
+    aiDescription.TextYAlignment = Enum.TextYAlignment.Top
+    aiDescription.TextColor3 = THEME.MUTED
+    aiDescription.TextSize = 12
+    aiDescription.Font = Enum.Font.Gotham
+    aiDescription.Text = "Local error detection is always on. External AI and draft patch proposals are OFF until you configure an HTTPS backend."
+    aiDescription.LayoutOrder = 1
+
+    MakeToggle(AIPage, "Send to AI server", _config and _config:Get("WhiteAIEnabled") == true, function(value)
+        if _whiteAI then _whiteAI:SetEnabled(value) end
+        runtimeLog("INFO", "WhiteAI external reports: " .. tostring(value))
+    end)
+
+    local aiStatus = Instance.new("TextLabel", AIPage)
+    aiStatus.BackgroundTransparency = 1
+    aiStatus.Size = UDim2.new(1, -8, 0, 80)
+    aiStatus.TextWrapped = true
+    aiStatus.TextYAlignment = Enum.TextYAlignment.Top
+    aiStatus.TextColor3 = THEME.GOLD_WHITE
+    aiStatus.TextSize = 12
+    aiStatus.Font = Enum.Font.Code
+    aiStatus.Text = "Local diagnostics initializing..."
+
+    local endpointBox = Instance.new("TextBox", AIPage)
+    endpointBox.Size = UDim2.new(1, -8, 0, 34)
+    endpointBox.BackgroundColor3 = THEME.PANEL2
+    endpointBox.BorderSizePixel = 0
+    endpointBox.Font = Enum.Font.Code
+    endpointBox.TextSize = 12
+    endpointBox.ClearTextOnFocus = false
+    endpointBox.TextColor3 = THEME.WHITE
+    endpointBox.PlaceholderText = "https://your-server.example/reports"
+    endpointBox.Text = _config and tostring(_config:Get("WhiteAIEndpoint") or "") or ""
+    Instance.new("UICorner", endpointBox).CornerRadius = UDim.new(0, 6)
+
+    local aiEndpointButton = Instance.new("TextButton", AIPage)
+    aiEndpointButton.Size = UDim2.new(1, -8, 0, 32)
+    aiEndpointButton.Text = "SAVE HTTPS ENDPOINT"
+    aiEndpointButton.Font = Enum.Font.GothamBold
+    aiEndpointButton.TextSize = 12
+    styleActionButton(aiEndpointButton, false)
+    trackConnection(aiEndpointButton.MouseButton1Click:Connect(function()
+        if not _whiteAI then return end
+        local ok, why = _whiteAI:SetEndpoint(endpointBox.Text)
+        aiStatus.Text = ok and "HTTPS backend address saved." or tostring(why)
+    end))
+
+    local aiCopyButton = Instance.new("TextButton", AIPage)
+    aiCopyButton.Size = UDim2.new(1, -8, 0, 32)
+    aiCopyButton.Text = "COPY SANITIZED DIAGNOSTIC"
+    aiCopyButton.Font = Enum.Font.GothamBold
+    aiCopyButton.TextSize = 12
+    styleActionButton(aiCopyButton, false)
+    trackConnection(aiCopyButton.MouseButton1Click:Connect(function()
+        if not _whiteAI then return end
+        local report = _whiteAI:BuildReport("manual_diagnostic", "Manual investigation requested", "General")
+        local success = copyToClipboard(HttpService:JSONEncode(report))
+        aiStatus.Text = success and "Diagnostic copied (no account token)." or "Clipboard unavailable."
+    end))
+
+    local aiSendButton = Instance.new("TextButton", AIPage)
+    aiSendButton.Size = UDim2.new(1, -8, 0, 32)
+    aiSendButton.Text = "SEND REPORT TO AI BACKEND"
+    aiSendButton.Font = Enum.Font.GothamBold
+    aiSendButton.TextSize = 12
+    styleActionButton(aiSendButton, true)
+    trackConnection(aiSendButton.MouseButton1Click:Connect(function()
+        if not _whiteAI then return end
+        local ok, reason = _whiteAI:SendManualReport()
+        aiStatus.Text = ok and "Report queued; backend will propose a patch for review." or tostring(reason)
+    end))
+
+    task.spawn(function()
+        while aiStatus.Parent do
+            task.wait(3)
+            if not aiStatus.Parent then break end
+            if _whiteAI and type(_whiteAI.GetStatus) == "function" then
+                local status = _whiteAI:GetStatus()
+                aiStatus.Text = tostring(status.message or "Ready")
+                    .. "\nDetected incidents: " .. tostring(status.incidents or 0)
+                    .. " | External reports: " .. (status.enabled and "ON" or "OFF")
+            end
+        end
+    end)
+    AutoCanvas(AIPage)
 
     -- =====================
     -- CREDITS PAGE
