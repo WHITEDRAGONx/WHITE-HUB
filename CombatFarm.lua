@@ -383,7 +383,10 @@ local function getClosestNPC(npcName, excludeTarget)
     local hrp = _movement:GetCharacter("HumanoidRootPart")
     if not hrp then return nil end
 
-    for _, npc in pairs(workspace.Living:GetChildren()) do
+    local living = workspace:FindFirstChild("Living")
+    if not living then return nil end
+
+    for _, npc in pairs(living:GetChildren()) do
         if npc ~= excludeTarget and npc.Name == npcName and isNPCAlive(npc) then
             local npcHRP = npc:FindFirstChild("HumanoidRootPart")
             if npcHRP then
@@ -843,13 +846,40 @@ end
 local function clickDialogueButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
 
-    if type(firesignal) == "function" then
-        local ok = pcall(function()
-            firesignal(btn.MouseButton1Click)
-        end)
-        if ok then return true end
+    local signal = btn.MouseButton1Click
+    -- TestAll proved connection:Fire() is often the only effective input
+    -- for YBA's ClientFunctions dialogue callbacks.
+    if type(getconnections) == "function" then
+        local ok, connections = pcall(getconnections, signal)
+        if ok and type(connections) == "table" then
+            for _, connection in pairs(connections) do
+                if connection then
+                    local fire = nil
+                    pcall(function() fire = connection.Fire end)
+                    if type(fire) == "function" then
+                        local fired = pcall(function() connection:Fire() end)
+                        if fired then return true end
+                    end
+                    local fn = nil
+                    pcall(function() fn = connection.Function end)
+                    if type(fn) == "function" and pcall(fn) then
+                        return true
+                    end
+                end
+            end
+        end
     end
 
+    if type(firesignal) == "function" and pcall(firesignal, signal) then
+        return true
+    end
+
+    -- VIM needs a visible GUI. Only use when internal input APIs are missing;
+    -- caller restores the original ScreenGui state on failure/exit.
+    local gui = btn:FindFirstAncestorWhichIsA("ScreenGui")
+    if gui then
+        pcall(function() gui.Enabled = true end)
+    end
     local ok = pcall(function()
         local pos = btn.AbsolutePosition
         local size = btn.AbsoluteSize
@@ -936,7 +966,7 @@ local function dialogueStageSignature()
     local parts = {}
     for i = 1, 8 do
         local option = options:FindFirstChild("Option" .. i)
-        if option then
+        if option and option.Visible then
             local label = option:FindFirstChildWhichIsA("TextLabel", true)
             local button = option:FindFirstChildWhichIsA("TextButton", true)
             local text = (button and button.Text) or (label and label.Text) or ""
@@ -1067,7 +1097,9 @@ local function acceptQuest(questName, token)
 
     -- Compatibility route retained for executors where connection/upvalue APIs
     -- are incomplete. This route may be visible/slower but keeps the farm usable.
-    local opened = pcall(function() fireproximityprompt(prompt) end)
+    -- Do not fire a second prompt on top of an already-open dialogue.
+    local existingDialogue = Player.PlayerGui:FindFirstChild("DialogueGui")
+    local opened = existingDialogue ~= nil or pcall(function() fireproximityprompt(prompt) end)
     if not opened then
         moduleLog("WARN", "[CombatFarm] Could not trigger quest prompt: " .. questName)
         return false
@@ -1113,6 +1145,12 @@ local function acceptQuest(questName, token)
                 task.wait(0.03)
             end
         else
+            -- Some quest pages have no options: advance the actual ClickContinue.
+            local dlg = Player.PlayerGui:FindFirstChild("DialogueGui")
+            local cont = dlg and dlg:FindFirstChild("ClickContinue", true)
+            if cont and cont:IsA("GuiButton") then
+                clickDialogueButton(cont)
+            end
             task.wait(0.04)
         end
     end
