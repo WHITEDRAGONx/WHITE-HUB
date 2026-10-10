@@ -93,6 +93,7 @@ end
 local _config      = nil
 local _webhook     = nil
 local _combatFarm  = nil
+local _serverHop   = nil
 local _runtimeLog   = nil
 
 local toggleObjects = {}
@@ -114,6 +115,7 @@ function UI:Init(Modules)
     _config      = Modules.Config
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
+    _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
 end
 
@@ -814,6 +816,35 @@ function UI:Create()
         print("[UI] Stay in Private Server set to " .. tostring(v))
         runtimeLog("INFO", "Stay in Private Server = " .. tostring(v))
     end)
+
+    -- Manual Server Hop uses the existing ServerHop.lua logic. No automatic
+    -- hop timers or Merchant code are changed.
+    local manualHopBusy = false
+    local manualHopButton = Instance.new("TextButton")
+    manualHopButton.Size = UDim2.new(1, -4, 0, 34)
+    manualHopButton.Font = Enum.Font.GothamBold
+    manualHopButton.TextSize = 13
+    manualHopButton.Text = "SERVER HOP NOW"
+    manualHopButton.Parent = FarmPage
+    styleActionButton(manualHopButton, false)
+    trackConnection(manualHopButton.MouseButton1Click:Connect(function()
+        if manualHopBusy then return end
+        manualHopBusy = true
+        manualHopButton.Text = "HOPPING..."
+        task.spawn(function()
+            local ok, result = pcall(function()
+                return _serverHop and _serverHop:Hop() or false
+            end)
+            if not ok or result ~= true then
+                runtimeLog("WARN", "Manual Server Hop did not start: " .. tostring(result))
+            end
+            task.wait(1.2)
+            if manualHopButton.Parent then
+                manualHopButton.Text = "SERVER HOP NOW"
+            end
+            manualHopBusy = false
+        end)
+    end))
 
     MakeSection(FarmPage, "PRESTIGE")
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
