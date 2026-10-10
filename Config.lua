@@ -20,6 +20,8 @@ local Defaults = {
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
+    WhiteAIEnabled = false,
+    WhiteAIEndpoint = "",
 
     NPCFarmEnabled = false,
     QuestFarmEnabled = false,
