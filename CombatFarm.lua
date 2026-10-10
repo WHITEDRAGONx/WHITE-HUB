@@ -29,6 +29,12 @@ local questCompleted = false
 local questOnCooldown = false
 local cooldownUntil = 0
 
+-- Only one movement controller can own the character at a time.
+-- Pause Item Farm in memory while NPC/Quest Farm runs, without editing Farm.lua,
+-- Inventory.lua or the saved configuration on disk.
+local itemFarmPausedByCombat = false
+local itemFarmWasEnabled = false
+
 local SAFE_SPOT = CFrame.new(978, -42, -49)
 local lastSafeTeleportAt = 0
 local lastStandSummonLogAt = 0
@@ -254,6 +260,27 @@ local function moduleLog(level, ...)
         _rawWarn(...)
     else
         _rawPrint(...)
+    end
+end
+
+local function pauseItemFarmForCombat()
+    if not _config or itemFarmPausedByCombat then return end
+    itemFarmWasEnabled = _config:Get("FarmEnabled") == true
+    itemFarmPausedByCombat = true
+    if itemFarmWasEnabled then
+        _config:Set("FarmEnabled", false, true)
+        moduleLog("INFO", "[CombatFarm][MovementLock] Item Farm temporarily paused; Merchant code unchanged.")
+    end
+end
+
+local function resumeItemFarmAfterCombat()
+    if not itemFarmPausedByCombat then return end
+    local shouldResume = itemFarmWasEnabled
+    itemFarmPausedByCombat = false
+    itemFarmWasEnabled = false
+    if shouldResume and _config and _config:Get("FarmEnabled") == false then
+        _config:Set("FarmEnabled", true, true)
+        moduleLog("INFO", "[CombatFarm][MovementLock] Item Farm resumed.")
     end
 end
 
@@ -978,11 +1005,16 @@ end
 
 local function findQuestPrompt(questName)
     local cleanName = tostring(questName):gsub("%s*%[Lvl%.?%s*%d+%+%]%s*$", "")
-    local roots = {
-        workspace:FindFirstChild("Dialogues"),
-        ReplicatedStorage:FindFirstChild("Dialogue"),
-        ReplicatedStorage:FindFirstChild("NewDialogue"),
-    }
+    -- Build a packed list: ipairs stops at the first nil root in a sparse list.
+    local roots = {}
+    for _, root in ipairs({
+        workspace, ReplicatedStorage
+    }) do
+        for _, name in ipairs(root == workspace and {"Dialogues"} or {"Dialogue", "NewDialogue"}) do
+            local found = root:FindFirstChild(name)
+            if found then roots[#roots + 1] = found end
+        end
+    end
 
     local best, bestScore = nil, -1
     for _, root in ipairs(roots) do
@@ -1620,9 +1652,24 @@ local function startMode(mode)
         questOnCooldown = false
     end
 
+    pauseItemFarmForCombat()
     moduleLog("INFO", "[CombatFarm] Starting " .. mode .. " farming (single-worker mode).")
     task.spawn(function()
-        farmLoop(token)
+        -- Let an in-flight item pickup finish before owning HRP movement.
+        if not waitToken(0.85, token, mode) then return end
+        local ok, err = pcall(farmLoop, token)
+        if not ok then
+            moduleLog("ERROR", "[CombatFarm][Worker] " .. tostring(err))
+        end
+        if token == runId then
+            isRunning = false
+            activeMode = nil
+            _movement:SetNoclip(false)
+            _movement:ClearFocus()
+            _movement:FixCamera()
+            goToSafeSpot("Combat worker ended")
+            resumeItemFarmAfterCombat()
+        end
     end)
 end
 
@@ -1678,9 +1725,10 @@ function CombatFarm:Stop()
     _movement:SetNoclip(false)
     _movement:ClearFocus()
     _movement:FixCamera()
-    if previousMode == "NPC" then
-        goToSafeSpot("NPC Farm disabled")
+    if previousMode == "NPC" or previousMode == "Quest" then
+        goToSafeSpot(tostring(previousMode) .. " Farm disabled")
     end
+    resumeItemFarmAfterCombat()
     moduleLog("INFO", "[CombatFarm] Stopped immediately and cleaned combat state.")
 end
 
@@ -1690,6 +1738,7 @@ end
 
 function CombatFarm:Destroy()
     self:Stop()
+    resumeItemFarmAfterCombat()
     if questWatcherConnection then
         pcall(function() questWatcherConnection:Disconnect() end)
         questWatcherConnection = nil
