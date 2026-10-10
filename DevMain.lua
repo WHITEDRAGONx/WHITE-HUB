@@ -539,7 +539,7 @@ end
 env.AutoPrestigeEnabled = false
 local previous = _G.WhiteHubModules
 if previous then
-    for _, name in ipairs({"UI", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
+    for _, name in ipairs({"UI", "WhiteAI", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
         local module = previous[name]
         if module and module.Destroy then
             pcall(function() module:Destroy() end)
@@ -563,7 +563,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"UI", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"UI", "WhiteAI", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -737,6 +737,7 @@ local moduleFiles = {
     { key = "Inventory",  file = "Inventory.lua" },
     { key = "CombatFarm", file = "CombatFarm.lua" },
     { key = "Farm",       file = "Farm.lua" },
+    { key = "WhiteAI",    file = "WhiteAI.lua" },
     { key = "UI",         file = "UI.lua" },
 }
 
@@ -782,7 +783,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "Farm", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "Farm", "WhiteAI", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()
