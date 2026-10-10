@@ -1,0 +1,24 @@
+# WHITE AI V1 deployment for Render. No credentials are stored in GitHub.
+# This blueprint deploys ONLY the existing experimental branch.
+services:
+  - type: web
+    name: white-ai-v1
+    runtime: python
+    plan: free
+    repo: https://github.com/WHITEDRAGONx/WHITE-HUB-V3
+    branch: dev/2026-10-10-autosell-compat
+    autoDeployTrigger: off
+    buildCommand: pip install -r ai/requirements.txt && python -m compileall -q ai && python -m unittest ai.test_server
+    startCommand: uvicorn ai.server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: WHITEAI_INGEST_KEY
+        sync: false
