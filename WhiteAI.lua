@@ -12,6 +12,7 @@ local _latest = nil
 local _history = {}
 local _dedupe = {}
 local _sending = false
+local _ingestKey = ""
 local _lastStatus = "Local diagnostics ready"
 local _questLast = nil
 local _questChangedAt = 0
@@ -90,20 +91,24 @@ local function validEndpoint(url)
         and not url:find("//", 9, true)
 end
 
-local function transport(url, json)
+local function transport(url, json, ingestKey)
     local requestFn = (syn and syn.request) or http_request or request
         or (http and http.request)
     if type(requestFn) == "function" then
         local response = requestFn({
             Url = url, Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["X-WhiteAI-Key"] = ingestKey,
+            },
             Body = json,
         })
         local code = response and (response.StatusCode or response.Status)
         return tonumber(code) and tonumber(code) >= 200 and tonumber(code) < 300
     end
-    HttpService:PostAsync(url, json, Enum.HttpContentType.ApplicationJson)
-    return true
+    -- PostAsync cannot attach the private report-ingest header.
+    -- Do not send a report without authentication: no anonymous fallback.
+    error("This executor has no HTTP request API with custom headers")
 end
 
 function WhiteAI:GetStatus()
@@ -111,6 +116,7 @@ function WhiteAI:GetStatus()
         message = _lastStatus,
         enabled = _config and _config:Get("WhiteAIEnabled") == true or false,
         endpoint_set = _config and validEndpoint(_config:Get("WhiteAIEndpoint")) == true or false,
+        ingest_key_set = #_ingestKey > 0,
         incidents = #_history,
         latest = _latest,
         sending = _sending,
@@ -139,11 +145,14 @@ function WhiteAI:Submit(report)
         return false, "Set a valid HTTPS report endpoint first"
     end
 
+    if _ingestKey == "" then
+        return false, "Set your report-ingest key for this session"
+    end
     _sending = true
     _lastStatus = "Sending diagnostic " .. tostring(report.id)
     task.spawn(function()
         local ok, result = pcall(function()
-            return transport(endpoint, HttpService:JSONEncode(report))
+            return transport(endpoint, HttpService:JSONEncode(report), _ingestKey)
         end)
         _sending = false
         if ok and result == true then
@@ -187,6 +196,14 @@ end
 function WhiteAI:SetEndpoint(url)
     if not validEndpoint(url) then return false, "HTTPS URL required" end
     _config:Set("WhiteAIEndpoint", url)
+    return true
+end
+
+function WhiteAI:SetIngestKey(token)
+    if type(token) ~= "string" or #token < 12 or #token > 128 then
+        return false, "Expected a 12-128 character ingestion key"
+    end
+    _ingestKey = token
     return true
 end
 
@@ -250,6 +267,7 @@ function WhiteAI:Destroy()
         _subscription = nil
     end
     _sending = false
+    _ingestKey = ""
 end
 
 return WhiteAI
