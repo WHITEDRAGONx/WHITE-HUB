@@ -1230,10 +1230,25 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
 
     -- IMPORTANT: this fast quest driver is fully local to CombatFarm.
     -- It does NOT call Inventory dialogue helpers, so Merchant/Auto Sell remains isolated.
+    local hiddenGuis = {}
     local function hideDialogue(gui)
         if gui and gui.Parent and gui:IsA("ScreenGui") then
+            if hiddenGuis[gui] == nil then
+                hiddenGuis[gui] = gui.Enabled
+            end
             pcall(function() gui.Enabled = false end)
         end
+    end
+
+    -- Never leave a stuck invisible DialogueGui behind after a failed quest.
+    -- Restoring the UI is especially important before a future Merchant sale.
+    local function finishDialogue(ok, reason)
+        for gui, originallyEnabled in pairs(hiddenGuis) do
+            if gui and gui.Parent then
+                pcall(function() gui.Enabled = originallyEnabled end)
+            end
+        end
+        return ok, reason
     end
 
     local function dialogueGone(originalGui)
@@ -1299,6 +1314,8 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
         local originalGui = gui
         local deadline = tick() + math.max(0.35, timeout or 1.50)
         local lastOptionAdvanceAt = 0
+        local lastOptionSignature = nil
+        local stuckSince = 0
         local lastContinueAt = 0
         local optionAdvances = 0
         local continueAdvances = 0
@@ -1329,19 +1346,29 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
                 hideDialogue(originalGui)
 
                 local option = findDialogueOption("Option1")
-                if option and option.Visible and tick() - lastOptionAdvanceAt >= 0.04 then
+                if option and option.Visible and tick() - lastOptionAdvanceAt >= 0.10 then
+                    local stage = dialogueStageSignature()
+                    if stage ~= lastOptionSignature then
+                        lastOptionSignature = stage
+                        stuckSince = tick()
+                    end
+
                     local advanced = false
-                    local okInject = injectDialogueOption("Option1")
-                    if okInject then
-                        advanced = true
-                    elseif clickDialogueButton(option) then
-                        advanced = true
+                    if tick() - stuckSince < 0.30 then
+                        local okInject = injectDialogueOption("Option1")
+                        advanced = okInject == true
+                    end
+                    -- If the same page is still present after injection, TEST ALL
+                    -- showed connection:Fire can advance it when upvalues cannot.
+                    if not advanced then
+                        advanced = clickDialogueButton(option)
+                        stuckSince = tick()
                     end
 
                     if advanced then
                         optionAdvances = optionAdvances + 1
                         lastOptionAdvanceAt = tick()
-                        task.wait(0.01)
+                        task.wait(0.025)
                     end
                 else
                     if tick() - lastContinueAt >= 0.03 then
@@ -1380,7 +1407,7 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
         hideDialogue(stale)
         local staleOk = select(1, processExistingDialogue(stale, 1.25))
         if not staleOk and stale.Parent then
-            return false, "stale quest DialogueGui could not be cleared"
+            return finishDialogue(false, "stale quest DialogueGui could not be cleared")
         end
         task.wait(0.01)
     end
@@ -1399,11 +1426,20 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
     end)
     if not fired then
         if childConnection then pcall(function() childConnection:Disconnect() end) end
-        return false, "prompt failed: " .. tostring(fireErr)
+        return finishDialogue(false, "prompt failed: " .. tostring(fireErr))
     end
 
     local appearDeadline = tick() + math.min(waitTimeout, 3.50)
     while not gui and tick() < appearDeadline and isTokenActive(token, "Quest") do
+        if type(isComplete) == "function" then
+            local okDone, done = pcall(isComplete)
+            if okDone and done == true then
+                if childConnection then
+                    pcall(function() childConnection:Disconnect() end)
+                end
+                return finishDialogue(true, "quest state changed before DialogueGui")
+            end
+        end
         local existing = playerGui:FindFirstChild("DialogueGui")
         if existing then
             gui = existing
@@ -1422,19 +1458,19 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
         if type(isComplete) == "function" then
             local okDone, done = pcall(isComplete)
             if okDone and done == true then
-                return true, "state changed without DialogueGui"
+                return finishDialogue(true, "state changed without DialogueGui")
             end
         end
-        return false, label .. " DialogueGui did not appear"
+        return finishDialogue(false, label .. " DialogueGui did not appear")
     end
 
     local okFast, info = processExistingDialogue(gui, waitTimeout)
     if okFast then
         moduleLog("INFO", ("[CombatFarm][LocalDialogue] %s cleared: %s"):format(label, tostring(info or "fast")))
-        return true, info
+        return finishDialogue(true, info)
     end
 
-    return false, tostring(info or (label .. " local route failed"))
+    return finishDialogue(false, tostring(info or (label .. " local route failed")))
 end
 
 local function runQuestFarm(token)
