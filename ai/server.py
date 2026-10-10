@@ -213,19 +213,24 @@ def publish_review_artifact(content: str, incident_id: str) -> str:
 
 def run_job(job_id: str, report: dict[str, Any]) -> None:
     try:
-        _jobs[job_id]["status"] = "analyzing"
+        _jobs[job_id]["status"] = "reading_source"
         path = allowed_module_path(report)
         source, source_sha = read_github_file(path)
+        _jobs[job_id]["status"] = "analyzing"
+        print("[WhiteAI backend] analyzing", job_id, path, flush=True)
         ai = ask_ai(report, path, source)
+        _jobs[job_id]["status"] = "saving_proposal"
         diff = validate_proposal(ai, path, source)
         output = proposal_markdown(report, path, source_sha, ai, diff)
         url = publish_review_artifact(output, job_id)
         _jobs[job_id] = {"status": "proposal_ready", "proposal_url": url,
                          "patch_valid": bool(diff)}
+        print("[WhiteAI backend] proposal saved", job_id, flush=True)
     except Exception as exc:
-        # Never expose tokens in API responses.
-        print("[WhiteAI backend] job failed:", type(exc).__name__)
-        _jobs[job_id] = {"status": "failed", "error": type(exc).__name__}
+        # Never expose tokens, raw provider errors or prompt text in API/logs.
+        error_type = type(exc).__name__
+        print("[WhiteAI backend] job failed", job_id, error_type, flush=True)
+        _jobs[job_id] = {"status": "failed", "error": error_type}
 
 @app.get("/health")
 def health():
