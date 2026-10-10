@@ -898,6 +898,7 @@ function UI:Create()
     local questList = {
         "Officer Sam [Lvl. 1+]",
         "Deputy Bertrude [Lvl. 10+]",
+        "Abbacchio's Partner [Lvl 15+]",
         "Homeless Man Jill [Lvl. 15+]",
         "Dracula [Lvl. 20+]",
         "William Zeppeli [Lvl. 25+]",
