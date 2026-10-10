@@ -11,6 +11,20 @@ Este diretório contém o backend para **diagnósticos e propostas de patches** 
 - Caso a sugestão seja válida, salva um **diff não aplicado** em `ai/proposals/` na branch `dev/2026-10-10-autosell-compat`.
 - Mesmo em caso de sucesso **não aplica código-fonte, não executa o patch, não modifica `main` e não faz merge**.
 
+## Hospedar no Render (mais fácil)
+
+O repositório já inclui o arquivo **`render.yaml` na raiz da branch dev**, preparado para o Render Blueprint. Ele instala dependências, executa os testes básicos e inicia `ai.server:app` com HTTPS, sem chaves hardcoded.
+
+1. No [Render Dashboard](https://dashboard.render.com/), escolha **New → Blueprint**, conecte o GitHub, selecione `WHITEDRAGONx/WHITE-HUB-V3` na branch `dev/2026-10-10-autosell-compat` e o `render.yaml`.
+2. Preencha os segredos solicitados no Render: `OPENAI_API_KEY`, `OPENAI_MODEL` (por exemplo `gpt-6-sol` caso habilitado na conta), `GITHUB_TOKEN` e `WHITEAI_INGEST_KEY` (12–128 caracteres aleatórios).
+3. Aguarde o deploy terminar e abra o endereço do tipo `https://white-ai-v1.onrender.com/health`. Deve retornar status `ok`.
+4. Na aba AI DEBUG do Roblox, configure `https://SEU-SERVICO.onrender.com/reports`, informe exatamente a mesma `WHITEAI_INGEST_KEY` apenas para essa sessão, habilite envio e envie um relatório de teste.
+5. Acompanhe a pasta `ai/proposals/` da branch dev para ver um novo relatório/recomendação; isso não modifica arquivos de jogo.
+
+**Atenção:** Render no plano Free pode entrar em modo de hibernação por inatividade, e a primeira requisição após dormir pode demorar. O plano grátis também possui limites de recursos. `autoDeployTrigger: off` impede que novas propostas no GitHub reiniciem o servidor automaticamente. Para atualizar o backend manualmente, use **Manual Deploy** no serviço Render.
+
+**Segurança:** não publique tokens em Issues, chats, arquivos Lua ou GitHub. Use uma credencial GitHub fine-grained limitada apenas ao repositório, com expiração curta e Contents read/write, e mantenha proteção de branch para `main`. A aplicação grava somente Markdown em `ai/proposals/`, mas o token de escrita ainda requer proteção externa contra comprometimento. Os relatórios devem ser revisados antes de qualquer correção.
+
 ## O que ainda é necessário
 
 **O servidor não foi implantado nem conectado a uma conta/API.** Para ativar a análise realmente automática, é necessário executar este backend numa máquina/serviço com HTTPS acessível pelo cliente.
