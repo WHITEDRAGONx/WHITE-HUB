@@ -1531,11 +1531,16 @@ local function runQuestFarm(token)
     if not acceptQuest(currentQuest, token) then
         return false
     end
-    if not waitToken(0.10, token, "Quest") then return false end
-
+    -- PlayerStats can replicate one or two ticks after DialogueGui closes.
+    -- Confirm an active quest before targeting any NPC.
     local progress, maxProgress = readQuestState()
+    local syncDeadline = tick() + 1.25
+    while (maxProgress or 0) <= 0 and tick() < syncDeadline do
+        if not waitToken(0.05, token, "Quest") then return false end
+        progress, maxProgress = readQuestState()
+    end
     if (maxProgress or 0) <= 0 then
-        moduleLog("WARN", "[CombatFarm] Quest dialogue finished but no active QuestMaxProgress was detected.")
+        moduleLog("WARN", "[CombatFarm] Quest dialogue ended but no active QuestMaxProgress replicated.")
         return false
     end
 
