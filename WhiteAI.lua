@@ -12,6 +12,8 @@ local _latest = nil
 local _history = {}
 local _dedupe = {}
 local _sending = false
+local _lastJobId = nil
+local _proposalUrl = nil
 local _ingestKey = ""
 local _lastStatus = "Local diagnostics ready"
 local _questLast = nil
@@ -116,11 +118,68 @@ local function transport(url, json, ingestKey)
             end
             return false, "HTTP " .. tostring(code) .. detail
         end
-        return true, "HTTP " .. tostring(code)
+        local payload = response and (response.Body or response.body)
+        local data = nil
+        if type(payload) == "string" and #payload < 3000 then
+            local decodedOk, decoded = pcall(HttpService.JSONDecode, HttpService, payload)
+            if decodedOk and type(decoded) == "table" then data = decoded end
+        end
+        return true, "HTTP " .. tostring(code), data
     end
     -- PostAsync cannot attach the private report-ingest header.
     -- Do not send a report without authentication: no anonymous fallback.
     error("This executor has no HTTP request API with custom headers")
+end
+
+-- A POST /reports acknowledgement only means queued. Poll the authenticated
+-- backend until the proposal is saved or a specific analysis error is known.
+local function watchJob(endpoint, key, jobId, token)
+    if type(jobId) ~= "string" or not jobId:match("^[0-9a-f]+$") or #jobId ~= 20 then
+        _lastStatus = "Report accepted, but backend did not return a valid job ID"
+        return
+    end
+
+    local requestFn = (syn and syn.request) or http_request or request
+        or (http and http.request)
+    if type(requestFn) ~= "function" then return end
+
+    local jobUrl = endpoint:gsub("/reports$", "/jobs/" .. jobId)
+    if jobUrl == endpoint then return end
+
+    for attempt = 1, 40 do
+        task.wait(7)
+        if not _running or _epoch ~= token then return end
+        local ok, response = pcall(requestFn, {
+            Url = jobUrl, Method = "GET",
+            Headers = { ["X-WhiteAI-Key"] = key },
+        })
+        if ok and type(response) == "table" then
+            local status = tonumber(response.StatusCode or response.Status)
+            if status == 200 then
+                local body = response.Body or response.body
+                if type(body) == "string" and #body < 4000 then
+                    local decodedOk, payload = pcall(HttpService.JSONDecode, HttpService, body)
+                    if decodedOk and type(payload) == "table" then
+                        if payload.status == "proposal_ready" then
+                            _proposalUrl = type(payload.proposal_url) == "string"
+                                and payload.proposal_url or nil
+                            _lastStatus = "AI analysis complete! Proposal saved in GitHub dev branch."
+                            return
+                        elseif payload.status == "failed" then
+                            _lastStatus = "AI analysis failed: " .. safeText(payload.error, 80)
+                            return
+                        elseif type(payload.status) == "string" then
+                            _lastStatus = "AI job " .. safeText(payload.status, 40)
+                        end
+                    end
+                end
+            elseif status == 401 or status == 404 then
+                _lastStatus = "Job status unavailable (HTTP " .. tostring(status) .. ")"
+                return
+            end
+        end
+    end
+    _lastStatus = "AI analysis still unconfirmed: check Render logs and ai/proposals"
 end
 
 function WhiteAI:GetStatus()
@@ -132,6 +191,8 @@ function WhiteAI:GetStatus()
         incidents = #_history,
         latest = _latest,
         sending = _sending,
+        job_id = _lastJobId,
+        proposal_url = _proposalUrl,
     }
 end
 
@@ -161,14 +222,26 @@ function WhiteAI:Submit(report)
         return false, "Set your report-ingest key for this session"
     end
     _sending = true
+    _proposalUrl = nil
+    _lastJobId = nil
     _lastStatus = "Sending diagnostic " .. tostring(report.id)
+    local sessionToken = _epoch
+    local sessionKey = _ingestKey
     task.spawn(function()
-        local ok, delivered, reason = pcall(function()
-            return transport(endpoint, HttpService:JSONEncode(report), _ingestKey)
+        local ok, delivered, reason, payload = pcall(function()
+            return transport(endpoint, HttpService:JSONEncode(report), sessionKey)
         end)
+        if not _running or _epoch ~= sessionToken then return end
         _sending = false
         if ok and delivered == true then
-            _lastStatus = "Diagnostic accepted by server (proposal awaits review)"
+            _lastStatus = "Diagnostic received; AI job queued."
+            local jobId = type(payload) == "table" and payload.job_id or nil
+            _lastJobId = jobId
+            if jobId then
+                task.spawn(watchJob, endpoint, sessionKey, jobId, sessionToken)
+            else
+                _lastStatus = "Diagnostic received, but job tracking is unavailable"
+            end
         else
             _lastStatus = "Delivery failed: " .. safeText(ok and reason or delivered, 150)
         end
@@ -279,6 +352,8 @@ function WhiteAI:Destroy()
         _subscription = nil
     end
     _sending = false
+    _lastJobId = nil
+    _proposalUrl = nil
     _ingestKey = ""
 end
 
