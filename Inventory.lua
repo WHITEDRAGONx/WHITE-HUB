@@ -623,6 +623,22 @@ local FINAL_SMALL_CONSTANT_MAX = 2.0
 local FINAL_FORCE_INTERVAL = 0.02
 local FINAL_GC_RESCAN_INTERVAL = 0.035
 
+-- Experimental compatibility guard for executors reporting themselves as Real Injector.
+-- getgc(true) is a synchronous full heap scan and can freeze on some executors.
+-- Keep Delta/other existing Zero Delay behavior unchanged until live logs confirm a fix.
+local function identifySellExecutor()
+    if type(identifyexecutor) ~= "function" then return "unknown" end
+    local ok, name, version = pcall(identifyexecutor)
+    if not ok then return "unknown" end
+    return tostring(name or "unknown") .. (version and (" " .. tostring(version)) or "")
+end
+
+local SELL_EXECUTOR_NAME = identifySellExecutor()
+local _realName = SELL_EXECUTOR_NAME:lower()
+local SKIP_HEAVY_GC = _realName == "real"
+    or _realName:find("real injector", 1, true) ~= nil
+    or _realName:find("realexecutor", 1, true) ~= nil
+
 local function getIndexedUpvalue(fn, index)
     if type(_rawGetUpvalue) ~= "function" or type(fn) ~= "function" then
         return false, nil, nil
@@ -686,7 +702,8 @@ local function hasInternalDialogueStateSupport()
 end
 
 local function hasFinalZeroDelaySupport()
-    return hasInternalDialogueStateSupport()
+    return not SKIP_HEAVY_GC
+        and hasInternalDialogueStateSupport()
         and type(_rawGetUpvalue) == "function"
         and type(_rawGetGC) == "function"
 end
@@ -1451,6 +1468,13 @@ function Inventory:SellAll()
     local internalSupported = hasInternalDialogueStateSupport()
     local fallbackFastMode = hasInternalClickSupport()
 
+    moduleLog("INFO", "[Inventory][Compatibility] Executor=" .. SELL_EXECUTOR_NAME
+        .. " | ZeroDelay=" .. tostring(zeroDelaySupported)
+        .. " | Internal=" .. tostring(internalSupported))
+    if SKIP_HEAVY_GC then
+        moduleLog("WARN", "[Inventory][Compatibility] Real Injector detected: skipping getgc(true) Zero Delay scans; trying existing hidden internal route.")
+    end
+
     if zeroDelaySupported then
         moduleLog("INFO", "[Inventory][ZeroDelay] FINAL Merchant route available — target is sub-1s hidden selling.")
     elseif internalSupported then
@@ -1523,6 +1547,30 @@ function Inventory:SellAll()
     closeDialogueIfOpen()
     restoreDialogueRendering()
     moduleLog("INFO", "[Inventory] SellAll done — Types sold: " .. soldTypes .. " | Failed: " .. failedTypes)
+end
+
+-- Prevent duplicate calls (e.g. overlapping cycles or manual triggers) from
+-- manipulating the same Merchant dialogue concurrently.
+-- The existing, proven selling implementation above is deliberately unchanged.
+local _sellAllBusy = false
+local _sellAllOriginal = Inventory.SellAll
+function Inventory:SellAll()
+    if _sellAllBusy then
+        moduleLog("WARN", "[Inventory][SellGuard] Duplicate SellAll call skipped.")
+        return false
+    end
+
+    _sellAllBusy = true
+    local ok, result = pcall(_sellAllOriginal, self)
+    _sellAllBusy = false
+
+    if not ok then
+        moduleLog("ERROR", "[Inventory][SellGuard] SellAll raised an error: " .. tostring(result))
+        pcall(closeDialogueIfOpen)
+        pcall(restoreDialogueRendering)
+        return false
+    end
+    return true
 end
 
 -- =====================
