@@ -103,8 +103,20 @@ local function transport(url, json, ingestKey)
             },
             Body = json,
         })
-        local code = response and (response.StatusCode or response.Status)
-        return tonumber(code) and tonumber(code) >= 200 and tonumber(code) < 300
+        local code = tonumber(response and (response.StatusCode or response.Status))
+        if not code then return false, "No HTTP status returned by executor" end
+        if code < 200 or code >= 300 then
+            local detail = ""
+            local body = response and (response.Body or response.body)
+            if type(body) == "string" and #body < 2000 then
+                local decodedOk, decoded = pcall(HttpService.JSONDecode, HttpService, body)
+                if decodedOk and type(decoded) == "table" and type(decoded.detail) == "string" then
+                    detail = ": " .. safeText(decoded.detail, 110)
+                end
+            end
+            return false, "HTTP " .. tostring(code) .. detail
+        end
+        return true, "HTTP " .. tostring(code)
     end
     -- PostAsync cannot attach the private report-ingest header.
     -- Do not send a report without authentication: no anonymous fallback.
@@ -151,14 +163,14 @@ function WhiteAI:Submit(report)
     _sending = true
     _lastStatus = "Sending diagnostic " .. tostring(report.id)
     task.spawn(function()
-        local ok, result = pcall(function()
+        local ok, delivered, reason = pcall(function()
             return transport(endpoint, HttpService:JSONEncode(report), _ingestKey)
         end)
         _sending = false
-        if ok and result == true then
+        if ok and delivered == true then
             _lastStatus = "Diagnostic accepted by server (proposal awaits review)"
         else
-            _lastStatus = "Delivery failed: " .. safeText(result, 120)
+            _lastStatus = "Delivery failed: " .. safeText(ok and reason or delivered, 150)
         end
     end)
     return true, "Report queued"
