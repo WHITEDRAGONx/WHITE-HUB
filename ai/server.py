@@ -229,7 +229,10 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "mode": "proposal-only", "target_branch": DEV_BRANCH}
+    missing = [name for name in ("OPENAI_API_KEY", "OPENAI_MODEL", "GITHUB_TOKEN")
+               if not os.environ.get(name)]
+    return {"status": "ok", "mode": "proposal-only",
+            "target_branch": DEV_BRANCH, "configured": len(missing) == 0}
 
 def authorize(request: Request) -> None:
     expected = os.environ.get("WHITEAI_INGEST_KEY", "")
@@ -250,8 +253,12 @@ def throttle(client: str) -> None:
 @app.post("/reports", status_code=202)
 async def accept_report(request: Request, background: BackgroundTasks):
     authorize(request)
-    if not all(os.environ.get(k) for k in ("OPENAI_API_KEY", "OPENAI_MODEL", "GITHUB_TOKEN")):
-        raise HTTPException(status_code=503, detail="Server not fully configured")
+    missing = [name for name in ("OPENAI_API_KEY", "OPENAI_MODEL", "GITHUB_TOKEN")
+               if not os.environ.get(name)]
+    if missing:
+        # Key names only. Never print or return environment variable values.
+        print("[WhiteAI backend] missing environment variables:", ", ".join(missing))
+        raise HTTPException(status_code=503, detail="Missing server settings: " + ", ".join(missing))
     body = await request.body()
     if len(body) > MAX_REPORT:
         raise HTTPException(status_code=413, detail="Report too large")
