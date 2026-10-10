@@ -1368,6 +1368,31 @@ function UI:Create()
         aiStatus.Text = ok and "HTTPS backend address saved." or tostring(why)
     end))
 
+    local keyBox = Instance.new("TextBox", AIPage)
+    keyBox.Size = UDim2.new(1, -8, 0, 34)
+    keyBox.BackgroundColor3 = THEME.PANEL2
+    keyBox.BorderSizePixel = 0
+    keyBox.Font = Enum.Font.Code
+    keyBox.TextSize = 12
+    keyBox.TextColor3 = THEME.WHITE
+    keyBox.ClearTextOnFocus = false
+    keyBox.PlaceholderText = "Report ingestion key (session only)"
+    keyBox.Text = ""
+    Instance.new("UICorner", keyBox).CornerRadius = UDim.new(0, 6)
+
+    local aiKeyButton = Instance.new("TextButton", AIPage)
+    aiKeyButton.Size = UDim2.new(1, -8, 0, 32)
+    aiKeyButton.Text = "USE INGEST KEY FOR THIS SESSION"
+    aiKeyButton.Font = Enum.Font.GothamBold
+    aiKeyButton.TextSize = 12
+    styleActionButton(aiKeyButton, false)
+    trackConnection(aiKeyButton.MouseButton1Click:Connect(function()
+        if not _whiteAI then return end
+        local ok, why = _whiteAI:SetIngestKey(keyBox.Text)
+        keyBox.Text = "" -- do not persist or show authentication value
+        aiStatus.Text = ok and "Ingestion key stored in memory for this session." or tostring(why)
+    end))
+
     local aiCopyButton = Instance.new("TextButton", AIPage)
     aiCopyButton.Size = UDim2.new(1, -8, 0, 32)
     aiCopyButton.Text = "COPY SANITIZED DIAGNOSTIC"
