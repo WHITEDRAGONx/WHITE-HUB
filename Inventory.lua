@@ -636,6 +636,7 @@ end
 local SELL_EXECUTOR_NAME = identifySellExecutor()
 local _realName = SELL_EXECUTOR_NAME:lower()
 local SKIP_HEAVY_GC = _realName == "real"
+    or _realName:match("^real[%s%-%_]") ~= nil
     or _realName:find("real injector", 1, true) ~= nil
     or _realName:find("realexecutor", 1, true) ~= nil
 
