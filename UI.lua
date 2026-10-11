@@ -1393,6 +1393,32 @@ function UI:Create()
         aiStatus.Text = ok and "Ingestion key stored in memory for this session." or tostring(why)
     end))
 
+    -- Owner-only dev: never persist admin credential in public Config or logs.
+    local adminBox = Instance.new("TextBox", AIPage)
+    adminBox.Size = UDim2.new(1, -8, 0, 34)
+    adminBox.BackgroundColor3 = THEME.PANEL2
+    adminBox.BorderSizePixel = 0
+    adminBox.Font = Enum.Font.Code
+    adminBox.TextSize = 12
+    adminBox.TextColor3 = THEME.WHITE
+    adminBox.ClearTextOnFocus = false
+    adminBox.PlaceholderText = "Owner admin key (private dev only, optional)"
+    adminBox.Text = ""
+    Instance.new("UICorner", adminBox).CornerRadius = UDim.new(0, 6)
+
+    local aiAdminButton = Instance.new("TextButton", AIPage)
+    aiAdminButton.Size = UDim2.new(1, -8, 0, 32)
+    aiAdminButton.Text = "AUTHORIZE PRIVATE DEV AUTO-PATCH"
+    aiAdminButton.Font = Enum.Font.GothamBold
+    aiAdminButton.TextSize = 12
+    styleActionButton(aiAdminButton, false)
+    trackConnection(aiAdminButton.MouseButton1Click:Connect(function()
+        if not _whiteAI or type(_whiteAI.SetAdminKey) ~= "function" then return end
+        local ok, why = _whiteAI:SetAdminKey(adminBox.Text)
+        adminBox.Text = "" -- key exists only in private session memory
+        aiStatus.Text = tostring(why or (ok and "Authorized." or "Not authorized."))
+    end))
+
     local aiCopyButton = Instance.new("TextButton", AIPage)
     aiCopyButton.Size = UDim2.new(1, -8, 0, 32)
     aiCopyButton.Text = "COPY SANITIZED DIAGNOSTIC"
