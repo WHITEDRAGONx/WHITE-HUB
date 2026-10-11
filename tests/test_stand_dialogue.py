@@ -62,10 +62,35 @@ pity=node("PityCount","NumberValue",stats); pity.Value=0
 bag=node("Backpack","Backpack",player)
 char=node("Character","Model"); player.Character=char
 hum=node("Humanoid","Humanoid",char); hum.Health=100
+root=node("HumanoidRootPart","Part",char)
 function hum:EquipTool(tool) end
 remote=node("RemoteFunction","RemoteFunction",char)
 skin="None"
-function remote:InvokeServer() return skin end
+worthRequests, safeMoves = 0, 0
+function remote:InvokeServer(action)
+    if action=="LearnSkill" then worthRequests=worthRequests+1; return true end
+    return skin
+end
+CFrame={new=function(x,y,z) return {X=x,Y=y,Z=z} end}
+movement={SetNoclip=function() end,ClearFocus=function() end,FixCamera=function() end,
+    Teleport=function(_,cf) safeMoves=safeMoves+1; movedCharacter=player.Character; return true end}
+function respawn(delay,readyDelay)
+    local previous=player.Character
+    after(delay or 0.5,function()
+        hum.Health=0
+        char=node("Character","Model"); player.Character=char
+        hum=node("Humanoid","Humanoid",char); hum.Health=100
+        function hum:EquipTool(tool) end
+        after(readyDelay or 0,function()
+            root=node("HumanoidRootPart","Part",char)
+            remote=node("RemoteFunction","RemoteFunction",char)
+            function remote:InvokeServer(action)
+                if action=="LearnSkill" then worthRequests=worthRequests+1; return true end
+                return skin
+            end
+        end)
+    end)
+end
 function closeGui() pg.children={} end
 function page(kind, text, hidden)
     closeGui()
@@ -118,7 +143,7 @@ class StandDialogueTests(unittest.TestCase):
         source = source.replace('    end\n    if runToken == token then',
                                 '        ::next_iteration::\n    end\n    if runToken == token then')
         self.lua.globals().farm = self.lua.execute(source)
-        self.lua.execute('farm:Init({Config=config,RuntimeLog=logger})')
+        self.lua.execute('farm:Init({Config=config,RuntimeLog=logger,Movement=movement})')
 
     def run_lua(self, code):
         self.lua.execute(code)
@@ -142,7 +167,7 @@ class StandDialogueTests(unittest.TestCase):
         self.run_lua('''
         stand.Value="Star Platinum"
         onActivate=function(name) item=name; page("Option1",name) end
-        onClick=function() stand.Value=item=="Rokakaka" and "None" or "Aerosmith"; closeGui() end
+        onClick=function() stand.Value=item=="Rokakaka" and "None" or "Aerosmith"; closeGui(); if item=="Rokakaka" then respawn() end end
         assert(farm:Start()); advance(10)
         assert(activations==2 and presses==2 and farm:GetStatus().rolls==1)
         ''')
@@ -166,7 +191,7 @@ class StandDialogueTests(unittest.TestCase):
     def test_stop_no_late_logs_or_inputs_pending_result_locked(self):
         self.run_lua('''
         onActivate=function() page("Option1","Confirm") end
-        assert(farm:Start()); advance(0.4); farm:Stop()
+        assert(farm:Start()); advance(2); farm:Stop()
         local count, inputCount=#logs, presses; advance(30)
         assert(#logs==count and presses==inputCount and activations==1)
         closeGui(); assert(not farm:Start())
@@ -215,7 +240,7 @@ class StandDialogueTests(unittest.TestCase):
     def test_mode_enabled_during_dialogue_cancels(self):
         self.run_lua('''
         onActivate=function() page("Option1","Use") end
-        assert(farm:Start()); advance(0.4); local inputCount=presses; values.QuestFarmEnabled=true; advance(10)
+        assert(farm:Start()); advance(2); local inputCount=presses; values.QuestFarmEnabled=true; advance(10)
         assert(presses==inputCount and activations==1 and not farm:IsRunning())
         ''')
 
@@ -307,7 +332,7 @@ class StandDialogueTests(unittest.TestCase):
         self.run_lua('''
         stand.Value="Star Platinum"
         onActivate=function(name) item=name; fastPage("Option1",name,true) end
-        onSelect=function() stand.Value=item=="Rokakaka" and "None" or "Aerosmith"; closeGui() end
+        onSelect=function() stand.Value=item=="Rokakaka" and "None" or "Aerosmith"; closeGui(); if item=="Rokakaka" then respawn() end end
         assert(farm:Start()); advance(8)
         assert(presses==0 and activations==2 and farm:GetStatus().rolls==1)
         ''')
@@ -318,7 +343,7 @@ class StandDialogueTests(unittest.TestCase):
         selectDelay=1
         onActivate=function() fastPage("Option1","Use?",true) end
         onSelect=function() error("selection should be cancelled") end
-        assert(farm:Start()); advance(0.4)
+        assert(farm:Start()); advance(2.4)
         local gui=pg.children[1]; assert(not gui.Enabled and ups[lastFn][1]=="Option1")
         farm:Stop(); assert(gui.Enabled and ups[lastFn][1]=="")
         local count=#logs; advance(10); assert(#logs==count and activations==1 and signalCalls==0)
@@ -347,7 +372,7 @@ class StandDialogueTests(unittest.TestCase):
         self.run_lua('''
         onActivate=function() fastPage("ClickContinue","Continue",true) end
         onSignal=function() task.wait(30) end
-        assert(farm:Start()); advance(1); local gui=pg.children[1]
+        assert(farm:Start()); advance(2.4); local gui=pg.children[1]
         assert(not gui.Enabled and signalCalls==1)
         farm:Stop(); assert(gui.Enabled); local count=#logs
         advance(25); assert(signalCalls==1 and #logs==count and not farm:Start())
@@ -384,8 +409,100 @@ class StandDialogueTests(unittest.TestCase):
             end) end
         end
         onSignal=function() stand.Value="Aerosmith"; closeGui() end
-        assert(farm:Start()); advance(2)
+        assert(farm:Start()); advance(4)
         assert(signalCalls==1 and presses==0 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_yielded_continue_released_by_fast_option(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("ClickContinue","Intro",true) end
+        onSignal=function()
+            fastPage("Option1","Choose")
+            local fn=lastFn
+            while ups[fn][1]~="Option1" do task.wait(0.1) end
+            stand.Value="Aerosmith"; closeGui()
+        end
+        assert(farm:Start()); advance(8)
+        assert(signalCalls==1 and presses==0 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_roka_waits_for_new_root_and_remote_before_arrow(self):
+        self.enable_fast()
+        self.run_lua('''
+        stand.Value="Cream"
+        onActivate=function(name) item=name; fastPage("Option1",name,true) end
+        onSelect=function()
+            if item=="Rokakaka" then stand.Value="None"; closeGui(); respawn(4,2)
+            else stand.Value="Aerosmith"; closeGui() end
+        end
+        assert(farm:Start()); advance(6)
+        assert(activations==1 and worthRequests==0 and safeMoves==1)
+        advance(2); assert(activations==1 and worthRequests==0)
+        advance(10)
+        assert(activations==2 and safeMoves==2 and movedCharacter==player.Character)
+        assert(worthRequests==1 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_three_rolls_across_two_roka_respawns(self):
+        self.enable_fast()
+        self.run_lua('''
+        arrows=0
+        onActivate=function(name) item=name; fastPage("Option1",name,true) end
+        onSelect=function()
+            if item=="Rokakaka" then stand.Value="None"; closeGui(); respawn(1,0.5)
+            else arrows=arrows+1; stand.Value=arrows==3 and "Aerosmith" or "Cream"; closeGui() end
+        end
+        assert(farm:Start()); advance(35)
+        assert(arrows==3 and activations==5 and farm:GetStatus().rolls==3)
+        assert(safeMoves==3 and worthRequests==3 and not farm:IsRunning())
+        ''')
+
+    def test_stop_during_respawn_no_new_move_skill_or_item(self):
+        self.enable_fast()
+        self.run_lua('''
+        stand.Value="Cream"
+        onActivate=function(name) fastPage("Option1",name,true) end
+        onSelect=function() stand.Value="None"; closeGui(); respawn(10,1) end
+        assert(farm:Start()); advance(4); farm:Stop()
+        local count, moves=#logs,safeMoves
+        advance(30)
+        assert(#logs==count and safeMoves==moves and activations==1 and worthRequests==0)
+        ''')
+
+    def test_worthiness_timeout_never_activates_arrow(self):
+        self.run_lua('''
+        function remote:InvokeServer(action)
+            if action=="LearnSkill" then task.wait(12); return true end
+            return "None"
+        end
+        assert(farm:Start()); advance(8)
+        assert(activations==0 and not farm:IsRunning() and not farm:Start())
+        local count=#logs; advance(20); assert(#logs==count and activations==0)
+        ''')
+
+    def test_stop_during_worthiness_no_late_activation(self):
+        self.run_lua('''
+        function remote:InvokeServer(action) task.wait(4); return true end
+        assert(farm:Start()); advance(2); farm:Stop()
+        local count=#logs; advance(10); assert(#logs==count and activations==0)
+        ''')
+
+    def test_failed_safe_spot_teleport_prevents_consumption(self):
+        self.run_lua('''
+        movement.Teleport=function() return false end
+        assert(farm:Start()); advance(5)
+        assert(not farm:IsRunning() and activations==0 and worthRequests==0)
+        ''')
+
+    def test_roka_none_without_replacement_times_out_no_arrow(self):
+        self.enable_fast()
+        self.run_lua('''
+        stand.Value="Cream"
+        onActivate=function(name) fastPage("Option1",name,true) end
+        onSelect=function() stand.Value="None"; closeGui() end
+        assert(farm:Start()); advance(30)
+        assert(not farm:IsRunning() and activations==1 and worthRequests==0)
         ''')
 
 if __name__ == '__main__':

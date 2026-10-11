@@ -6,13 +6,14 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local StandFarm = {}
 
-local config, inventory, logger
+local config, inventory, logger, movement
 local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
-local callbackInFlight = 0
+local callbackInFlight, skillInFlight = 0, 0
+local preparedCharacter, respawnFrom, worthinessCharacter
 local cleanupDialogue
 
 local function log(level, message)
@@ -318,13 +319,13 @@ local function advanceDialogue(token, button, gui, kind, attempt)
         if kind == "ClickContinue" then return dispatchBoundSignal(token, button, gui) end
         return false, "hidden-option"
     end
-    if callbackInFlight > 0 then return false, "callback-pending" end
     local reason = "continue"
     if kind == "Option1" and attempt == 0 then
         local ok
         ok, reason = selectFastOption(token, button, gui)
         if ok then return true, reason end
     end
+    if callbackInFlight > 0 then return false, "callback-pending" end
     -- Quest TEST ALL route: if selection did not advance, dispatch ONLY
     -- this button's actual connected handler, not an unrelated game closure.
     local ok, method = dispatchBoundSignal(token, button, gui)
@@ -392,6 +393,7 @@ local function interact(token, name)
     local ownedGui, button, signature, stableSince
     local lastClick, clicks, lastSignature = 0, 0, nil
     local stageAttempts = {}
+    local callbackWaitLogged = false
     while active(token) and os.clock() - openedAt < 22 do
         if resultConfirmed(name) then
             if not dialogueGui() then
@@ -412,25 +414,29 @@ local function interact(token, name)
                     signature, button, stableSince = nextSignature, nextButton, os.clock()
                 end
                 if button and os.clock() - stableSince >= 0.1
-                    and callbackInFlight == 0
+                    and (callbackInFlight == 0 or kind == "Option1")
                     and (signature ~= lastSignature or os.clock() - lastClick >= 0.8) then
                     local attempts = stageAttempts[signature] or 0
                     if attempts >= 2 or clicks >= 12 then
                         return finish(false, name .. " dialogue stalled; clicks=" .. clicks .. "; result pending")
                     end
                     local advanced, method = advanceDialogue(token, button, gui, kind, attempts)
-                    if not advanced then
-                        if not active(token) then return finish(false, "Stopped") end
+                    if not active(token) then return finish(false, "Stopped") end
+                    if advanced then
+                        clicks, stageAttempts[signature], lastClick = clicks + 1, attempts + 1, os.clock()
+                        lastSignature = signature
+                        log("INFO", name .. " dialogue " .. method .. " " .. kind .. " #" .. clicks .. "; result pending")
+                    elseif method ~= "callback-pending" then
                         return finish(false, name .. " dialogue " .. method .. "; result pending")
                     end
-                    if not active(token) then return finish(false, "Stopped") end
-                    clicks, stageAttempts[signature], lastClick = clicks + 1, attempts + 1, os.clock()
-                    lastSignature = signature
-                    log("INFO", name .. " dialogue " .. method .. " " .. kind .. " #" .. clicks .. "; result pending")
                 end
             elseif not ownedGui and os.clock() - openedAt >= 6 then
                 return finish(false, name .. " dialogue not detected; no further items consumed")
             end
+        end
+        if callbackInFlight > 0 and not callbackWaitLogged and os.clock() - openedAt >= 2 then
+            callbackWaitLogged = true
+            log("INFO", name .. " dialogue handler pending; waiting for Option1/result, no extra signal fired")
         end
         task.wait(0.1)
     end
@@ -448,6 +454,89 @@ local function awaitStand(token, wanted, timeout)
     return false
 end
 
+-- Recovery belongs to this Stand worker; Item Farm is deliberately disabled.
+-- Roka's None stat can replicate BEFORE the old Character dies/replaces.
+local function prepareCharacter(token)
+    if not movement then return false, "Movement module unavailable" end
+    local started, stableSince, candidate = os.clock(), nil, nil
+    local announced = false
+    while active(token) and os.clock() - started < 20 do
+        local char, humanoid = getCharacter()
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local remote = char and char:FindFirstChild("RemoteFunction")
+        local bag = player and player:FindFirstChildOfClass("Backpack")
+        local ready = char and humanoid and root and remote and bag
+            and (not respawnFrom or char ~= respawnFrom)
+            and callbackInFlight == 0 and skillInFlight == 0
+        if ready then
+            if char == preparedCharacter and not respawnFrom then return true end
+            if candidate ~= char then candidate, stableSince = char, os.clock() end
+            if os.clock() - stableSince >= 1.5 then
+                if not active(token) then return false, "Stopped" end
+                local ok, moved = pcall(function()
+                    movement:SetNoclip(true)
+                    movement:ClearFocus()
+                    return movement:Teleport(CFrame.new(978, -42, -49))
+                end)
+                pcall(function() movement:SetNoclip(false) end)
+                if not active(token) then return false, "Stopped" end
+                if not ok or moved ~= true then return false, "Safe spot teleport not confirmed" end
+                if player.Character ~= char or humanoid.Health <= 0 then
+                    candidate, stableSince = nil, nil
+                else
+                    pcall(function() movement:FixCamera() end)
+                    preparedCharacter, respawnFrom = char, nil
+                    log("INFO", "Character ready; returned to safe spot before next consumable")
+                    return true
+                end
+            end
+        else
+            candidate, stableSince = nil, nil
+        end
+        if not announced then
+            announced = true
+            log("INFO", respawnFrom and "Rokakaka confirmed; waiting for NEW Character/root/remotes"
+                or "Waiting for ready Character/root/remotes before Stand Farm")
+        end
+        task.wait(0.1)
+    end
+    if not active(token) then return false, "Stopped" end
+    return false, "Character recovery timed out after 20s; nothing else consumed"
+end
+
+local function prepareWorthiness(token)
+    local char = getCharacter()
+    if not char or char ~= preparedCharacter then return false, "Character changed before Worthiness" end
+    if worthinessCharacter == char then return true end
+    local remote = char:FindFirstChild("RemoteFunction")
+    if not remote then return false, "Worthiness RemoteFunction unavailable" end
+    if not active(token) then return false, "Stopped" end
+    local finished, ok, result = false, false, nil
+    skillInFlight = skillInFlight + 1
+    log("INFO", "Preparing Worthiness for Arrow (single existing LearnSkill request)")
+    task.spawn(function()
+        if active(token) and player.Character == char then
+            ok, result = pcall(function()
+                return remote:InvokeServer("LearnSkill", {Skill = "Worthiness", SkillTreeType = "Character"})
+            end)
+        end
+        finished = true
+        skillInFlight = skillInFlight - 1
+    end)
+    local started = os.clock()
+    while active(token) and not finished and os.clock() - started < 5 do task.wait(0.1) end
+    if not active(token) then return false, "Stopped" end
+    if not finished or not ok then return false, "Worthiness request failed/timed out; Arrow not activated" end
+    if player.Character ~= char or getCharacter() ~= char then
+        return false, "Character changed during Worthiness; Arrow not activated"
+    end
+    -- The game's return schema is not verified. Do not claim skill allocation
+    -- succeeded from a nil/bool reply; the actual Arrow result remains required.
+    worthinessCharacter = char
+    log("INFO", "Worthiness request returned (" .. type(result) .. "); Arrow result still requires confirmation")
+    return true
+end
+
 local function loop(token)
     local selected = config:Get("StandFarmTarget")
     if type(selected) ~= "string" or selected == "" then
@@ -457,6 +546,13 @@ local function loop(token)
     log("INFO", "Searching for " .. selected .. "; rare skins are always protected")
     local unavailableSince
     while active(token) do
+        local ready, readyReason = prepareCharacter(token)
+        if not active(token) then break end
+        if not ready then
+            stoppedOn = readyReason
+            log("WARN", readyReason)
+            break
+        end
         local char = getCharacter()
         local stand = readStand()
         local pity = readPity()
@@ -501,7 +597,9 @@ local function loop(token)
                 log("WARN", "Rokakaka did not clear the Stand; stopped to avoid duplicate use")
                 break
             end
-            if not waitActive(token, 0.6) then break end
+            -- Require replacement, not just an early replicated None value.
+            respawnFrom, preparedCharacter, worthinessCharacter = char, nil, nil
+            log("INFO", "Rokakaka result confirmed; suspending consumption until respawn recovery")
         else
             local beforeStand = readStand()
             if beforeStand ~= "None" then
@@ -513,6 +611,13 @@ local function loop(token)
             if not getTool("Mysterious Arrow") then
                 stoppedOn = "Out of Mysterious Arrow"
                 log("WARN", stoppedOn)
+                break
+            end
+            local skillReady, skillReason = prepareWorthiness(token)
+            if not active(token) then break end
+            if not skillReady then
+                stoppedOn = skillReason
+                log("WARN", skillReason)
                 break
             end
             local ok, err = interact(token, "Mysterious Arrow")
@@ -553,9 +658,10 @@ end
 function StandFarm:Init(modules)
     cleanupDialogue(true)
     runToken = runToken + 1
-    config, inventory, logger = modules.Config, modules.Inventory, modules.RuntimeLog
+    config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
+    preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn = false, 0, nil
-    log("INFO", "Build SF-FAST-20261011-R2; experimental fast dialogue, Roblox validation pending")
+    log("INFO", "Build SF-RESPAWN-20261011-R3; experimental fast dialogue, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -566,7 +672,7 @@ end
 
 function StandFarm:Start()
     clearConfirmedPending()
-    if running or interactionBusy or callbackInFlight > 0 then
+    if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 then
         return false, "Stand Farm already running or cancelling callbacks"
     end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
@@ -596,6 +702,7 @@ function StandFarm:Start()
     runToken = runToken + 1
     local token = runToken
     running, stoppedOn = true, nil
+    preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
     task.spawn(function()
         local ok, err = xpcall(function() loop(token) end, debug.traceback)
