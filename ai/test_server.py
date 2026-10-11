@@ -2,16 +2,107 @@
 import json
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from ai.server import (
     clean_report, validate_proposal, proposal_markdown,
     ask_ai, GeminiAPIError, gemini_error_classification, gemini_model,
     health, report_needs_ai, run_job, _jobs,
+    owner_autopatch_enabled, attempt_dev_commit,
 )
 
+from ai.autofix import checked_candidate, check_luau
 
 class WhiteAITests(unittest.TestCase):
+    def test_private_admin_requires_separate_secret_and_explicit_enable(self):
+        request = SimpleNamespace(headers={"X-WhiteAI-Admin-Key": "x" * 40})
+        with patch.dict(os.environ, {"WHITEAI_ADMIN_KEY": "x" * 40,
+                                     "WHITEAI_AUTOPATCH_ENABLED": "0"}):
+            self.assertFalse(owner_autopatch_enabled(request))
+        with patch.dict(os.environ, {"WHITEAI_ADMIN_KEY": "x" * 40,
+                                     "WHITEAI_AUTOPATCH_ENABLED": "1"}):
+            self.assertTrue(owner_autopatch_enabled(request))
+            self.assertFalse(owner_autopatch_enabled(SimpleNamespace(headers={})))
+            with self.assertRaises(Exception):
+                owner_autopatch_enabled(SimpleNamespace(
+                    headers={"X-WhiteAI-Admin-Key": "wrong"}))
+        with patch.dict(os.environ, {"WHITEAI_ADMIN_KEY": "",
+                                     "WHITEAI_AUTOPATCH_ENABLED": "1"}):
+            with self.assertRaises(Exception):
+                owner_autopatch_enabled(request)
+
+    def test_luau_syntax_gate_rejects_invalid_code(self):
+        self.assertTrue(check_luau("local x = 1\\nreturn x\\n"))
+        self.assertFalse(check_luau("local x ="))
+
+    def test_private_patch_requires_high_confidence_and_exact_match(self):
+        base = "local enabled = true\\nreturn enabled\\n"
+        ai = {"file": "Farm.lua", "confidence": 0.99,
+              "old_text": "true", "new_text": "false"}
+        code, reason = checked_candidate("Farm.lua", base, ai)
+        self.assertEqual(reason, "static_syntax_passed")
+        self.assertIn("enabled = false", code)
+        ai["confidence"] = 0.79
+        self.assertIsNone(checked_candidate("Farm.lua", base, ai)[0])
+        ai["confidence"] = 0.99
+        ai["old_text"] = "not-an-exact-substring"
+        self.assertIsNone(checked_candidate("Farm.lua", base, ai)[0])
+
+    def test_inventory_and_protected_core_never_auto_patch(self):
+        src = "local x = true\\nreturn x\\n"
+        ai = {"file": "Inventory.lua", "confidence": 1,
+              "old_text": "true", "new_text": "false"}
+        self.assertIsNone(checked_candidate("Inventory.lua", src, ai)[0])
+        src = ("function CombatFarm:StartQuest() end\\n"
+               "-- QUEST FARM\\nlocal active = true\\n"
+               "-- PUBLIC API\\nfunction CombatFarm:StartNPC() end\\n")
+        ai.update(file="CombatFarm.lua", old_text="function CombatFarm:StartQuest() end",
+                  new_text="function CombatFarm:StartQuest() return true end")
+        self.assertEqual(checked_candidate("CombatFarm.lua", src, ai)[1],
+                         "combat_core_protected")
+
+    def test_autopatch_requires_fresh_source_no_write_on_conflict(self):
+        with patch("ai.server.checked_candidate",
+                   return_value=("local x = 2", "static_syntax_passed")):
+            with patch("ai.server.read_github_file", return_value=("different", "new-sha")):
+                with patch("ai.server.requests.put") as write:
+                    result = attempt_dev_commit("a" * 20, "Farm.lua",
+                                                "local x = 1", "old-sha",
+                                                {"file": "Farm.lua", "confidence": 0.99})
+        self.assertEqual(result["reason"], "stale_source")
+        write.assert_not_called()
+
+    def test_backup_record_precedes_any_dev_source_commit(self):
+        class MockReply:
+            def __init__(self, obj):
+                self.obj = obj
+            def raise_for_status(self):
+                return None
+            def json(self):
+                return self.obj
+        replies = [MockReply({}), MockReply({"commit": {"sha": "new-dev-commit"}})]
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "dummy-test-only"}):
+            with patch("ai.server.checked_candidate",
+                       return_value=("local x = 2", "static_syntax_passed")):
+                with patch("ai.server.read_github_file",
+                           return_value=("local x = 1", "original-blob")):
+                    with patch("ai.server.requests.get",
+                               return_value=MockReply({"commit": {"sha": "pre-patch-commit"}})):
+                        with patch("ai.server.requests.put", side_effect=replies) as writes:
+                            result = attempt_dev_commit("a" * 20, "Farm.lua",
+                                                        "local x = 1", "original-blob",
+                                                        {"file": "Farm.lua"})
+        self.assertEqual(result["state"], "dev_committed_unverified")
+        self.assertEqual(writes.call_count, 2)
+        backup = writes.call_args_list[0]
+        changed = writes.call_args_list[1]
+        self.assertIn("/contents/ai/backups/", backup.args[0])
+        self.assertIn("/contents/Farm.lua", changed.args[0])
+        self.assertEqual(changed.kwargs["json"]["sha"], "original-blob")
+        self.assertEqual(backup.kwargs["json"]["branch"], "dev/2026-10-10-autosell-compat")
+        self.assertEqual(changed.kwargs["json"]["branch"], "dev/2026-10-10-autosell-compat")
+
     def test_gemini_429_safe_classification(self):
         code, hint = gemini_error_classification(429)
         self.assertEqual(code, "gemini_rate_limited")
