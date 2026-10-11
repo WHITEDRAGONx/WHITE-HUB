@@ -259,6 +259,11 @@ end
 function StandFarm:Init(modules)
     config, inventory, logger = modules.Config, modules.Inventory, modules.RuntimeLog
     running, rolls, stoppedOn = false, 0, nil
+    -- Never resume potentially destructive item consumption after reload.
+    -- The owner must re-enable the beta manually in the current session.
+    if config:Get("StandFarmEnabled") == true then
+        config:Set("StandFarmEnabled", false)
+    end
 end
 
 function StandFarm:Start()
