@@ -16,6 +16,7 @@ local _lastJobId = nil
 local _proposalUrl = nil
 local _jobHistory = {} -- Last 5 local job outcomes only; no secrets.
 local _ingestKey = ""
+local _adminKey = "" -- owner-only, session memory; never persist/print
 local _lastStatus = "Local diagnostics ready"
 local _questLast = nil
 local _questChangedAt = 0
@@ -115,16 +116,20 @@ local function validEndpoint(url)
         and not url:find("//", 9, true)
 end
 
-local function transport(url, json, ingestKey)
+local function transport(url, json, ingestKey, adminKey)
     local requestFn = (syn and syn.request) or http_request or request
         or (http and http.request)
     if type(requestFn) == "function" then
+        local headers = {
+            ["Content-Type"] = "application/json",
+            ["X-WhiteAI-Key"] = ingestKey,
+        }
+        if type(adminKey) == "string" and #adminKey >= 32 then
+            headers["X-WhiteAI-Admin-Key"] = adminKey
+        end
         local response = requestFn({
             Url = url, Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-WhiteAI-Key"] = ingestKey,
-            },
+            Headers = headers,
             Body = json,
         })
         local code = tonumber(response and (response.StatusCode or response.Status))
@@ -230,6 +235,7 @@ function WhiteAI:GetStatus()
         enabled = _config and _config:Get("WhiteAIEnabled") == true or false,
         endpoint_set = _config and validEndpoint(_config:Get("WhiteAIEndpoint")) == true or false,
         ingest_key_set = #_ingestKey > 0,
+        private_owner_session = #_adminKey >= 32,
         incidents = #_history,
         latest = _latest,
         sending = _sending,
@@ -270,9 +276,10 @@ function WhiteAI:Submit(report)
     _lastStatus = "Sending diagnostic " .. tostring(report.id)
     local sessionToken = _epoch
     local sessionKey = _ingestKey
+    local sessionAdminKey = _adminKey
     task.spawn(function()
         local ok, delivered, reason, payload = pcall(function()
-            return transport(endpoint, HttpService:JSONEncode(report), sessionKey)
+            return transport(endpoint, HttpService:JSONEncode(report), sessionKey, sessionAdminKey)
         end)
         if not _running or _epoch ~= sessionToken then return end
         _sending = false
@@ -333,6 +340,18 @@ function WhiteAI:SetIngestKey(token)
     end
     _ingestKey = token
     return true
+end
+
+function WhiteAI:SetAdminKey(token)
+    if token == "" then
+        _adminKey = ""
+        return true, "Private auto-commit authorization cleared."
+    end
+    if type(token) ~= "string" or #token < 32 or #token > 128 then
+        return false, "Admin key must have 32-128 characters."
+    end
+    _adminKey = token
+    return true, "Owner-only session authorization stored in memory."
 end
 
 function WhiteAI:SetEnabled(enabled)
@@ -399,6 +418,7 @@ function WhiteAI:Destroy()
     _proposalUrl = nil
     _jobHistory = {}
     _ingestKey = ""
+    _adminKey = ""
 end
 
 return WhiteAI
