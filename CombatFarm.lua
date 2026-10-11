@@ -1291,6 +1291,7 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
 
     waitTimeout = math.max(0.75, tonumber(waitTimeout) or 3.50)
     label = tostring(label or "Quest dialogue")
+    local dialogueStartedAt = tick()
 
     local playerGui = Player:FindFirstChild("PlayerGui")
     if not playerGui then return false, "PlayerGui missing" end
@@ -1315,6 +1316,8 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
                 pcall(function() gui.Enabled = originallyEnabled end)
             end
         end
+        moduleLog("INFO", ("[CombatFarm][DialogueTiming] %s elapsed=%.3fs; confirmed=%s; %s")
+            :format(label, tick() - dialogueStartedAt, tostring(ok), tostring(reason or "")))
         return ok, reason
     end
 
@@ -1413,29 +1416,38 @@ runPromptDialogueFast = function(prompt, token, isComplete, waitTimeout, label)
                 hideDialogue(originalGui)
 
                 local option = findDialogueOption("Option1")
-                if option and option.Visible and tick() - lastOptionAdvanceAt >= 0.10 then
+                if option and option.Visible then
                     local stage = dialogueStageSignature()
+                    -- A genuinely new option page need not wait for the old
+                    -- page's retry cooldown. Unchanged pages remain throttled.
+                    local pageChanged = stage ~= lastOptionSignature
                     if stage ~= lastOptionSignature then
                         lastOptionSignature = stage
                         stuckSince = tick()
                     end
 
-                    local advanced = false
-                    if tick() - stuckSince < 0.30 then
-                        local okInject = injectDialogueOption("Option1")
-                        advanced = okInject == true
-                    end
-                    -- If the same page is still present after injection, TEST ALL
-                    -- showed connection:Fire can advance it when upvalues cannot.
-                    if not advanced then
-                        advanced = clickDialogueButton(option)
-                        stuckSince = tick()
-                    end
+                    if pageChanged or tick() - lastOptionAdvanceAt >= 0.10 then
+                        local advanced = false
+                        if tick() - stuckSince < 0.30 then
+                            local okInject = injectDialogueOption("Option1")
+                            advanced = okInject == true
+                        end
+                        -- If the same page is still present after injection, TEST ALL
+                        -- showed connection:Fire can advance it when upvalues cannot.
+                        if not advanced then
+                            advanced = clickDialogueButton(option)
+                            stuckSince = tick()
+                        end
 
-                    if advanced then
-                        optionAdvances = optionAdvances + 1
-                        lastOptionAdvanceAt = tick()
-                        task.wait(0.025)
+                        if advanced then
+                            optionAdvances = optionAdvances + 1
+                            lastOptionAdvanceAt = tick()
+                            task.wait(0.025)
+                        else
+                            task.wait(0.01)
+                        end
+                    else
+                        task.wait(0.01)
                     end
                 else
                     if tick() - lastContinueAt >= 0.03 then

@@ -234,19 +234,24 @@ local function getDialogueGui()
     return nil
 end
 
-local function getVisibleDialogueButtons()
+local function getVisibleDialogueButtons(optionsOnly)
     local dlg = getDialogueGui()
     if not dlg then return {} end
 
     local buttons = {}
-    for _, obj in ipairs(dlg:GetDescendants()) do
+    -- Internal Merchant stages only need Options. Keep the broad search for
+    -- adaptive/renamed layouts and the visible semantic fallback.
+    local root = optionsOnly and dlg:FindFirstChild("Options", true) or dlg
+    root = root or dlg
+    for _, obj in ipairs(root:GetDescendants()) do
         if obj:IsA("GuiButton") and isActuallyVisible(obj) then
             local text = getButtonText(obj)
-            if normalizeText(text) ~= "" then
+            local normalized = normalizeText(text)
+            if normalized ~= "" then
                 table.insert(buttons, {
                     Button = obj,
                     Text = text,
-                    Normalized = normalizeText(text),
+                    Normalized = normalized,
                 })
             end
         end
@@ -723,7 +728,7 @@ local function optionNameForButton(btn)
 end
 
 local function getDialogueStateSignature()
-    local buttons = getVisibleDialogueButtons()
+    local buttons = getVisibleDialogueButtons(true)
     if #buttons == 0 then return "", buttons end
 
     local parts = {}
@@ -736,7 +741,7 @@ local function getDialogueStateSignature()
 end
 
 local function findDialogueButtonByOptionName(wantedName)
-    for _, entry in ipairs(getVisibleDialogueButtons()) do
+    for _, entry in ipairs(getVisibleDialogueButtons(true)) do
         if optionNameForButton(entry.Button) == wantedName then
             return entry.Button, entry
         end
@@ -824,6 +829,7 @@ local function newFinalState()
         richObjects = 0,
         constantsZeroed = 0,
         gcScans = 0,
+        gcSeconds = 0,
     }
 end
 
@@ -995,7 +1001,9 @@ local function findFresh1982Closure(state)
         state.gcScans = (state.gcScans or 0) + 1
     end
 
+    local scanStarted = tick()
     local ok, objects = pcall(_rawGetGC, true)
+    if state then state.gcSeconds = (state.gcSeconds or 0) + tick() - scanStarted end
     if not ok or type(objects) ~= "table" then return nil end
 
     local best, fallback = nil, nil
@@ -1181,9 +1189,9 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     if soldAmount and soldAmount > 0 then
         moduleLog("INFO", string.format(
-            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d",
+            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d gcTime=%.3fs",
             soldAmount, itemName, tick() - startedAt, state.signalFires, state.direct1982Calls,
-            state.richObjects, state.constantsZeroed, state.gcScans or 0
+            state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcSeconds or 0
         ))
         return true, soldAmount
     end
