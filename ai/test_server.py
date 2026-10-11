@@ -40,7 +40,7 @@ class WhiteAITests(unittest.TestCase):
         self.assertIn('StandFarmPityLimit = 20', cfg)
         self.assertIn('function StandFarm:Start()', src)
         self.assertIn('function StandFarm:Stop()', src)
-        self.assertIn('return false, "Stand skin check unavailable;', src)
+        self.assertIn('return nil, "Stand skin check unavailable:', src)
         self.assertIn('if skin ~= "None" and skin ~= "" then', src)
         self.assertIn('if limit > 0 and pity >= limit then', src)
         self.assertIn('if not awaitStand(token, "None", 12) then', src)
