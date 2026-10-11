@@ -7,7 +7,7 @@ from unittest.mock import patch
 from ai.server import (
     clean_report, validate_proposal, proposal_markdown,
     ask_ai, GeminiAPIError, gemini_error_classification, gemini_model,
-    health,
+    health, report_needs_ai, run_job, _jobs,
 )
 
 
@@ -125,6 +125,54 @@ class WhiteAITests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "test", "OPENAI_API_KEY": "legacy"},
                         clear=True):
             self.assertFalse(health()["configured"])
+
+    def test_empty_manual_report_skips_gemini_quota(self):
+        empty = clean_report({
+            "category": "manual_diagnostic", "module": "General",
+            "reason": "Manual review requested",
+            "context": {"recent": [{"module": "Farm", "level": "INFO",
+                                    "message": "Loop started"}]},
+        })
+        self.assertFalse(report_needs_ai(empty))
+        empty["context"]["quest_enabled"] = True
+        self.assertTrue(report_needs_ai(empty))
+        empty["context"]["quest_enabled"] = False
+        empty["context"]["recent"][0]["level"] = "WARN"
+        self.assertTrue(report_needs_ai(empty))
+
+    def test_explicit_quest_incident_always_analyzed(self):
+        report = clean_report({
+            "category": "quest_stall", "module": "CombatFarm",
+            "reason": "Quest progress unchanged",
+        })
+        self.assertTrue(report_needs_ai(report))
+
+    def test_sanitized_job_result_has_review_url_and_summary(self):
+        job = "offline-mocked-job"
+        _jobs[job] = {"status": "queued"}
+        report = clean_report({
+            "category": "quest_stall", "module": "CombatFarm",
+            "reason": "No progress",
+        })
+        proposed = {
+            "summary": "Needs logs about quest",
+            "hypothesis": "Dialogue not confirmed",
+            "confidence": 0.25, "file": "CombatFarm.lua",
+            "old_text": "", "new_text": "", "tests": [],
+        }
+        try:
+            with patch("ai.server.read_github_file", return_value=("local x = 1", "abc123")):
+                with patch("ai.server.ask_ai", return_value=proposed):
+                    with patch("ai.server.publish_review_artifact",
+                               return_value="https://github.com/WHITEDRAGONx/WHITE-HUB-V3/") as save:
+                        run_job(job, report)
+            self.assertEqual(_jobs[job]["status"], "proposal_ready")
+            self.assertEqual(_jobs[job]["confidence"], 0.25)
+            self.assertEqual(_jobs[job]["module"], "CombatFarm.lua")
+            self.assertIn("Needs logs", _jobs[job]["diagnosis"])
+            save.assert_called_once()
+        finally:
+            _jobs.pop(job, None)
 
     def test_rejects_arbitrary_paths(self):
         self.assertEqual(validate_proposal({
