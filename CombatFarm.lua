@@ -25,6 +25,9 @@ local stopRequested = false
 local runId = 0
 local questWatcherConnection = nil
 local currentQuest = nil
+-- Only a quest dialogue confirmed by this worker is eligible for the
+-- shortcut/turn-in logic. Global QuestProgress cannot identify quest owner.
+local sessionQuestName = nil
 local questCompleted = false
 local questOnCooldown = false
 local cooldownUntil = 0
@@ -1062,13 +1065,14 @@ local function acceptQuest(questName, token)
     local activeIncomplete = (beforeMax or 0) > 0 and (beforeProgress or 0) < (beforeMax or 0)
     local previousCompleted = (beforeMax or 0) > 0 and (beforeProgress or 0) >= (beforeMax or 0)
 
-    if activeIncomplete then
-        -- QuestProgress alone does not identify the current NPC/quest.
-        -- Never claim this proves the selected quest was accepted.
-        moduleLog("WARN", ("[CombatFarm][QuestState] Existing active quest %s/%s; cannot verify it matches %s. If kills do not count, complete or abandon the previous quest first.")
-            :format(tostring(beforeProgress), tostring(beforeMax), tostring(questName)))
+    local isQuestSwitch = sessionQuestName ~= questName
+    if activeIncomplete and not isQuestSwitch then
         questCompleted = false
         return true
+    end
+    if isQuestSwitch then
+        moduleLog("INFO", ("[CombatFarm][QuestSwitch] Requesting %s with previous global progress=%s/%s. Existing quests will not be completed or abandoned.")
+            :format(tostring(questName), tostring(beforeProgress), tostring(beforeMax)))
     end
 
     local prompt = findQuestPrompt(questName)
@@ -1081,7 +1085,7 @@ local function acceptQuest(questName, token)
     -- the ClickContinue page does not spawn automatically after the kill: it is
     -- created only when Dio's prompt is fired again. Do the turn-in explicitly,
     -- invisibly, using the same line-2088 connection:Fire path proven by Analyzer.
-    if previousCompleted then
+    if previousCompleted and not isQuestSwitch then
         moduleLog("INFO", ("[CombatFarm] Previous quest finished (%s/%s). Instant turn-in: %s...")
             :format(tostring(beforeProgress), tostring(beforeMax), tostring(questName)))
 
@@ -1107,6 +1111,7 @@ local function acceptQuest(questName, token)
             local p, m = readQuestState()
             if (m or 0) > 0 and (p or 0) < (m or 0) then
                 questCompleted = false
+                sessionQuestName = questName
                 moduleLog("INFO", ("[CombatFarm][FastDialogue] Quest reactivated during turn-in: %s | %s/%s")
                     :format(tostring(questName), tostring(p), tostring(m)))
                 return true
@@ -1125,17 +1130,30 @@ local function acceptQuest(questName, token)
     -- and option-less ClickContinue pages (2088), which fixes Officer Sam and
     -- other NPCs whose first page is text-only.
     if type(runPromptDialogueFast) == "function" then
-        local okFast, fastInfo = runPromptDialogueFast(prompt, token, function()
-            local p, m = readQuestState()
-            return (m or 0) > 0 and (p or 0) < (m or 0)
-        end, 4.00, "Quest accept")
+        -- A global progress counter may already be 0/1 for a DIFFERENT quest.
+        -- For a switch, confirm dialogue completion rather than treating
+        -- the old nonzero QuestMaxProgress as an immediate success.
+        local completionCheck = nil
+        if not isQuestSwitch then
+            completionCheck = function()
+                local p, m = readQuestState()
+                return (m or 0) > 0 and (p or 0) < (m or 0)
+            end
+        end
+        local okFast, fastInfo = runPromptDialogueFast(
+            prompt, token, completionCheck, 4.00, "Quest accept")
 
         if okFast then
             local p, m = readQuestState()
-            questCompleted = false
-            moduleLog("INFO", ("[CombatFarm][FastDialogue] Quest accepted automatically: %s | progress=%s/%s | %s")
-                :format(tostring(questName), tostring(p), tostring(m), tostring(fastInfo or "fast")))
-            return true
+            if (m or 0) > 0 and (p or 0) < (m or 0) then
+                sessionQuestName = questName
+                questCompleted = false
+                moduleLog("INFO", ("[CombatFarm][QuestSwitch] Dialogue completed for %s | progress=%s/%s | %s. Kill credit will be verified independently.")
+                    :format(tostring(questName), tostring(p), tostring(m), tostring(fastInfo or "fast")))
+                return true
+            end
+            moduleLog("WARN", ("[CombatFarm][QuestSwitch] Dialogue finished for %s but quest progress is not active (%s/%s).")
+                :format(tostring(questName), tostring(p), tostring(m)))
         end
 
         moduleLog("INFO", "[CombatFarm][FastDialogue] Automatic quest route not confirmed; using compatibility route. " .. tostring(fastInfo or ""))
@@ -1160,9 +1178,10 @@ local function acceptQuest(questName, token)
     while tick() < deadline and isTokenActive(token, "Quest") do
         local progress, maxProgress = readQuestState()
         local nowActive = (maxProgress or 0) > 0 and (progress or 0) < (maxProgress or 0)
-        if nowActive then
+        if nowActive and (not isQuestSwitch or internalStages > 0 or fallbackClicks > 0) then
+            sessionQuestName = questName
             questCompleted = false
-            moduleLog("INFO", ("[CombatFarm] Quest accepted: %s | progress=%s/%s internalStages=%d fallbackClicks=%d")
+            moduleLog("INFO", ("[CombatFarm] Quest dialogue advanced: %s | progress=%s/%s internalStages=%d fallbackClicks=%d; kill credit pending")
                 :format(questName, tostring(progress), tostring(maxProgress), internalStages, fallbackClicks))
             return true
         end
@@ -1202,9 +1221,11 @@ local function acceptQuest(questName, token)
     end
 
     local progress, maxProgress = readQuestState()
-    if (maxProgress or 0) > 0 and (progress or 0) < (maxProgress or 0) then
+    if (maxProgress or 0) > 0 and (progress or 0) < (maxProgress or 0)
+        and (not isQuestSwitch or internalStages > 0 or fallbackClicks > 0) then
+        sessionQuestName = questName
         questCompleted = false
-        moduleLog("INFO", "[CombatFarm] Quest accepted after dialogue settle: " .. questName)
+        moduleLog("INFO", "[CombatFarm] Quest dialogue accepted after settle: " .. questName)
         return true
     end
 
@@ -1564,6 +1585,7 @@ local function runQuestFarm(token)
     end
 
     if data.enemy then
+        local consecutiveUncreditedKills = 0
         while isTokenActive(token, "Quest") do
             progress, maxProgress = readQuestState()
             if (maxProgress or 0) > 0 and (progress or 0) >= (maxProgress or 0) then
@@ -1574,9 +1596,23 @@ local function runQuestFarm(token)
                 return true
             end
 
+            local progressBeforeKill, maxBeforeKill = progress, maxProgress
             local ok = killTarget(data.enemy, token)
             if not isTokenActive(token, "Quest") then return false end
             if ok then
+                local afterProgress, afterMax = readQuestState()
+                if afterProgress ~= progressBeforeKill or afterMax ~= maxBeforeKill then
+                    consecutiveUncreditedKills = 0
+                else
+                    consecutiveUncreditedKills = consecutiveUncreditedKills + 1
+                    moduleLog("WARN", ("[CombatFarm][QuestSwitch] %s kill not credited to %s (%d/2); checking dialogue again if repeated.")
+                        :format(tostring(data.enemy), tostring(currentQuest), consecutiveUncreditedKills))
+                    if consecutiveUncreditedKills >= 2 then
+                        sessionQuestName = nil
+                        moduleLog("WARN", "[CombatFarm][QuestSwitch] Quest objective did not credit two confirmed kills. Reopening selected quest instead of endlessly attacking.")
+                        return false
+                    end
+                end
                 if not waitToken(0.02, token, "Quest") then return false end
             else
                 if not waitToken(0.50, token, "Quest") then return false end
@@ -1672,6 +1708,7 @@ local function startMode(mode)
 
     local token = runId
     if mode == "Quest" then
+        sessionQuestName = nil
         questCompleted = false
         questOnCooldown = false
     end
@@ -1745,6 +1782,7 @@ function CombatFarm:Stop()
     stopRequested = true
     isRunning = false
     activeMode = nil
+    sessionQuestName = nil
     questCompleted = false
     _movement:SetNoclip(false)
     _movement:ClearFocus()
