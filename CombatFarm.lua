@@ -832,6 +832,16 @@ local function getBestQuest()
     local stats = Player:FindFirstChild("PlayerStats")
     local levelObj = stats and stats:FindFirstChild("Level")
     local level = levelObj and tonumber(levelObj.Value) or 0
+    -- User-selected Auto Choose policy: once level 25 is reached, keep
+    -- choosing William Zeppeli's Vampire quest rather than Doppio/Dio.
+    -- Do not touch the battle controller or change manually selected quests.
+    local vampireQuest = "William Zeppeli [Lvl. 25+]"
+    if level >= 25 then
+        moduleLog("INFO", ("[CombatFarm][QuestChoice] Auto Choose priority: %s -> Vampire (level %d)")
+            :format(vampireQuest, level))
+        return vampireQuest
+    end
+
     local best = nil
     local bestReq = -1
 
@@ -1053,6 +1063,10 @@ local function acceptQuest(questName, token)
     local previousCompleted = (beforeMax or 0) > 0 and (beforeProgress or 0) >= (beforeMax or 0)
 
     if activeIncomplete then
+        -- QuestProgress alone does not identify the current NPC/quest.
+        -- Never claim this proves the selected quest was accepted.
+        moduleLog("WARN", ("[CombatFarm][QuestState] Existing active quest %s/%s; cannot verify it matches %s. If kills do not count, complete or abandon the previous quest first.")
+            :format(tostring(beforeProgress), tostring(beforeMax), tostring(questName)))
         questCompleted = false
         return true
     end
@@ -1527,6 +1541,11 @@ local function runQuestFarm(token)
         moduleLog("WARN", "[CombatFarm] Special quest is visible but not automated yet: " .. tostring(currentQuest) .. " (" .. tostring(data.special) .. ").")
         return false
     end
+
+    local beforeProgress, beforeMax = readQuestState()
+    moduleLog("INFO", ("[CombatFarm][QuestState] Starting %s quest=%s target=%s previous=%s/%s")
+        :format(autoChoose and "AutoChoose" or "Manual", tostring(currentQuest),
+            tostring(data.enemy or data.item or "unknown"), tostring(beforeProgress), tostring(beforeMax)))
 
     if not acceptQuest(currentQuest, token) then
         return false
