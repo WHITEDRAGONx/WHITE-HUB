@@ -1119,6 +1119,15 @@ function StandFarm:IsRunning()
     return running
 end
 
+-- Read-only ownership boundary: unresolved consumption always retains the fence.
+function StandFarm:IsBusy()
+    clearConfirmedPending()
+    return (respawnFrom ~= nil and player.Character == respawnFrom)
+        or running or pending ~= nil or interactionBusy or callbackInFlight > 0
+        or skillInFlight > 0 or restockInFlight > 0 or hopInFlight > 0
+        or recovering or awaitingTransfer
+end
+
 function StandFarm:GetStatus()
     local targets = {}
     for index, name in ipairs(activeTargets) do targets[index] = name end

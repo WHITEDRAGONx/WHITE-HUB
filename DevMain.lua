@@ -539,7 +539,7 @@ end
 env.AutoPrestigeEnabled = false
 local previous = _G.WhiteHubModules
 if previous then
-    for _, name in ipairs({"UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
+    for _, name in ipairs({"SmartFarmEngine", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
         local module = previous[name]
         if module and module.Destroy then
             pcall(function() module:Destroy() end)
@@ -563,7 +563,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"SmartFarmEngine", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -657,13 +657,16 @@ local moduleRequirements = {
     Config     = {"Load", "Get", "Set"},
     Webhook    = {"Init"},
     Movement   = {"Init"},
-    ServerHop  = {"Init"},
+    ServerHop  = {"Init", "IsBusy"},
     Inventory  = {"Init"},
-    CombatFarm = {"Init"},
-    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
+    CombatFarm = {"Init", "IsBusy"},
+    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics", "IsBusy"},
     StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
     StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
-    Farm       = {"Init", "Start"},
+    SmartFarmEngine = {"Init", "Start", "RequestMode", "StopAll", "GetStatus", "CanRecoverTransfer"},
+    SmartFarmAdapters = {"Init", "PrepareBoot", "Start", "Stop", "IsQuiet"},
+    SmartFarmUI = {"Init", "Build"},
+    Farm       = {"Init", "Start", "IsBusy"},
     UI         = {"Init", "Create"},
 }
 
@@ -742,6 +745,9 @@ local moduleFiles = {
     { key = "StandFarm",  file = "StandFarm.lua" },
     { key = "StandTransfer", file = "StandTransfer.lua" },
     { key = "StandV2UI", file = "StandV2UI.lua" },
+    { key = "SmartFarmAdapters", file = "SmartFarmAdapters.lua" },
+    { key = "SmartFarmEngine", file = "SmartFarmEngine.lua" },
+    { key = "SmartFarmUI", file = "SmartFarmUI.lua" },
     { key = "Farm",       file = "Farm.lua" },
     { key = "WhiteAI",    file = "WhiteAI.lua" },
     { key = "UI",         file = "UI.lua" },
@@ -789,7 +795,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "WhiteAI", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "SmartFarmAdapters", "SmartFarmEngine", "SmartFarmUI", "WhiteAI", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()
@@ -844,4 +850,10 @@ end)
 
 LOG("BOOT", "WHITE HUB V3 running. All critical modules passed boot validation.")
 -- Only a valid one-use arrival intent can authorize the opt-in exception.
-Modules.StandFarm:RecoverTransfer()
+if Modules.SmartFarmEngine:CanRecoverTransfer() then
+    Modules.StandFarm:RecoverTransfer()
+else
+    -- Original competing preferences must not be hidden by boot flag normalization.
+    Modules.StandFarm:Stop()
+end
+Modules.SmartFarmEngine:Start()

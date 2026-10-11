@@ -287,8 +287,10 @@ local function DoHop()
 
     moduleLog("INFO", "[Farm] Server dry — selling, buying, then hopping...")
     _inventory:SellAll()
+    if not _config:Get("FarmEnabled") or stopRequested then return end
     _inventory:BuyLucky()
-    _serverHop:Hop()
+    if not _config:Get("FarmEnabled") or stopRequested then return end
+    _serverHop:Hop(function() return _config:Get("FarmEnabled") and not stopRequested end)
     lastItemTime = tick()
 end
 
@@ -577,6 +579,11 @@ function Farm:Stop()
     stopRequested = true
     _movement:SetNoclip(false)
     moduleLog("INFO", "[Farm] Stop requested.")
+end
+
+-- Engine waits for real operations, not the permanent idle worker.
+function Farm:IsBusy()
+    return startupBusy or cycleBusy or restockBusy
 end
 
 function Farm:IsRunning()

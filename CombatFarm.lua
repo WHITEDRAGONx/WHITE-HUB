@@ -11,6 +11,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local Player = Players.LocalPlayer
 
+-- Observational task accounting; attack/movement/dialogue algorithms unchanged.
+local nativeTask = task
+local outstandingTasks = 0
+local task = setmetatable({spawn = function(callback, ...)
+    local args = table.pack(...)
+    outstandingTasks = outstandingTasks + 1
+    return nativeTask.spawn(function()
+        local ok, failure = pcall(callback, table.unpack(args, 1, args.n))
+        outstandingTasks = outstandingTasks - 1
+        if not ok then error(failure, 0) end
+    end)
+end}, {__index = nativeTask})
+
 local CombatFarm = {}
 
 local _config    = nil
@@ -1804,6 +1817,10 @@ function CombatFarm:Stop()
     end
     resumeItemFarmAfterCombat()
     moduleLog("INFO", "[CombatFarm] Stopped immediately and cleaned combat state.")
+end
+
+function CombatFarm:IsBusy()
+    return isRunning or outstandingTasks > 0
 end
 
 function CombatFarm:IsRunning()

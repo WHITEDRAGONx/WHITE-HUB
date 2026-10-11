@@ -72,3 +72,15 @@ successful job. Owner reports sales working; preserve Merchant as is.
    or widened AutoFix allowlist without authorization.
 6. Closed beta, changelog/versioning and public release only after QA and explicit
    approval to update main.
+
+## Smart Farm Engine E1 — implementação experimental
+
+Fila/prioridades, perfis validados, ownership, metas, limites, recuperação
+limitada, métricas e controles integrados na dev. Guia:
+SMART_FARM_ENGINE_DELTA_QA.md. QA dentro do YBA ainda pendente.
+
+Integração cooperativa do Auto Prestige continua aberta: após ativação, o
+coordenador bloqueia troca no mesmo servidor (inclusive após reload) por falta de confirmação de liberação do módulo
+legado. Não classificar o Engine inteiro como estável ou essa integração como
+concluída. Próximo passo: QA de trocas e tarefa isolada do lifecycle Prestige,
+antes de UI V4 ou publicação na main.

@@ -36,6 +36,8 @@ local Defaults = {
     StandFarmRestockPendingItem = "", -- Non-secret restart notice, never a resume command.
     StandFarmPityLimit = 20,
 
+    SmartFarmProfiles = {}, -- Validated task settings only; no credentials or automatic replay.
+
     NPCFarmEnabled = false,
     QuestFarmEnabled = false,
     AutoChooseQuest = false,

@@ -20,7 +20,8 @@ class RestockHopTests(unittest.TestCase):
         site={data={{id="destination",maxPlayers=20,playing=1}}}
         httpCalls,teleports,cameraFixes=0,0,0
         local httpService={JSONDecode=function() return site end,JSONEncode=function() return "mock-json" end}
-        local teleportService={TeleportToPlaceInstance=function(_,place,id) teleports=teleports+1; destination=id end}
+        local teleportService={TeleportToPlaceInstance=function(_,place,id) teleports=teleports+1; destination=id end,
+            TeleportInitFailed={Connect=function(_,fn) hopFailure=fn; return {Disconnect=function() hopFailure=nil end} end}}
         local coreGui={DescendantAdded={Connect=function() return {Disconnect=function() end} end}}
         game.PlaceId=123; game.JobId="current"
         game.GetService=function(self,name)
@@ -126,6 +127,7 @@ class RestockHopTests(unittest.TestCase):
         site={data={{id="current",maxPlayers=20,playing=1},{id="other",maxPlayers=20,playing=1}}}
         assert(hop:Hop(function() return true end)); assert(destination=="other" and teleports==1)
         advance(4); assert(cameraFixes==0)
+        assert(hop:IsBusy() and not hop:Hop()); hopFailure(player); assert(not hop:IsBusy())
         site={data={{id="legacy",maxPlayers=20,playing=1}}}
         assert(hop:Hop()); advance(4)
         assert(destination=="legacy" and teleports==2 and cameraFixes==1)
