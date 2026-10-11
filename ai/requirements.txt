@@ -1,3 +1,5 @@
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
 requests>=2.32,<3
+tree-sitter>=0.25,<0.26
+tree-sitter-luau==1.2.0
