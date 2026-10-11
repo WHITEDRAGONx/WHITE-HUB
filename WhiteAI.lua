@@ -166,7 +166,9 @@ local function watchJob(endpoint, key, jobId, token)
                             _lastStatus = "AI analysis complete! Proposal saved in GitHub dev branch."
                             return
                         elseif payload.status == "failed" then
-                            _lastStatus = "AI analysis failed: " .. safeText(payload.error, 80)
+                            local reasonCode = type(payload.error_code) == "string"
+                                and payload.error_code or payload.error
+                            _lastStatus = "AI analysis failed: " .. safeText(reasonCode, 80)
                             return
                         elseif type(payload.status) == "string" then
                             _lastStatus = "AI job " .. safeText(payload.status, 40)
