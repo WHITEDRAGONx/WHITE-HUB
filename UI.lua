@@ -1552,6 +1552,24 @@ function UI:Create()
         aiStatus.Text = ok and "Report received; checking backend job status..." or tostring(reason)
     end))
 
+    for _, action in ipairs({
+        {label = "RECOVER SAVED INCIDENTS", method = "RecoverSavedIncidents"},
+        {label = "RETRY LAST INCIDENT", method = "RetryLastJob"},
+    }) do
+        local actionButton = Instance.new("TextButton", AIPage)
+        actionButton.Size = UDim2.new(1, -8, 0, 32)
+        actionButton.Text = action.label
+        actionButton.Font = Enum.Font.GothamBold
+        actionButton.TextSize = 12
+        styleActionButton(actionButton, false)
+        local method = action.method
+        trackConnection(actionButton.MouseButton1Click:Connect(function()
+            if not _whiteAI or type(_whiteAI[method]) ~= "function" then return end
+            local _, reason = _whiteAI[method](_whiteAI)
+            aiStatus.Text = tostring(reason)
+        end))
+    end
+
     local aiCopyProposal = Instance.new("TextButton", AIPage)
     aiCopyProposal.Size = UDim2.new(1, -8, 0, 32)
     aiCopyProposal.Text = "COPY LATEST PROPOSAL LINK"

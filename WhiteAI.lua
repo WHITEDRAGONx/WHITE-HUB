@@ -25,6 +25,8 @@ local _sessionExpires = 0
 local _pairing = false
 local SESSION_FILE = "WHITE_AI_DEVICE_SESSION.json"
 local _lastStatus = "Local diagnostics ready"
+local _watching = {}
+local _recovering = false
 local _questLast = nil
 local _questChangedAt = 0
 local _lastHealthAlert = 0
@@ -191,7 +193,7 @@ local function recordJob(jobId, status, data)
     while #_jobHistory > 5 do table.remove(_jobHistory) end
 end
 
-local function watchJob(endpoint, key, jobId, token)
+local function watchJobLoop(endpoint, key, jobId, token)
     if type(jobId) ~= "string" or not jobId:match("^[0-9a-f]+$") or #jobId ~= 20 then
         _lastStatus = "Report accepted, but backend did not return a valid job ID"
         return
@@ -204,9 +206,10 @@ local function watchJob(endpoint, key, jobId, token)
     local jobUrl = endpoint:gsub("/reports$", "/jobs/" .. jobId)
     if jobUrl == endpoint then return end
 
-    for attempt = 1, 40 do
+    local lastQueueState
+    for attempt = 1, 120 do
         task.wait(7)
-        if not _running or _epoch ~= token then return end
+        if not _running or _epoch ~= token or not _config:Get("WhiteAIEnabled") then return end
         local ok, response = pcall(requestFn, {
             Url = jobUrl, Method = "GET",
             Headers = sessionHeaders(key),
@@ -242,6 +245,20 @@ local function watchJob(endpoint, key, jobId, token)
                             _lastStatus = "AI analysis failed: " .. safeText(reasonCode, 80)
                             recordJob(jobId, "failed", { diagnosis = _lastStatus })
                             return
+                        elseif payload.status == "waiting_retry" or payload.status == "queued" then
+                            _lastStatus = "Incidente salvo; " .. (payload.status == "queued" and "aguardando análise"
+                                or "nova tentativa agendada") .. " (" .. tostring(payload.attempts or 0) .. "/3)"
+                            local queueState = payload.status .. tostring(payload.attempts or 0)
+                            if queueState ~= lastQueueState then
+                                recordJob(jobId, payload.status, {diagnosis = _lastStatus})
+                                lastQueueState = queueState
+                            end
+                        elseif payload.status == "retry_exhausted" or payload.status == "storage_failure" then
+                            _lastStatus = payload.status == "retry_exhausted"
+                                and "Incidente salvo; limite de 3 análises atingido. Proposta não aplicada."
+                                or "Falha de armazenamento; recupere o incidente antes de reenviar."
+                            recordJob(jobId, payload.status, {diagnosis = _lastStatus})
+                            return
                         elseif type(payload.status) == "string" then
                             _lastStatus = "AI job " .. safeText(payload.status, 40)
                         end
@@ -253,7 +270,14 @@ local function watchJob(endpoint, key, jobId, token)
             end
         end
     end
-    _lastStatus = "AI analysis still unconfirmed: check Render logs and ai/proposals"
+    _lastStatus = "Análise ainda pendente; use RECOVER SAVED INCIDENTS para acompanhar novamente."
+end
+
+local function watchJob(endpoint, key, jobId, token)
+    if not jobId or _watching[jobId] == token then return end
+    _watching[jobId] = token
+    pcall(watchJobLoop, endpoint, key, jobId, token)
+    if _watching[jobId] == token then _watching[jobId] = nil end
 end
 
 function WhiteAI:GetStatus()
@@ -402,11 +426,63 @@ local function authRequest(endpoint, path, method, headers)
     local ok, response = pcall(requestFn, { Url = base .. path, Method = method,
         Headers = headers, Body = method == "POST" and "{}" or nil })
     if not ok or type(response) ~= "table" then return nil end
-    if tonumber(response.StatusCode or response.Status) ~= 200 then return nil end
+    local status = tonumber(response.StatusCode or response.Status)
+    if status ~= 200 and status ~= 202 then return nil end
     local body = response.Body or response.body
-    if type(body) ~= "string" or #body > 2000 then return nil end
+    if type(body) ~= "string" or #body > 8000 then return nil end
     local decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
     return decoded and type(data) == "table" and data or nil
+end
+
+function WhiteAI:RecoverSavedIncidents()
+    if _recovering then return false, "Recuperação já em andamento" end
+    if not _running or not _config or not _config:Get("WhiteAIEnabled") then
+        return false, "Ative Send to AI server primeiro"
+    end
+    if _ownerSession == "" then return false, "Pareie o dispositivo para recuperar incidentes privados" end
+    local endpoint, epoch = _config:Get("WhiteAIEndpoint"), _epoch
+    if not validEndpoint(endpoint) then return false, "Endpoint inválido" end
+    _recovering = true
+    task.spawn(function()
+        local data = authRequest(endpoint, "/incidents", "GET", sessionHeaders(_ingestKey))
+        if epoch ~= _epoch then return end
+        _recovering = false
+        if not data or type(data.incidents) ~= "table" then
+            _lastStatus = "Não foi possível recuperar incidentes; verifique servidor/sessão e aguarde antes de repetir."
+            return
+        end
+        local resumed = 0
+        for _, incident in ipairs(data.incidents) do
+            local id = type(incident) == "table" and incident.job_id
+            if type(id) == "string" and #id == 20 and id:match("^[0-9a-f]+$") and resumed < 3 then
+                _lastJobId = _lastJobId or id
+                resumed = resumed + 1
+                task.spawn(watchJob, endpoint, _ingestKey, id, epoch)
+            end
+        end
+        _lastStatus = "Incidentes recuperados: " .. tostring(resumed) .. "; reanálises somente para revisão."
+    end)
+    return true, "Recuperando incidentes salvos..."
+end
+
+function WhiteAI:RetryLastJob()
+    if not _running or not _config or not _config:Get("WhiteAIEnabled") then
+        return false, "Ative Send to AI server primeiro"
+    end
+    if _ownerSession == "" or not _lastJobId then return false, "Pareie e recupere um incidente primeiro" end
+    local endpoint, epoch, id = _config:Get("WhiteAIEndpoint"), _epoch, _lastJobId
+    if not validEndpoint(endpoint) or not id:match("^[0-9a-f]+$") or #id ~= 20 then return false, "Job inválido" end
+    task.spawn(function()
+        local data = authRequest(endpoint, "/jobs/" .. id .. "/retry", "POST", sessionHeaders(_ingestKey))
+        if epoch ~= _epoch then return end
+        if data then
+            _lastStatus = "Reanálise solicitada; somente proposta para revisão."
+            task.spawn(watchJob, endpoint, _ingestKey, id, epoch)
+        else
+            _lastStatus = "Reanálise não iniciada: aguarde cooldown ou confira limite/estado/sessão."
+        end
+    end)
+    return true, "Solicitando reanálise..."
 end
 
 function WhiteAI:PairDevice(masterKey)
@@ -440,6 +516,7 @@ function WhiteAI:PairDevice(masterKey)
         _lastStatus = saved and "Device paired; session restored automatically on next start"
             or "Device paired in memory; local file storage unavailable"
         WhiteAI:FlushPending()
+        WhiteAI:RecoverSavedIncidents()
     end)
     return true, "Pairing device..."
 end
@@ -464,6 +541,7 @@ function WhiteAI:RecoverSession()
             _sessionExpires = data.expires_at
             _lastStatus = "Owner device session restored"
             WhiteAI:FlushPending()
+            WhiteAI:RecoverSavedIncidents()
         else
             _lastStatus = "Could not restore session; retry or pair this device"
         end
@@ -504,7 +582,10 @@ end
 
 function WhiteAI:SetEnabled(enabled)
     _config:Set("WhiteAIEnabled", enabled == true)
-    if enabled then self:FlushPending() end
+    if enabled then
+        self:FlushPending()
+        if _ownerSession ~= "" then self:RecoverSavedIncidents() end
+    end
     return true
 end
 
@@ -544,6 +625,7 @@ function WhiteAI:Init(modules)
     end)
     _running = true
     _epoch = _epoch + 1
+    _watching, _recovering = {}, false
     local token = _epoch
     _questChangedAt = now()
     self:RecoverSession()
@@ -569,6 +651,7 @@ function WhiteAI:Destroy()
     _lastJobId = nil
     _proposalUrl = nil
     _jobHistory = {}
+    _watching, _recovering = {}, false
     _ingestKey = ""
     _adminKey = ""
     _ownerSession = ""

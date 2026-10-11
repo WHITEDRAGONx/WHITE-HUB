@@ -4,3 +4,4 @@ requests>=2.32,<3
 tree-sitter>=0.25,<0.26
 tree-sitter-luau==1.2.0
 httpx>=0.27,<1
+cryptography>=44,<51
