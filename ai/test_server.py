@@ -1,10 +1,33 @@
 """No external requests or API keys are used by these tests."""
 import unittest
 
-from ai.server import clean_report, validate_proposal, proposal_markdown
+from ai.server import clean_report, validate_proposal, proposal_markdown, rate_limit_diagnostic
 
 
 class WhiteAITests(unittest.TestCase):
+    def test_openai_quota_diagnostic_does_not_echo_secrets(self):
+        class FakeError(Exception):
+            code = None
+            body = {"error": {"code": "insufficient_quota", "message": "private-secret"}}
+        code, hint = rate_limit_diagnostic(FakeError())
+        self.assertEqual(code, "insufficient_quota")
+        self.assertIn("billing", hint)
+        self.assertNotIn("private-secret", hint)
+
+    def test_openai_rate_limit_diagnostic(self):
+        class FakeError(Exception):
+            body = {"code": "rate_limit_exceeded"}
+        code, hint = rate_limit_diagnostic(FakeError())
+        self.assertEqual(code, "rate_limit_exceeded")
+        self.assertIn("retry", hint)
+
+    def test_openai_unknown_429_diagnostic(self):
+        class FakeError(Exception):
+            body = {"code": "sensitive-internal-data"}
+        code, hint = rate_limit_diagnostic(FakeError())
+        self.assertEqual(code, "http_429_unclassified")
+        self.assertNotIn("sensitive-internal-data", hint)
+
     def test_rejects_arbitrary_paths(self):
         self.assertEqual(validate_proposal({
             "file": "Inventory.lua", "old_text": "a", "new_text": "b"
