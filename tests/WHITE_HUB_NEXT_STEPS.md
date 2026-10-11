@@ -19,6 +19,10 @@ remain protected. Offline tests and an HTTP health check are not YBA validation.
   detector/collector without enabling sales or phases. Checks roll-item stock
   before Roka; confirmed inventory, safe-spot recovery and renewed skin/pity checks
   precede consumption. See RIB_RESTOCK_DELTA_QA.md. Actual Delta QA is pending.
+- R8 optional hop after local restock limit: guarded lookup/teleport, one transfer,
+  dedicated Cancel button and missing-item reminder. Beta remains OFF in the next
+  server; manual restart required. See RESTOCK_HOP_DELTA_QA.md. No arrival or
+  automatic cross-server AFK continuation has been validated or claimed.
 
 ## Owner evidence received
 
@@ -31,7 +35,7 @@ successful job. Owner reports sales working; preserve Merchant as is.
 
 ## Owner QA now
 
-1. Run DevMain on Delta, confirm R7 build and no bootstrap failures.
+1. Run DevMain on Delta, confirm R8 build and no bootstrap failures.
 2. Follow the controlled list/Stop/respawn/skin/pity tests in the Stand QA guide.
 3. On the already paired device, enable WHITE AI and send an actionable report.
    An idle manual report may legitimately return no_incident without Gemini.
@@ -46,7 +50,9 @@ successful job. Owner reports sales working; preserve Merchant as is.
 1. Stable QA: Quest/NPC credit and switching, farm cancellation, reload, respawn,
    hop and prolonged AutoPrestige. Fix only evidenced failures.
 2. Stand V2 next slices: validate any-skin mode, Rib and bounded restock; then
-   skin-specific selection and cross-server restock recovery. Each needs checkpoint, tests and YBA
+   skin-specific selection and full cross-server restock recovery. R8 only requests
+   a transfer and requires manual restart; automatic consumption after reload
+   remains prohibited. Each slice needs checkpoint, tests and YBA
    evidence. No storage integration before functional validation.
 3. Smart Farm Engine: one owner for character/dialogues, task priorities, bounded
    recovery and progress metrics. Integrate working modules incrementally.

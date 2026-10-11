@@ -28,7 +28,9 @@ local Defaults = {
     StandFarmTargets = {}, -- Empty list keeps the existing single-target mode.
     StandFarmMode = "stand", -- Opt-in "shiny" ignores common Stand targets.
     StandFarmConsumable = "Mysterious Arrow",
-    StandFarmAutoRestock = false, -- Current server, bounded, never sells or hops.
+    StandFarmAutoRestock = false, -- Local collection; optional transfer configured separately.
+    StandFarmRestockHop = false, -- One guarded transfer, then manual beta restart.
+    StandFarmRestockPendingItem = "", -- Non-secret restart notice, never a resume command.
     StandFarmPityLimit = 20,
 
     NPCFarmEnabled = false,

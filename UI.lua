@@ -903,6 +903,22 @@ function UI:Create()
             if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
             if _config then _config:Set("StandFarmAutoRestock", enabled) end
         end)
+    MakeToggle(FarmPage, "Hop After Restock Limit (BETA)",
+        (_config and _config:Get("StandFarmRestockHop")) == true, function(enabled)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmRestockHop", enabled) end
+        end)
+    UI:AddLabel(FarmPage, "Restock hop: ONE transfer, no sales. Reload DevMain and restart beta manually after joining.")
+    local cancelRestockHop = Instance.new("TextButton", FarmPage)
+    cancelRestockHop.Size = UDim2.new(1, -4, 0, 32)
+    cancelRestockHop.Text = "CANCEL RESTOCK TRANSFER / STOP"
+    cancelRestockHop.Font = Enum.Font.GothamBold
+    cancelRestockHop.TextSize = 11
+    styleActionButton(cancelRestockHop, false)
+    trackConnection(cancelRestockHop.MouseButton1Click:Connect(function()
+        if _standFarm then _standFarm:Stop() end
+        UI:SetToggleValue("Stand Farm (BETA)", false)
+    end))
 
     local refreshTargetList
     UI:AddLabel(FarmPage, "Shiny mode: ANY skin stops the farm. Common targets may be replaced.")

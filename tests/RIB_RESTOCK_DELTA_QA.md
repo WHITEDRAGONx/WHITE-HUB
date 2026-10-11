@@ -1,5 +1,9 @@
 # R7 Rib / auto-restock beta — NOT VALIDATED IN ROBLOX
 
+Current build is R8; keep Hop After Restock Limit OFF for the R7 procedures below.
+Optional guarded server transfer and manual restart are covered in
+RESTOCK_HOP_DELTA_QA.md. The Farm.lua local restock API itself still never hops.
+
 The same StandFarm worker handles Arrow/Rib, target lists and Shiny mode. No
 Xenon code is imported. Inventory.lua, Merchant and XenonLock are unchanged.
 Config.lua, StandFarm.lua, UI.lua and a small Farm.lua handoff are in scope.

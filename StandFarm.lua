@@ -14,6 +14,7 @@ local activeTargets = {}
 local activeMode = "stand"
 local activeConsumable = "Mysterious Arrow"
 local restockInFlight, restockingItem = 0, nil
+local serverHop, hopInFlight = nil, 0
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
 local callbackInFlight, skillInFlight = 0, 0
@@ -602,7 +603,52 @@ local function prepareWorthiness(token)
     return true
 end
 
-local function ensureItem(token, name)
+local function restockHop(token, name, selected, mode)
+    if config:Get("StandFarmRestockHop") ~= true then return false, "Restock hop disabled" end
+    if config:Get("StayInPrivateServer") then return false, "Restock hop blocked: stay in private server" end
+    if not serverHop or type(serverHop.Hop) ~= "function" then return false, "ServerHop module unavailable" end
+    local char, stand = getCharacter(), readStand()
+    local function permitted()
+        local pity = readPity()
+        local limit = tonumber(config:Get("StandFarmPityLimit")) or 0
+        return runToken == token and char ~= nil and getCharacter() == char and readStand() == stand
+            and not pending and not interactionBusy and callbackInFlight == 0 and skillInFlight == 0
+            and restockInFlight == 0 and not dialogueGui() and not config:Get("StayInPrivateServer")
+            and config:Get("StandFarmRestockHop") == true and config:Get("StandFarmAutoRestock") == true
+            and not config:Get("FarmEnabled") and not config:Get("AutoSell") and not config:Get("AutoPrestige")
+            and not config:Get("QuestFarmEnabled") and not config:Get("NPCFarmEnabled")
+            and pity ~= nil and (limit <= 0 or pity < limit)
+    end
+    local function guarded()
+        if not permitted() then return false end
+        if stand ~= "None" then
+            local replace = shouldReplace(stand, selected, char, nil, mode)
+            if not replace then return false end
+        end
+        return permitted() -- Skin lookup can yield; check cancellation again.
+    end
+    if not guarded() then return false, "Restock hop blocked by Stand/skin/state check" end
+    running = false
+    config:Set("StandFarmEnabled", false)
+    config:Set("StandFarmRestockPendingItem", name)
+    stoppedOn = "Restock transfer pending; consumption stopped"
+    log("INFO", "Restock exhausted for " .. name .. "; requesting ONE server transfer, beta stopped")
+    hopInFlight = hopInFlight + 1
+    local ok, requested = pcall(function() return serverHop:Hop(guarded) end)
+    hopInFlight = hopInFlight - 1
+    if runToken ~= token then return false, "Stopped" end
+    if ok and requested then
+        stoppedOn = "Teleport requested; reload DevMain and restart beta manually after joining"
+        log("INFO", stoppedOn)
+        return true
+    end
+    config:Set("StandFarmRestockPendingItem", "")
+    stoppedOn = "Restock transfer not confirmed; beta remains stopped"
+    log("WARN", stoppedOn)
+    return false, stoppedOn
+end
+
+local function ensureItem(token, name, selected, mode)
     if getTool(name) then return true, nil, false end
     if not config:Get("StandFarmAutoRestock") then return false, "Out of " .. name end
     if not itemFarm or type(itemFarm.Restock) ~= "function" then return false, "Item Farm restock API unavailable" end
@@ -622,7 +668,14 @@ local function ensureItem(token, name)
     end)
     restockInFlight, restockingItem = restockInFlight - 1, nil
     if not active(token) then return false, "Stopped" end
-    if not ok or not restored then return false, reason or "Restock failed; no item consumed" end
+    if not ok or not restored then
+        if ok and type(reason) == "string" and reason:find("^Restock limit reached")
+            and config:Get("StandFarmRestockHop") == true then
+            local requested, hopReason = restockHop(token, name, selected, mode)
+            if not requested and active(token) then return false, hopReason end
+        end
+        return false, reason or "Restock failed; no item consumed"
+    end
     if not getTool(name) then return false, "Restock inventory/tool not confirmed for " .. name end
     preparedCharacter = nil
     local ready, recoveryReason = prepareCharacter(token)
@@ -682,13 +735,13 @@ local function loop(token, selected, mode, consumable)
         if replace then
             -- Check stock for both the reset and the next roll before discarding
             -- a common Stand. A restock yield requires a fresh safety pass.
-            local stocked, stockReason, changed = ensureItem(token, consumable)
+            local stocked, stockReason, changed = ensureItem(token, consumable, selected, mode)
             if not active(token) then break end
             if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
             if changed then
                 continue
             end
-            stocked, stockReason, changed = ensureItem(token, "Rokakaka")
+            stocked, stockReason, changed = ensureItem(token, "Rokakaka", selected, mode)
             if not active(token) then break end
             if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
             if changed then
@@ -718,7 +771,7 @@ local function loop(token, selected, mode, consumable)
                 log("WARN", stoppedOn)
                 break
             end
-            local stocked, stockReason, changed = ensureItem(token, consumable)
+            local stocked, stockReason, changed = ensureItem(token, consumable, selected, mode)
             if not active(token) then break end
             if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
             if changed then
@@ -772,22 +825,27 @@ function StandFarm:Init(modules)
     runToken = runToken + 1
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
     itemFarm = modules.Farm
+    serverHop = modules.ServerHop
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
     activeMode = "stand"
     activeConsumable = "Mysterious Arrow"
-    log("INFO", "Build SF-RIB-RESTOCK-20261011-R7; experimental Rib/restock, Roblox validation pending")
+    log("INFO", "Build SF-RESTOCK-HOP-20261011-R8; experimental guarded hop, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
     if config:Get("StandFarmEnabled") == true then
         config:Set("StandFarmEnabled", false)
     end
+    local waitingItem = config:Get("StandFarmRestockPendingItem")
+    if waitingItem == "Rokakaka" or waitingItem == "Mysterious Arrow" or waitingItem == "Rib Cage of The Saint's Corpse" then
+        log("INFO", "Previous restock transfer wanted " .. waitingItem .. "; verify stock and enable beta manually")
+    end
 end
 
 function StandFarm:Start()
     clearConfirmedPending()
-    if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 or restockInFlight > 0 then
+    if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 or restockInFlight > 0 or hopInFlight > 0 then
         return false, "Stand Farm already running or cancelling callbacks"
     end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
@@ -837,6 +895,7 @@ function StandFarm:Start()
     activeConsumable = consumable
     preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
+    config:Set("StandFarmRestockPendingItem", "")
     task.spawn(function()
         local ok, err = xpcall(function() loop(token, selected, mode, consumable) end, debug.traceback)
         if not ok then cleanupDialogue(true); interactionBusy = false end
@@ -853,7 +912,7 @@ function StandFarm:Stop()
     runToken = runToken + 1
     running = false
     cleanupDialogue(true)
-    if config then config:Set("StandFarmEnabled", false) end
+    if config then config:Set("StandFarmEnabled", false); config:Set("StandFarmRestockPendingItem", "") end
     stoppedOn = "Stopped by user"
     log("INFO", "Stand Farm stopped by user")
     return true
@@ -869,6 +928,7 @@ function StandFarm:GetStatus()
     return { running = running, message = status,
         rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn,
         mode = activeMode, consumable = activeConsumable, restocking_item = restockingItem,
+        hopping = hopInFlight > 0,
         targets = targets, pending_item = pending and pending.name or nil }
 end
 

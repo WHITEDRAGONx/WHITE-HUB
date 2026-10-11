@@ -273,7 +273,9 @@ class RibRestockTests(unittest.TestCase):
         targets.StandTargetTests.build_ui(self)
         self.run_lua('''
         function MakeStyledDropdown(_,label,options,fn) sourceChange=fn; return node("Source","TextButton") end
-        function MakeToggle(_,label,default,fn) restockChange=fn; restockDefault=default end
+        function MakeToggle(_,label,default,fn)
+            if label=="Auto Restock Consumables (BETA)" then restockChange=fn; restockDefault=default end
+        end
         ''')
         source = (ROOT / 'UI.lua').read_text()
         chunk = source[source.index('    local sourceDropdown ='):source.index('    local refreshTargetList')]
