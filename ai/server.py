@@ -348,13 +348,13 @@ def attempt_dev_commit(job_id: str, path: str, source: str, original_sha: str,
         previous_commit = branch_response.json()["commit"]["sha"]
         backup_path = f"ai/backups/{datetime.now(timezone.utc):%Y%m%d}-{job_id}.md"
         backup_text = (
-            "# WHITE AI dev rollback checkpoint\\n\\n"
-            f"File: {path}\\n\\n"
-            f"Before patch commit: {previous_commit}\\n\\n"
-            f"Original blob: {original_sha}\\n\\n"
-            f"SHA256: {hashlib.sha256(source.encode('utf-8')).hexdigest()}\\n\\n"
-            "Rollback: restore this file from the pre-patch commit shown above.\\n"
-            "Static Luau syntax was checked; NEVER VERIFIED IN ROBLOX.\\n"
+            "# WHITE AI dev rollback checkpoint\n\n"
+            f"File: {path}\n\n"
+            f"Before patch commit: {previous_commit}\n\n"
+            f"Original blob: {original_sha}\n\n"
+            f"SHA256: {hashlib.sha256(source.encode('utf-8')).hexdigest()}\n\n"
+            "Rollback: restore this file from the pre-patch commit shown above.\n"
+            "Static Luau syntax was checked; NEVER VERIFIED IN ROBLOX.\n"
         )
         backup_response = requests.put(
             f"{GITHUB_API}/contents/{quote(backup_path, safe='/')}",
