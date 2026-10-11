@@ -405,7 +405,8 @@ def run_job(job_id: str, report: dict[str, Any],
             conf = 0
         conf = max(0.0, min(1.0, float(conf)))
         _jobs[job_id] = {
-            "status": "proposal_ready", "proposal_url": url,
+            "status": ("writing_dev_candidate" if owner_autopatch else "proposal_ready"),
+            "proposal_url": url,
             "patch_valid": bool(diff), "module": path,
             "diagnosis": scrub(ai.get("summary", ""), 240),
             "confidence": round(conf, 2),
@@ -424,6 +425,8 @@ def run_job(job_id: str, report: dict[str, Any],
                 _jobs[job_id]["auto_patch"] = {
                     "state": "review_only", "reason": "backup_or_commit_failed"
                 }
+            finally:
+                _jobs[job_id]["status"] = "proposal_ready"
     except GeminiAPIError as exc:
         # Only whitelisted codes/hints; never log external response bodies.
         print("[WhiteAI backend] job failed", job_id, exc.code, flush=True)
