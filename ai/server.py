@@ -111,8 +111,18 @@ def report_needs_ai(report: dict[str, Any]) -> bool:
     context = report.get("context") or {}
     if context.get("quest_enabled") or context.get("npc_enabled"):
         return True
-    return any(entry.get("level", "").upper() in ("WARN", "ERROR")
-               for entry in context.get("recent", []))
+    actionable = [
+        entry for entry in context.get("recent", [])
+        if entry.get("level", "").upper() in ("WARN", "ERROR")
+    ]
+    # A manually stopped combat lock is not by itself a failure. Suppress
+    # this specific warning only for idle *manual* diagnostics; explicit
+    # runtime errors, stalls, or any other warning still get analyzed.
+    return any(not (
+        entry.get("module") == "CombatFarm"
+        and entry.get("level", "").upper() == "WARN"
+        and "Target lock ended without confirmed death:" in entry.get("message", "")
+    ) for entry in actionable)
 
 
 def allowed_module_path(report: dict[str, Any]) -> str:
@@ -216,26 +226,38 @@ def ask_ai(report: dict[str, Any], path: str, source: str) -> dict[str, Any]:
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
 
     def generate(selected_model: str):
-        return requests.post(
-            f"{GEMINI_API_BASE}{selected_model}:generateContent",
-            headers=headers, json=payload, timeout=(10, 90),
-            allow_redirects=False,
-        )
+        try:
+            return requests.post(
+                f"{GEMINI_API_BASE}{selected_model}:generateContent",
+                headers=headers, json=payload, timeout=(10, 55),
+                allow_redirects=False,
+            )
+        except requests.exceptions.Timeout:
+            # A timeout is a provider/network failure, not a Lua auth error.
+            # Never log the provider request body or credentials.
+            print("[WhiteAI backend] Gemini request timed out", flush=True)
+            return None
 
     response = generate(model)
-    if response.status_code >= 500:
-        # One bounded retry with backoff; do not retry exhausted quota (429).
+    if response is not None and response.status_code >= 500:
+        # One bounded retry for explicit 5xx responses; never retry 429/403.
         print("[WhiteAI backend] Gemini transient HTTP", response.status_code,
               "retrying once", flush=True)
         time.sleep(1.5)
         response = generate(model)
 
-    if response.status_code >= 500 and model == GEMINI_DEFAULT_MODEL:
-        # Supported structured JSON model, Free-tier eligible. Fail closed if
-        # unavailable; never fall back to paid providers or arbitrary endpoints.
-        print("[WhiteAI backend] Gemini main model still unavailable; "
+    if (response is None or response.status_code >= 500) and model == GEMINI_DEFAULT_MODEL:
+        # A timeout after 5xx should reach the Free-tier Flash-Lite fallback.
+        # No paid provider or user-selected arbitrary endpoint is permitted.
+        print("[WhiteAI backend] Primary Gemini unavailable; "
               "trying Flash-Lite", flush=True)
         response = generate(GEMINI_FALLBACK_MODEL)
+
+    if response is None:
+        raise GeminiAPIError(
+            "gemini_timeout",
+            "Gemini did not respond in time; retry later, no patch was applied.",
+        )
 
     if response.status_code != 200:
         code, hint = gemini_error_classification(response.status_code)
@@ -534,7 +556,7 @@ async def accept_report(request: Request, background: BackgroundTasks):
     if not report_needs_ai(report):
         _jobs[job_id] = {
             "status": "no_incident",
-            "message": "No recent WARN/ERROR with farming disabled; Gemini call skipped.",
+            "message": "No actionable incident while farming disabled; Gemini call skipped.",
         }
         return {"status": "no_incident", "job_id": job_id,
                 "message": "No actionable incident; no Gemini quota used"}
