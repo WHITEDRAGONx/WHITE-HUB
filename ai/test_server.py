@@ -54,6 +54,63 @@ class WhiteAITests(unittest.TestCase):
         self.assertEqual(error.exception.code, "gemini_rate_limited")
         self.assertNotIn("raw-provider-private-token", str(error.exception))
 
+    def test_503_retries_primary_once_then_uses_free_lite(self):
+        class Failure:
+            status_code = 503
+            text = "do not show provider response"
+        class Success:
+            status_code = 200
+            def json(self):
+                return {"candidates": [{"content": {"parts": [{
+                    "text": json.dumps({
+                        "summary": "Need logs", "hypothesis": "Unknown",
+                        "confidence": 0.2, "file": "Farm.lua",
+                        "old_text": "", "new_text": "", "tests": ["Verify in game"],
+                    })
+                }]}}]}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake-test-key",
+                                     "GEMINI_MODEL": "gemini-3.8-flash"}):
+            with patch("ai.server.requests.post",
+                       side_effect=[Failure(), Failure(), Success()]) as send:
+                with patch("ai.server.time.sleep") as pause:
+                    result = ask_ai({"reason": "test"}, "Farm.lua", "return true")
+        self.assertEqual(result["file"], "Farm.lua")
+        self.assertEqual(send.call_count, 3)
+        self.assertIn("gemini-3.8-flash:generateContent", send.call_args_list[0].args[0])
+        self.assertIn("gemini-3.8-flash:generateContent", send.call_args_list[1].args[0])
+        self.assertIn("gemini-3.5-flash-lite:generateContent", send.call_args_list[2].args[0])
+        pause.assert_called_once_with(1.5)
+
+    def test_429_and_403_never_retry_or_fallback(self):
+        for http_status, expected in ((429, "gemini_rate_limited"),
+                                      (403, "gemini_auth_error")):
+            class Failure:
+                status_code = http_status
+                text = "private provider response"
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "fake-test-key",
+                                         "GEMINI_MODEL": "gemini-3.8-flash"}):
+                with patch("ai.server.requests.post", return_value=Failure()) as send:
+                    with patch("ai.server.time.sleep") as pause:
+                        with self.assertRaises(GeminiAPIError) as error:
+                            ask_ai({"reason": "test"}, "Farm.lua", "return true")
+            self.assertEqual(error.exception.code, expected)
+            self.assertEqual(send.call_count, 1)
+            pause.assert_not_called()
+
+    def test_5xx_fallback_is_bounded_when_both_models_down(self):
+        class Failure:
+            status_code = 503
+            text = "private response"
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake-test-key",
+                                     "GEMINI_MODEL": "gemini-3.8-flash"}):
+            with patch("ai.server.requests.post", return_value=Failure()) as send:
+                with patch("ai.server.time.sleep"):
+                    with self.assertRaises(GeminiAPIError) as error:
+                        ask_ai({"reason": "test"}, "Farm.lua", "return true")
+        self.assertEqual(error.exception.code, "gemini_unavailable")
+        self.assertEqual(send.call_count, 3)
+        self.assertNotIn("private response", str(error.exception))
+
     def test_default_model_and_disallow_external_model_url(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(gemini_model(), "gemini-3.8-flash")
