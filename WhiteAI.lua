@@ -14,6 +14,7 @@ local _dedupe = {}
 local _sending = false
 local _lastJobId = nil
 local _proposalUrl = nil
+local _jobHistory = {} -- Last 5 local job outcomes only; no secrets.
 local _ingestKey = ""
 local _lastStatus = "Local diagnostics ready"
 local _questLast = nil
@@ -55,10 +56,29 @@ local function snapshot()
     if _log and type(_log.GetEntries) == "function" then
         local ok, entries = pcall(_log.GetEntries, _log)
         if ok and type(entries) == "table" then
-            for i = math.max(1, #entries - 9), #entries do
-                if entries[i] and entries[i].Module ~= "WhiteAI" then
-                    recent[#recent + 1] = cleanEntry(entries[i])
+            local positions, included = {}, {}
+            -- Retain up to 3 recent warnings/errors even when INFO messages
+            -- would otherwise drown out the quest/dialogue failure.
+            for i = #entries, math.max(1, #entries - 59), -1 do
+                local entry = entries[i]
+                if entry and entry.Module ~= "WhiteAI"
+                    and (entry.Level == "WARN" or entry.Level == "ERROR") then
+                    positions[#positions + 1] = i
+                    included[i] = true
+                    if #positions >= 3 then break end
                 end
+            end
+            for i = #entries, 1, -1 do
+                if #positions >= 10 then break end
+                local entry = entries[i]
+                if entry and entry.Module ~= "WhiteAI" and not included[i] then
+                    positions[#positions + 1] = i
+                    included[i] = true
+                end
+            end
+            table.sort(positions)
+            for _, i in ipairs(positions) do
+                recent[#recent + 1] = cleanEntry(entries[i])
             end
         end
     end
@@ -72,6 +92,8 @@ local function snapshot()
         combat_running = combatRunning,
         quest_enabled = _config and _config:Get("QuestFarmEnabled") == true or false,
         npc_enabled = _config and _config:Get("NPCFarmEnabled") == true or false,
+        selected_quest = _config and safeText(_config:Get("SelectedQuest"), 90) or "",
+        auto_choose_quest = _config and _config:Get("AutoChooseQuest") == true or false,
         recent = recent,
     }
 end
@@ -133,6 +155,18 @@ end
 
 -- A POST /reports acknowledgement only means queued. Poll the authenticated
 -- backend until the proposal is saved or a specific analysis error is known.
+local function recordJob(jobId, status, data)
+    local result = {
+        job_id = jobId, status = status,
+        module = safeText(data and data.module or "", 40),
+        diagnosis = safeText(data and data.diagnosis or "", 180),
+        confidence = type(data and data.confidence) == "number" and data.confidence or nil,
+        proposal_url = data and data.proposal_url or nil,
+    }
+    table.insert(_jobHistory, 1, result)
+    while #_jobHistory > 5 do table.remove(_jobHistory) end
+end
+
 local function watchJob(endpoint, key, jobId, token)
     if type(jobId) ~= "string" or not jobId:match("^[0-9a-f]+$") or #jobId ~= 20 then
         _lastStatus = "Report accepted, but backend did not return a valid job ID"
@@ -164,11 +198,17 @@ local function watchJob(endpoint, key, jobId, token)
                             _proposalUrl = type(payload.proposal_url) == "string"
                                 and payload.proposal_url or nil
                             _lastStatus = "AI analysis complete! Proposal saved in GitHub dev branch."
+                            recordJob(jobId, "proposal_ready", payload)
+                            return
+                        elseif payload.status == "no_incident" then
+                            _lastStatus = "No recent issues; Gemini call skipped to save free quota."
+                            recordJob(jobId, "no_incident", payload)
                             return
                         elseif payload.status == "failed" then
                             local reasonCode = type(payload.error_code) == "string"
                                 and payload.error_code or payload.error
                             _lastStatus = "AI analysis failed: " .. safeText(reasonCode, 80)
+                            recordJob(jobId, "failed", { diagnosis = _lastStatus })
                             return
                         elseif type(payload.status) == "string" then
                             _lastStatus = "AI job " .. safeText(payload.status, 40)
@@ -195,6 +235,7 @@ function WhiteAI:GetStatus()
         sending = _sending,
         job_id = _lastJobId,
         proposal_url = _proposalUrl,
+        jobs = _jobHistory,
     }
 end
 
@@ -356,6 +397,7 @@ function WhiteAI:Destroy()
     _sending = false
     _lastJobId = nil
     _proposalUrl = nil
+    _jobHistory = {}
     _ingestKey = ""
 end
 
