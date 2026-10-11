@@ -92,9 +92,26 @@ def clean_report(payload: Any) -> dict[str, Any]:
             "quest_enabled": context.get("quest_enabled") is True,
             "npc_enabled": context.get("npc_enabled") is True,
             "combat_running": context.get("combat_running") is True,
+            "selected_quest": scrub(context.get("selected_quest", ""), 90),
+            "auto_choose_quest": context.get("auto_choose_quest") is True,
             "recent": recent_logs,
         },
     }
+
+def report_needs_ai(report: dict[str, Any]) -> bool:
+    """Avoid paying a Gemini quota for empty manual diagnostics.
+
+    Explicit runtime incidents always pass. Manual testing also passes if
+    Quest/NPC Farm is enabled or if a recent WARN/ERROR exists.
+    """
+    if report.get("category") != "manual_diagnostic":
+        return True
+    context = report.get("context") or {}
+    if context.get("quest_enabled") or context.get("npc_enabled"):
+        return True
+    return any(entry.get("level", "").upper() in ("WARN", "ERROR")
+               for entry in context.get("recent", []))
+
 
 def allowed_module_path(report: dict[str, Any]) -> str:
     # Read only one known module. Report cannot supply arbitrary repository paths.
@@ -311,8 +328,16 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
         diff = validate_proposal(ai, path, source)
         output = proposal_markdown(report, path, source_sha, ai, diff)
         url = publish_review_artifact(output, job_id)
-        _jobs[job_id] = {"status": "proposal_ready", "proposal_url": url,
-                         "patch_valid": bool(diff)}
+        conf = ai.get("confidence", 0)
+        if type(conf) not in (float, int):
+            conf = 0
+        conf = max(0.0, min(1.0, float(conf)))
+        _jobs[job_id] = {
+            "status": "proposal_ready", "proposal_url": url,
+            "patch_valid": bool(diff), "module": path,
+            "diagnosis": scrub(ai.get("summary", ""), 240),
+            "confidence": round(conf, 2),
+        }
         print("[WhiteAI backend] proposal saved", job_id, flush=True)
     except GeminiAPIError as exc:
         # Only whitelisted codes/hints; never log external response bodies.
@@ -369,6 +394,13 @@ async def accept_report(request: Request, background: BackgroundTasks):
     ip = request.client.host if request.client else "unknown"
     throttle(hashlib.sha256(ip.encode()).hexdigest())
     job_id = secrets.token_hex(10)
+    if not report_needs_ai(report):
+        _jobs[job_id] = {
+            "status": "no_incident",
+            "message": "No recent WARN/ERROR with farming disabled; Gemini call skipped.",
+        }
+        return {"status": "no_incident", "job_id": job_id,
+                "message": "No actionable incident; no Gemini quota used"}
     _jobs[job_id] = {"status": "queued"}
     background.add_task(run_job, job_id, report)
     return {"status": "queued", "job_id": job_id,
