@@ -167,8 +167,8 @@ class StandDialogueTests(unittest.TestCase):
         self.run_lua('''
         onActivate=function() page("Option1","Confirm") end
         assert(farm:Start()); advance(0.4); farm:Stop()
-        local count=#logs; advance(30)
-        assert(#logs==count and presses==0 and activations==1)
+        local count, inputCount=#logs, presses; advance(30)
+        assert(#logs==count and presses==inputCount and activations==1)
         closeGui(); assert(not farm:Start())
         ''')
 
@@ -215,8 +215,8 @@ class StandDialogueTests(unittest.TestCase):
     def test_mode_enabled_during_dialogue_cancels(self):
         self.run_lua('''
         onActivate=function() page("Option1","Use") end
-        assert(farm:Start()); advance(0.4); values.QuestFarmEnabled=true; advance(10)
-        assert(presses==0 and activations==1 and not farm:IsRunning())
+        assert(farm:Start()); advance(0.4); local inputCount=presses; values.QuestFarmEnabled=true; advance(10)
+        assert(presses==inputCount and activations==1 and not farm:IsRunning())
         ''')
 
     def test_skin_read_timeout_preserves_stand(self):
@@ -257,6 +257,135 @@ class StandDialogueTests(unittest.TestCase):
         self.run_lua('''
         assert(farm:Start()); after(0.1,function() pity.Value=20 end); advance(3)
         assert(activations==0)
+        ''')
+
+    def enable_fast(self):
+        self.run_lua(r'''
+        ups, signals, mutations, signalCalls = {}, {}, {}, 0
+        typeof=function(v) return type(v)=="table" and v.class and "Instance" or type(v) end
+        getconnections=function(signal) return signals[signal] or {} end
+        getupvalue=function(fn,index) return ups[fn] and ups[fn][index] end
+        setupvalue=function(fn,index,value)
+            table.insert(mutations,{fn=fn,index=index,value=value})
+            ups[fn][index]=value
+            if index==1 and value=="Option1" and onSelect then
+                after(selectDelay or 0.05,function()
+                    if ups[fn][1]=="Option1" then ups[fn][1]=""; onSelect() end
+                end)
+            end
+        end
+        function fastPage(kind,text,initial)
+            local b,gui
+            if initial then b,gui=page(kind,text) else b,gui=nextPage(kind,text) end
+            b.MouseButton1Click={}
+            local fn=function() signalCalls=signalCalls+1; if onSignal then onSignal(kind) end end
+            ups[fn]={[1]="",[2]=b.Parent}
+            signals[b.MouseButton1Click]={{Function=fn,Fire=function() fn() end}}
+            lastFn,lastButton=fn,b
+            return b,gui
+        end
+        ''')
+
+    def test_fast_option_continue_without_virtual_mouse(self):
+        self.enable_fast()
+        self.run_lua('''
+        selected=0
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function()
+            selected=selected+1
+            if selected==1 then fastPage("ClickContinue","Continue")
+            else stand.Value="Aerosmith"; closeGui() end
+        end
+        onSignal=function(kind) assert(kind=="ClickContinue"); fastPage("Option1","Confirm") end
+        assert(farm:Start()); advance(8)
+        assert(presses==0 and selected==2 and signalCalls==1 and activations==1)
+        assert(farm:GetStatus().rolls==1)
+        ''')
+
+    def test_fast_roka_then_arrow(self):
+        self.enable_fast()
+        self.run_lua('''
+        stand.Value="Star Platinum"
+        onActivate=function(name) item=name; fastPage("Option1",name,true) end
+        onSelect=function() stand.Value=item=="Rokakaka" and "None" or "Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(8)
+        assert(presses==0 and activations==2 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_fast_stop_restores_gui_and_selection(self):
+        self.enable_fast()
+        self.run_lua('''
+        selectDelay=1
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function() error("selection should be cancelled") end
+        assert(farm:Start()); advance(0.4)
+        local gui=pg.children[1]; assert(not gui.Enabled and ups[lastFn][1]=="Option1")
+        farm:Stop(); assert(gui.Enabled and ups[lastFn][1]=="")
+        local count=#logs; advance(10); assert(#logs==count and activations==1 and signalCalls==0)
+        ''')
+
+    def test_mismatched_callback_never_modified(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("Option1","Use?",true); ups[lastFn][2]=node("Other","Frame") end
+        onSignal=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(6)
+        assert(#mutations==0 and presses==0 and signalCalls==1 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_standard_debug_upvalue_return_shape(self):
+        self.enable_fast()
+        self.run_lua('''
+        getupvalue=function(fn,index) return "upvalue"..index, ups[fn][index] end
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(6); assert(presses==0 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_pending_callback_never_overlaps_or_logs_after_stop(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("ClickContinue","Continue",true) end
+        onSignal=function() task.wait(30) end
+        assert(farm:Start()); advance(1); local gui=pg.children[1]
+        assert(not gui.Enabled and signalCalls==1)
+        farm:Stop(); assert(gui.Enabled); local count=#logs
+        advance(25); assert(signalCalls==1 and #logs==count and not farm:Start())
+        advance(10); assert(signalCalls==1 and #logs==count and activations==1)
+        ''')
+
+    def test_stalled_fast_selection_restored_on_failure(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("Option1","Stuck",true) end
+        assert(farm:Start()); advance(8)
+        assert(not farm:IsRunning() and pg.children[1].Enabled and ups[lastFn][1]=="")
+        assert(signalCalls==1 and activations==1 and presses==0)
+        ''')
+
+    def test_no_fast_api_uses_bound_signal_before_mouse(self):
+        self.enable_fast()
+        self.run_lua('''
+        setupvalue=nil
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSignal=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(6)
+        assert(#mutations==0 and signalCalls==1 and presses==0 and farm:GetStatus().rolls==1)
+        ''')
+
+    def test_hidden_continue_fast_skips_animated_text(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function()
+            fastPage("ClickContinue","Animated text",true); lastButton.Visible=false
+            for i=1,30 do after(i*0.1,function()
+                local gui=pg.children[1]
+                if gui then gui:FindFirstChild("Message",true).Text=tostring(now) end
+            end) end
+        end
+        onSignal=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(2)
+        assert(signalCalls==1 and presses==0 and farm:GetStatus().rolls==1)
         ''')
 
 if __name__ == '__main__':

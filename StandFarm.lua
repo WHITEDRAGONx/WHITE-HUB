@@ -11,6 +11,9 @@ local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
 local interactionBusy, pending = false, nil
+local hiddenDialogues, selectedCallbacks = {}, {}
+local callbackInFlight = 0
+local cleanupDialogue
 
 local function log(level, message)
     status = message
@@ -114,7 +117,8 @@ local function visible(object, gui)
     local node = object
     while node do
         if node:IsA("GuiObject") and not node.Visible then return false end
-        if node:IsA("ScreenGui") and not node.Enabled then return false end
+        if node:IsA("ScreenGui") and not node.Enabled
+            and hiddenDialogues[node] == nil then return false end
         if node == gui then return true end
         node = node.Parent
     end
@@ -147,10 +151,32 @@ local function dialogueButton(gui)
             end
         end
     end
-    return resolveButton(gui:FindFirstChild("ClickContinue", true), gui), "ClickContinue"
+    local continueButton = gui:FindFirstChild("ClickContinue", true)
+    local ready = resolveButton(continueButton, gui)
+    if ready then return ready, "ClickContinue" end
+    -- The Quest fast path also advances a hidden Continue during text animation.
+    -- Accept it only when its own signal already has an actual bound handler.
+    if continueButton and continueButton:IsA("GuiButton") and type(getconnections) == "function" then
+        local ok, connections = pcall(getconnections, continueButton.MouseButton1Click)
+        if ok and type(connections) == "table" then
+            for _, connection in pairs(connections) do
+                local fire, fn
+                pcall(function() fire, fn = connection.Fire, connection.Function end)
+                if type(fire) == "function" or type(fn) == "function" then
+                    return continueButton, "ClickContinue"
+                end
+            end
+        end
+    end
+    return nil, "ClickContinue"
 end
 
 local function stageSignature(gui, kind)
+    if kind == "ClickContinue" then
+        -- Animated body text is not a new Continue page; do not wait for its
+        -- typewriter to settle before using the already-bound fast callback.
+        return kind .. "|" .. tostring(gui:FindFirstChild("ClickContinue", true))
+    end
     local parts = {kind}
     for _, object in ipairs(gui:GetDescendants()) do
         if (object:IsA("TextLabel") or object:IsA("TextButton")) and visible(object, gui) then
@@ -163,7 +189,7 @@ end
 
 local function clickButton(token, button, gui)
     if not active(token) or not visible(button, gui) then return false end
-    -- Only visible input. Do not inspect or rewrite game callback upvalues.
+    -- Rendered input fallback when fast dialogue APIs are unavailable.
     local ok = pcall(function()
         local p, size = button.AbsolutePosition, button.AbsoluteSize
         local x, y = p.X + size.X / 2, p.Y + size.Y / 2
@@ -172,6 +198,143 @@ local function clickButton(token, button, gui)
         VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
     end)
     return ok
+end
+
+-- Adapted from the current Quest fast-dialogue path, scoped to the owned
+-- consumable GUI. No GC scans, constant patches or Merchant state sharing.
+local function indexedUpvalue(reader, fn, index)
+    local values = table.pack(pcall(reader, fn, index))
+    if not values[1] then return false end
+    if values.n >= 3 and type(values[2]) == "string" then
+        return true, values[3] -- standard debug API: name, value
+    end
+    if values.n >= 2 then return true, values[2] end -- executor API: value
+    return false
+end
+
+local function hideOwnedDialogue(gui)
+    if not gui or dialogueGui() ~= gui or not gui:IsA("ScreenGui") then return end
+    if hiddenDialogues[gui] == nil then hiddenDialogues[gui] = gui.Enabled end
+    pcall(function() gui.Enabled = false end)
+end
+
+cleanupDialogue = function(restoreSelection)
+    if restoreSelection then
+        for fn, record in pairs(selectedCallbacks) do
+            if dialogueGui() == record.gui then
+                local okAnchor, anchor = indexedUpvalue(record.reader, fn, 2)
+                local okValue, value = indexedUpvalue(record.reader, fn, 1)
+                if okAnchor and anchor == record.anchor and okValue and value == "Option1" then
+                    pcall(record.setter, fn, 1, record.original)
+                end
+            end
+        end
+    end
+    selectedCallbacks = {}
+    for gui, enabled in pairs(hiddenDialogues) do
+        pcall(function() gui.Enabled = enabled end)
+    end
+    hiddenDialogues = {}
+end
+
+local function selectFastOption(token, button, gui)
+    local reader, setter
+    if type(getupvalue) == "function" and type(setupvalue) == "function" then
+        reader, setter = getupvalue, setupvalue
+    elseif debug and type(debug.getupvalue) == "function" and type(debug.setupvalue) == "function" then
+        reader, setter = debug.getupvalue, debug.setupvalue
+    end
+    if type(getconnections) ~= "function" or not reader or not setter then
+        return false, "fast-option-unsupported"
+    end
+    local ok, connections = pcall(getconnections, button.MouseButton1Click)
+    if not ok or type(connections) ~= "table" then return false, "no-connections" end
+    for _, connection in pairs(connections) do
+        local fn
+        pcall(function() fn = connection.Function end)
+        if type(fn) == "function" then
+            local okAnchor, anchor = indexedUpvalue(reader, fn, 2)
+            local okValue, value = indexedUpvalue(reader, fn, 1)
+            -- Require the proven U[2] option container binding BEFORE writing.
+            if okAnchor and typeof(anchor) == "Instance"
+                and anchor == button.Parent and anchor.Name == "Option1"
+                and okValue and (value == nil or type(value) == "string") then
+                if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
+                if not selectedCallbacks[fn] then
+                    selectedCallbacks[fn] = {gui = gui, anchor = anchor, reader = reader,
+                        setter = setter, original = value}
+                end
+                local written = pcall(setter, fn, 1, "Option1")
+                local verified, selected = indexedUpvalue(reader, fn, 1)
+                if written and verified and selected == "Option1" then
+                    if not active(token) then cleanupDialogue(true); return false, "Stopped" end
+                    hideOwnedDialogue(gui)
+                    return true, "fast-option"
+                end
+            end
+        end
+    end
+    return false, "callback-mismatch"
+end
+
+local function dispatchBoundSignal(token, button, gui)
+    if callbackInFlight > 0 then return false, "callback-pending" end
+    local signal = button.MouseButton1Click
+    local call, method
+    if type(getconnections) == "function" then
+        local ok, connections = pcall(getconnections, signal)
+        if ok and type(connections) == "table" then
+            for _, connection in pairs(connections) do
+                local fire, fn
+                pcall(function() fire, fn = connection.Fire, connection.Function end)
+                if type(fire) == "function" then
+                    call, method = function() connection:Fire() end, "connection-fire"
+                elseif type(fn) == "function" then
+                    call, method = fn, "bound-callback"
+                end
+                if call then break end
+            end
+        end
+    end
+    if not call and type(firesignal) == "function" then
+        call, method = function() firesignal(signal) end, "firesignal"
+    end
+    if not call then return false, "signal-unsupported" end
+    if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
+    hideOwnedDialogue(gui)
+    callbackInFlight = callbackInFlight + 1
+    -- A game handler may yield. Stop must not wait for it, and a second
+    -- handler must not overlap while it is still in flight.
+    task.spawn(function()
+        if active(token) and dialogueGui() == gui then pcall(call) end
+        callbackInFlight = callbackInFlight - 1
+    end)
+    return true, method
+end
+
+local function advanceDialogue(token, button, gui, kind, attempt)
+    if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
+    if not visible(button, gui) then
+        if kind == "ClickContinue" then return dispatchBoundSignal(token, button, gui) end
+        return false, "hidden-option"
+    end
+    if callbackInFlight > 0 then return false, "callback-pending" end
+    local reason = "continue"
+    if kind == "Option1" and attempt == 0 then
+        local ok
+        ok, reason = selectFastOption(token, button, gui)
+        if ok then return true, reason end
+    end
+    -- Quest TEST ALL route: if selection did not advance, dispatch ONLY
+    -- this button's actual connected handler, not an unrelated game closure.
+    local ok, method = dispatchBoundSignal(token, button, gui)
+    if ok then return true, method end
+    if not active(token) or method == "callback-pending" then return false, method end
+    cleanupDialogue(true) -- real input requires a rendered ScreenGui
+    if clickButton(token, button, gui) then
+        return true, "visible-fallback:" .. reason .. ":" .. method
+    end
+    return false, "input-unavailable:" .. reason .. ":" .. method
 end
 
 local function resultConfirmed(name)
@@ -216,6 +379,7 @@ local function interact(token, name)
     interactionBusy = true
     pending = {name = name}
     local function finish(ok, reason)
+        cleanupDialogue(not ok)
         interactionBusy = false
         -- Keep an uncertain consumption locked even after Stop/restart.
         clearConfirmedPending()
@@ -226,7 +390,7 @@ local function interact(token, name)
     if not activated then return finish(false, "Could not activate " .. name .. "; result pending") end
     local openedAt = os.clock()
     local ownedGui, button, signature, stableSince
-    local lastClick, clicks = 0, 0
+    local lastClick, clicks, lastSignature = 0, 0, nil
     local stageAttempts = {}
     while active(token) and os.clock() - openedAt < 22 do
         if resultConfirmed(name) then
@@ -247,18 +411,22 @@ local function interact(token, name)
                 if nextSignature ~= signature or nextButton ~= button then
                     signature, button, stableSince = nextSignature, nextButton, os.clock()
                 end
-                if button and os.clock() - stableSince >= 0.3
-                    and os.clock() - lastClick >= 0.8 then
+                if button and os.clock() - stableSince >= 0.1
+                    and callbackInFlight == 0
+                    and (signature ~= lastSignature or os.clock() - lastClick >= 0.8) then
                     local attempts = stageAttempts[signature] or 0
                     if attempts >= 2 or clicks >= 12 then
                         return finish(false, name .. " dialogue stalled; clicks=" .. clicks .. "; result pending")
                     end
-                    if not clickButton(token, button, gui) then
-                        return finish(false, name .. " visible input unavailable; result pending")
+                    local advanced, method = advanceDialogue(token, button, gui, kind, attempts)
+                    if not advanced then
+                        if not active(token) then return finish(false, "Stopped") end
+                        return finish(false, name .. " dialogue " .. method .. "; result pending")
                     end
                     if not active(token) then return finish(false, "Stopped") end
                     clicks, stageAttempts[signature], lastClick = clicks + 1, attempts + 1, os.clock()
-                    log("INFO", name .. " dialogue input " .. kind .. " #" .. clicks .. "; result pending")
+                    lastSignature = signature
+                    log("INFO", name .. " dialogue " .. method .. " " .. kind .. " #" .. clicks .. "; result pending")
                 end
             elseif not ownedGui and os.clock() - openedAt >= 6 then
                 return finish(false, name .. " dialogue not detected; no further items consumed")
@@ -383,9 +551,12 @@ local function loop(token)
 end
 
 function StandFarm:Init(modules)
+    cleanupDialogue(true)
     runToken = runToken + 1
     config, inventory, logger = modules.Config, modules.Inventory, modules.RuntimeLog
     running, rolls, stoppedOn = false, 0, nil
+    log("INFO", "Build SF-FAST-20261011-R2; experimental fast dialogue, Roblox validation pending")
+    status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
     if config:Get("StandFarmEnabled") == true then
@@ -395,7 +566,9 @@ end
 
 function StandFarm:Start()
     clearConfirmedPending()
-    if running or interactionBusy then return false, "Stand Farm already running or cancelling" end
+    if running or interactionBusy or callbackInFlight > 0 then
+        return false, "Stand Farm already running or cancelling callbacks"
+    end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
     if dialogueGui() then return false, "Close existing dialogue before starting Stand Farm" end
     local selected = config and config:Get("StandFarmTarget")
@@ -426,7 +599,7 @@ function StandFarm:Start()
     config:Set("StandFarmEnabled", true)
     task.spawn(function()
         local ok, err = xpcall(function() loop(token) end, debug.traceback)
-        if not ok then interactionBusy = false end
+        if not ok then cleanupDialogue(true); interactionBusy = false end
         if not ok and runToken == token then
             running = false
             config:Set("StandFarmEnabled", false)
@@ -439,6 +612,7 @@ end
 function StandFarm:Stop()
     runToken = runToken + 1
     running = false
+    cleanupDialogue(true)
     if config then config:Set("StandFarmEnabled", false) end
     stoppedOn = "Stopped by user"
     log("INFO", "Stand Farm stopped by user")
@@ -457,6 +631,7 @@ end
 function StandFarm:Destroy()
     runToken = runToken + 1
     running = false
+    cleanupDialogue(true)
 end
 
 return StandFarm
