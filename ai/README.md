@@ -1,70 +1,72 @@
-# WHITE AI V1 — Backend experimental
+# WHITE AI V1 — Gemini API, branch experimental
 
-Este diretório contém o backend para **diagnósticos e propostas de patches** do WHITE HUB V3.
+Este backend de diagnóstico do WHITE HUB V3 mantém o serviço existente
+[white-ai-v1 no Render](https://dashboard.render.com/web/srv-db527jflot8c73df8mr0)
+e o repositório WHITEDRAGONx/WHITE-HUB-V3 na branch
+`dev/2026-10-10-autosell-compat`.
 
-## O que já funciona no código
+## Provedor gratuito
 
-- A aba **AI DEBUG** e o módulo `WhiteAI.lua` observam logs do RuntimeLog e possível estagnação de quests.
-- O sistema local não faz varreduras `getgc`, não modifica combat, Merchant ou inventário.
-- Envio externo **desativado por padrão** até o usuário escolher ativá-lo.
-- O backend recebe relatórios curtos autenticados, lê um módulo conhecido na branch dev, solicita análise via OpenAI API e valida substituições exatas.
-- Caso a sugestão seja válida, salva um **diff não aplicado** em `ai/proposals/` na branch `dev/2026-10-10-autosell-compat`.
-- Mesmo em caso de sucesso **não aplica código-fonte, não executa o patch, não modifica `main` e não faz merge**.
+A análise usa **Google Gemini API** pelo endpoint REST generateContent.
+O modelo padrão é `gemini-3.8-flash`, com nível gratuito sujeito a cotas.
+Não há fallback automático para uma API paga. A antiga OpenAI não é usada.
 
-## Hospedar no Render (mais fácil)
+No plano gratuito do Google, as solicitações podem ser utilizadas para
+melhorar produtos. Não envie segredos ou informações privadas nos relatórios.
 
-O repositório já inclui o arquivo **`render.yaml` na raiz da branch dev**, preparado para o Render Blueprint. Ele instala dependências, executa os testes básicos e inicia `ai.server:app` com HTTPS, sem chaves hardcoded.
+## Configurar o Render existente
 
-1. No [Render Dashboard](https://dashboard.render.com/), escolha **New → Blueprint**, conecte o GitHub, selecione `WHITEDRAGONx/WHITE-HUB-V3` na branch `dev/2026-10-10-autosell-compat` e o `render.yaml`.
-2. Preencha os segredos solicitados no Render: `OPENAI_API_KEY`, `OPENAI_MODEL` (por exemplo `gpt-6-sol` caso habilitado na conta), `GITHUB_TOKEN` e `WHITEAI_INGEST_KEY` (12–128 caracteres aleatórios).
-3. Aguarde o deploy terminar e abra o endereço do tipo `https://white-ai-v1.onrender.com/health`. Deve retornar status `ok`.
-4. Na aba AI DEBUG do Roblox, configure `https://SEU-SERVICO.onrender.com/reports`, informe exatamente a mesma `WHITEAI_INGEST_KEY` apenas para essa sessão, habilite envio e envie um relatório de teste.
-5. Acompanhe a pasta `ai/proposals/` da branch dev para ver um novo relatório/recomendação; isso não modifica arquivos de jogo.
+1. Gere uma chave para um projeto **Free** em https://aistudio.google.com/apikey .
+2. No Render, em **white-ai-v1 → Environment**, adicione a variável secreta
+   `GEMINI_API_KEY`. Cole a chave **somente no Render**, nunca no GitHub,
+   Lua ou chat.
+3. Opcional: `GEMINI_MODEL=gemini-3.8-flash`. Esse já é o padrão.
+4. Mantenha as variáveis existentes `GITHUB_TOKEN` e
+   `WHITEAI_INGEST_KEY`. As variáveis antigas da OpenAI não são mais
+   necessárias; podem ser removidas no painel depois.
+5. O serviço está com auto-deploy desligado. Use **Manual Deploy** para
+   alterações de código, confirme status `live` e execute
+   GET https://white-ai-v1.onrender.com/health .
+6. `configured: true` apenas confirma a presença das configurações,
+   não a validade da chave ou disponibilidade de cota.
 
-**Atenção:** Render no plano Free pode entrar em modo de hibernação por inatividade, e a primeira requisição após dormir pode demorar. O plano grátis também possui limites de recursos. `autoDeployTrigger: off` impede que novas propostas no GitHub reiniciem o servidor automaticamente. Para atualizar o backend manualmente, use **Manual Deploy** no serviço Render.
+## Teste ponta a ponta
 
-**Segurança:** não publique tokens em Issues, chats, arquivos Lua ou GitHub. Use uma credencial GitHub fine-grained limitada apenas ao repositório, com expiração curta e Contents read/write, e mantenha proteção de branch para `main`. A aplicação grava somente Markdown em `ai/proposals/`, mas o token de escrita ainda requer proteção externa contra comprometimento. Os relatórios devem ser revisados antes de qualquer correção.
+Use `DevMain.lua` da branch experimental no YBA. Na aba AI DEBUG,
+configure `https://white-ai-v1.onrender.com/reports`, a chave de
+ingestão **somente durante a sessão**, habilite o envio e envie um
+relatório. O POST devolve HTTP 202 e um `job_id`; o Lua acompanha
+GET /jobs/{job_id} para verificar `analyzing`, `saving_proposal`,
+`proposal_ready` ou `failed`.
 
-## O que ainda é necessário
+Somente propostas Markdown de revisão são gravadas em `ai/proposals/`
+na branch de desenvolvimento. Nenhum patch é aplicado nem executado
+automaticamente. Nunca altera `main` nem o módulo de venda
+`Inventory.lua`. Combate, Farm, UI e outras funcionalidades de jogo
+permanecem inalteradas pela migração de provedor.
 
-**O servidor não foi implantado nem conectado a uma conta/API.** Para ativar a análise realmente automática, é necessário executar este backend numa máquina/serviço com HTTPS acessível pelo cliente.
+O servidor limita acesso por chave, taxa e tamanho, restringe os
+arquivos e caminhos de escrita, e sanitiza os registros. A análise
+continua precisando de revisão e teste humano antes de qualquer alteração.
 
-1. Instale Python 3.11+ e execute `pip install -r ai/requirements.txt`.
-2. Configure as variáveis de ambiente **no servidor**, nunca no script Roblox nem em arquivos públicos:
+## Erros comuns
 
-   - `OPENAI_API_KEY`: chave da API da OpenAI; assinatura do ChatGPT Plus **não inclui** créditos de API.
-   - `OPENAI_MODEL`: modelo disponível na sua conta da API. Escolha conforme custo e capacidade.
-   - `GITHUB_TOKEN`: token GitHub **restrito ao repositório WHITE-HUB-V3**, com permissão Contents read/write.
-   - `WHITEAI_INGEST_KEY`: segredo aleatório próprio com 12–128 caracteres usado exclusivamente para autenticar relatórios recebidos.
+- `503`: variável `GEMINI_API_KEY` ausente no Render.
+- `gemini_auth_error`: chave ou permissão inválida.
+- `gemini_rate_limited`: cota gratuita ou limite de taxa atingido.
+- `gemini_model_unavailable`: falta acesso ao modelo escolhido.
+- `gemini_bad_request`: requisição ou JSON incompatível.
+- `failed`: conferir o erro sanitizado no Render, sem imprimir segredos.
 
-3. Inicie `uvicorn ai.server:app --host 127.0.0.1 --port 8765`.
-4. Coloque o serviço atrás de um proxy **HTTPS** com limitação de taxa, logs e controles de acesso. Não exponha diretamente o servidor de desenvolvimento na internet.
-5. Na aba AI DEBUG do WHITE HUB, configure `https://seu-dominio/reports`, insira a chave de ingestão **somente para a sessão atual**, e habilite **Send to AI server**.
-6. Teste com **COPY SANITIZED DIAGNOSTIC** primeiro, depois com **SEND REPORT TO AI BACKEND**. Uma ocorrência de erro poderá gerar proposta na pasta `ai/proposals`.
-
-Veja `GET /health` para verificar o serviço, e `GET /jobs/{id}` (com header `X-WhiteAI-Key`) para consultar um diagnóstico específico. Em caso de reinício os status em memória são perdidos; as propostas já gravadas no GitHub permanecem.
-
-## Arquitetura e limites de segurança
-
-```
-WhiteAI.lua -> HTTPS POST /reports -> AI backend
-                                   |-> GitHub API READ (dev)
-                                   |-> OpenAI Responses API
-                                   \-> GitHub API WRITE (ai/proposals/*.md, dev ONLY)
-```
-
-- A única escrita automática permitida no GitHub pelo backend é `ai/proposals/*.md` na branch experimental fixa.
-- `Inventory.lua`, `Main.lua`, `DevMain.lua` e `Config.lua` não podem receber propostas de substituição automáticas.
-- O backend exige chave para ingressos, limita frequência e volume das requisições e reduz o conteúdo dos logs.
-- Nunca coloque chaves OpenAI/GitHub no `WhiteAI.lua`. O token temporário de ingestão é menos privilegiado, mas ainda deve ser protegido.
-- Logs e código fornecidos à IA são tratados como dados não confiáveis; nenhuma proposta é automaticamente executada.
-- A IA pode diagnosticar incorretamente. Toda sugestão precisa de revisão humana, comparação com a versão atual, validação Luau e testes no Roblox.
-- Se o endpoint estiver desativado/indisponível, o modo local continua disponível para coleta e cópia de relatórios.
-
-### Testes locais
+## Testes locais
 
 ```bash
+pip install -r ai/requirements.txt
+python -m compileall -q ai
 python -m unittest ai.test_server
 ```
 
-Testa validação de propostas e sanitização sem chamar GitHub/OpenAI. **Não é um teste funcional dentro do YBA.**
+Esses testes simulam as chamadas externas sem gastar cota do Gemini.
+Os estados dos trabalhos ficam somente na memória do Render. Reiniciar
+o serviço pode invalidar um `job_id`, mas propostas já gravadas no
+GitHub permanecem. O Render Free pode hibernar quando inativo.
