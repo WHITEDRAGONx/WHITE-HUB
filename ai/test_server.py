@@ -241,6 +241,95 @@ class WhiteAITests(unittest.TestCase):
         empty["context"]["recent"][0]["level"] = "WARN"
         self.assertTrue(report_needs_ai(empty))
 
+    def test_idle_manual_report_ignores_interrupted_target_locks_only(self):
+        report = clean_report({
+            "category": "manual_diagnostic", "module": "General",
+            "reason": "Manual investigation requested",
+            "context": {
+                "quest_enabled": False, "npc_enabled": False,
+                "recent": [
+                    {"module": "CombatFarm", "level": "WARN",
+                     "message": "[CombatFarm][XenonLock] Target lock ended without confirmed death: Vampire | lastHp=34"},
+                    {"module": "CombatFarm", "level": "WARN",
+                     "message": "[CombatFarm][XenonLock] Target lock ended without confirmed death: Jotaro | lastHp=339"},
+                    {"module": "Farm", "level": "INFO", "message": "Item detected"},
+                ],
+            },
+        })
+        self.assertFalse(report_needs_ai(report))
+        report["context"]["quest_enabled"] = True
+        self.assertTrue(report_needs_ai(report))
+        report["context"]["quest_enabled"] = False
+        report["context"]["recent"].append(
+            {"module": "CombatFarm", "level": "ERROR", "message": "Unexpected farm failure"})
+        self.assertTrue(report_needs_ai(report))
+
+    def test_primary_503_then_readtimeout_uses_free_fallback(self):
+        from requests.exceptions import ReadTimeout
+
+        class Retryable:
+            status_code = 503
+
+        class Success:
+            status_code = 200
+
+            def json(self):
+                return {"candidates": [{"content": {"parts": [{
+                    "text": json.dumps({
+                        "summary": "Need more evidence", "hypothesis": "Unknown",
+                        "confidence": 0.1, "file": "CombatFarm.lua",
+                        "old_text": "", "new_text": "", "tests": [],
+                    })
+                }]}}]}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "mock",
+                                     "GEMINI_MODEL": "gemini-3.8-flash"}):
+            with patch("ai.server.requests.post",
+                       side_effect=[Retryable(), ReadTimeout("secret-url"), Success()]) as send:
+                with patch("ai.server.time.sleep"):
+                    answer = ask_ai({"reason": "test"}, "CombatFarm.lua", "return true")
+        self.assertEqual(answer["file"], "CombatFarm.lua")
+        self.assertEqual(send.call_count, 3)
+        self.assertIn("gemini-3.5-flash-lite:", send.call_args_list[2].args[0])
+        self.assertEqual(send.call_args_list[0].kwargs["timeout"], (10, 55))
+
+    def test_initial_gemini_timeout_tries_lite_once(self):
+        from requests.exceptions import ReadTimeout
+
+        class Success:
+            status_code = 200
+
+            def json(self):
+                return {"candidates": [{"content": {"parts": [{
+                    "text": json.dumps({
+                        "summary": "Recovered", "hypothesis": "Transient",
+                        "confidence": 0.1, "file": "Farm.lua",
+                        "old_text": "", "new_text": "", "tests": [],
+                    })
+                }]}}]}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "mock",
+                                     "GEMINI_MODEL": "gemini-3.8-flash"}):
+            with patch("ai.server.requests.post",
+                       side_effect=[ReadTimeout("secret-url"), Success()]) as send:
+                result = ask_ai({"reason": "test"}, "Farm.lua", "return true")
+        self.assertEqual(result["summary"], "Recovered")
+        self.assertEqual(send.call_count, 2)
+
+    def test_both_gemini_models_timeout_returns_safe_error(self):
+        from requests.exceptions import ReadTimeout
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "mock",
+                                     "GEMINI_MODEL": "gemini-3.8-flash"}):
+            with patch("ai.server.requests.post",
+                       side_effect=[ReadTimeout("private-primary"), ReadTimeout("private-lite")]) as send:
+                with self.assertRaises(GeminiAPIError) as error:
+                    ask_ai({"reason": "test"}, "Farm.lua", "return true")
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual(error.exception.code, "gemini_timeout")
+        self.assertNotIn("private-primary", str(error.exception))
+        self.assertNotIn("private-lite", str(error.exception))
+
     def test_explicit_quest_incident_always_analyzed(self):
         report = clean_report({
             "category": "quest_stall", "module": "CombatFarm",
