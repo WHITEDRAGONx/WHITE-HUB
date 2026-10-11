@@ -1,3 +1,5 @@
+> ATUALIZAÇÃO: a otimização do Merchant foi retirada após o proprietário relatar piora na venda. Inventory.lua foi restaurado byte a byte de b82831fa3b079068fac1b7df1d46662767f3edec. As mudanças de quests e Stand Farm permanecem. As seções abaixo descrevem a tentativa anterior, não a implementação atual da venda. O log gcTime foi removido no rollback; exporte o Console completo e confira quantidade/dinheiro antes e depois de uma venda comum. Causa real ainda não confirmada por log novo. Foi acrescentado um cenário de opção fora de Options. Os testes Lua/backend deste rollback não puderam ser executados neste ambiente: faltam dependências e a instalação foi interrompida pela aprovação de rede. A restauração foi conferida byte a byte e os arquivos Python passaram em compileall; resultados anteriores não são apresentados como uma nova execução.
+
 # Diálogos de quests e Merchant — melhoria experimental
 
 Baseline dev: b82831fa3b079068fac1b7df1d46662767f3edec. Alterações ainda não validadas no Roblox.

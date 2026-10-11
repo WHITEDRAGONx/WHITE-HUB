@@ -22,7 +22,7 @@ class MerchantLookupTests(unittest.TestCase):
         findOption=findDialogueButtonByOptionName
         ''')
 
-    def test_internal_lookup_skips_unrelated_ui_and_hidden_templates(self):
+    def test_restored_lookup_keeps_continue_and_excludes_hidden_templates(self):
         self.lua.execute('''
         local b,gui=page("Option1","Merchant")
         b.Text="Sell one"
@@ -32,18 +32,26 @@ class MerchantLookupTests(unittest.TestCase):
         node("Template","TextButton",hidden).Text="Hidden"
         local continue=node("ClickContinue","TextButton",gui); continue.Text="Continue"
         for i=1,500 do node("Body"..i,"TextLabel",gui) end
-        function gui:GetDescendants() error("internal lookup must not scan whole GUI") end
         local sig,buttons=signature()
-        assert(#buttons==2 and sig:find("Option1=Sell one",1,true) and sig:find("Option6=Sell all",1,true))
+        assert(#buttons==3 and sig:find("Option1=Sell one",1,true) and sig:find("Option6=Sell all",1,true))
         assert(findOption("Option1")==b and not findOption("Option2"))
-        gui.Enabled=false; assert(#lookup(true)==2)
+        gui.Enabled=false; assert(#lookup()==3)
         ''')
 
     def test_adaptive_lookup_keeps_buttons_outside_options(self):
         self.lua.execute('''
         local b,gui=page("Option1","Merchant"); b.Text="Sell"
         node("ClickContinue","TextButton",gui).Text="Continue"
-        assert(#lookup()==2 and #lookup(true)==1)
+        assert(#lookup()==2 and #lookup(true)==2)
+        ''')
+
+    def test_restored_lookup_finds_option_outside_options_container(self):
+        self.lua.execute('''
+        local b,gui=page("Option1","Merchant"); b.Text="Sell one"
+        local outside=node("Option6","Frame",gui)
+        local sellAll=node("SellAll","TextButton",outside); sellAll.Text="Sell all"
+        assert(findOption("Option6")==sellAll)
+        local sig=signature(); assert(sig:find("Option6=Sell all",1,true))
         ''')
 
     def test_renamed_layout_retains_broad_fallback(self):
@@ -164,7 +172,7 @@ class MerchantFinalRouteTests(unittest.TestCase):
         resume(coroutine.create(function() ok,sold=sell("Gold Coin",{}) end)); advance(2)
         assert(ok and sold==2 and count==1 and restored==1)
         assert(table.concat(selections,",")=="Option1,Option1,Option6")
-        assert(closed==2 and logs[#logs]:find("gcTime=",1,true))
+        assert(closed==2 and logs[#logs]:find("gcScans=",1,true))
         ''')
 
     def test_dialogue_without_inventory_result_is_not_success(self):
