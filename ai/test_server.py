@@ -20,10 +20,34 @@ from ai.test_owner_session import OwnerSessionTests
 class WhiteAITests(unittest.TestCase):
     def test_active_dev_luau_files_parse_without_syntax_errors(self):
         project = Path(__file__).resolve().parents[1]
-        for module in ("CombatFarm.lua", "WhiteAI.lua", "UI.lua"):
+        for module in ("CombatFarm.lua", "WhiteAI.lua", "UI.lua",
+                       "StandFarm.lua", "Config.lua", "DevMain.lua"):
             with self.subTest(module=module):
                 self.assertTrue(check_luau((project / module).read_text(encoding="utf-8")),
                                 f"{module} has syntax errors or unrecognized grammar")
+
+    def test_stand_farm_beta_is_isolated_and_fail_closed(self):
+        src = (Path(__file__).resolve().parents[1] / "StandFarm.lua").read_text(
+            encoding="utf-8")
+        loader = (Path(__file__).resolve().parents[1] / "DevMain.lua").read_text(
+            encoding="utf-8")
+        cfg = (Path(__file__).resolve().parents[1] / "Config.lua").read_text(
+            encoding="utf-8")
+        ui = (Path(__file__).resolve().parents[1] / "UI.lua").read_text(
+            encoding="utf-8")
+        self.assertIn('StandFarm  = {"Init", "Start", "Stop", "GetStatus"}', loader)
+        self.assertIn('StandFarmEnabled = false', cfg)
+        self.assertIn('StandFarmPityLimit = 20', cfg)
+        self.assertIn('function StandFarm:Start()', src)
+        self.assertIn('function StandFarm:Stop()', src)
+        self.assertIn('return false, "Stand skin check unavailable;', src)
+        self.assertIn('if skin ~= "None" and skin ~= "" then', src)
+        self.assertIn('if limit > 0 and pity >= limit then', src)
+        self.assertIn('if not awaitStand(token, "None", 12) then', src)
+        self.assertIn('Stand Farm (BETA)', ui)
+        self.assertNotIn("pastebin.com", src)
+        self.assertNotIn("discord.com/api/webhooks/", src)
+        self.assertNotIn("loadstring", src)
 
     def test_private_admin_requires_separate_secret_and_explicit_enable(self):
         request = SimpleNamespace(headers={"X-WhiteAI-Admin-Key": "x" * 40})
