@@ -8,7 +8,7 @@ services:
     repo: https://github.com/WHITEDRAGONx/WHITE-HUB-V3
     branch: dev/2026-10-10-autosell-compat
     autoDeployTrigger: off
-    buildCommand: pip install -r ai/requirements.txt && python -m compileall -q ai && python -m unittest ai.test_server
+    buildCommand: pip install -r ai/requirements.txt && python -m compileall -q ai && python -m unittest ai.test_server ai.test_owner_session
     startCommand: uvicorn ai.server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
@@ -21,4 +21,10 @@ services:
       - key: GITHUB_TOKEN
         sync: false
       - key: WHITEAI_INGEST_KEY
+        sync: false
+      - key: WHITEAI_ADMIN_KEY
+        sync: false
+      - key: WHITEAI_SESSION_NOT_BEFORE
+        value: "0"
+      - key: WHITEAI_AUTOPATCH_ENABLED
         sync: false

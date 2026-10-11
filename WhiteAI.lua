@@ -20,6 +20,10 @@ local _proposalUrl = nil
 local _jobHistory = {} -- Last 5 local job outcomes only; no secrets.
 local _ingestKey = ""
 local _adminKey = "" -- owner-only, session memory; never persist/print
+local _ownerSession = ""
+local _sessionExpires = 0
+local _pairing = false
+local SESSION_FILE = "WHITE_AI_DEVICE_SESSION.json"
 local _lastStatus = "Local diagnostics ready"
 local _questLast = nil
 local _questChangedAt = 0
@@ -28,6 +32,10 @@ local _lastHealthAlert = 0
 local function now() return os.clock() end
 local function safeText(value, maxLen)
     local s = tostring(value or "")
+    s = s:gsub("wa1%.[%w_.%-]+", "[SESSION]")
+    for _, secret in ipairs({_ingestKey, _adminKey, _ownerSession}) do
+        if #secret > 0 then s = s:gsub(secret:gsub("([^%w])", "%%%1"), "[REDACTED]") end
+    end
     s = s:gsub("https?://[^%s]+", "[URL]")
     s = s:gsub("[%w_.-]+@[%w_.-]+", "[EMAIL]")
     if Player and Player.Name then
@@ -119,15 +127,18 @@ local function validEndpoint(url)
         and not url:find("//", 9, true)
 end
 
+local function sessionHeaders(key)
+    if #_ownerSession > 0 then return { ["X-WhiteAI-Session"] = _ownerSession } end
+    return { ["X-WhiteAI-Key"] = key }
+end
+
 local function transport(url, json, ingestKey, adminKey)
     local requestFn = (syn and syn.request) or http_request or request
         or (http and http.request)
     if type(requestFn) == "function" then
-        local headers = {
-            ["Content-Type"] = "application/json",
-            ["X-WhiteAI-Key"] = ingestKey,
-        }
-        if type(adminKey) == "string" and #adminKey >= 32 then
+        local headers = sessionHeaders(ingestKey)
+        headers["Content-Type"] = "application/json"
+        if #_ownerSession == 0 and type(adminKey) == "string" and #adminKey >= 32 then
             headers["X-WhiteAI-Admin-Key"] = adminKey
         end
         local response = requestFn({
@@ -146,7 +157,12 @@ local function transport(url, json, ingestKey, adminKey)
                     detail = ": " .. safeText(decoded.detail, 110)
                 end
             end
-            return false, "HTTP " .. tostring(code) .. detail
+            if code == 401 and #_ownerSession > 0 then
+                _ownerSession = ""
+                _sessionExpires = 0
+                if type(delfile) == "function" then pcall(delfile, SESSION_FILE) end
+            end
+            return false, "HTTP " .. tostring(code)
         end
         local payload = response and (response.Body or response.body)
         local data = nil
@@ -193,7 +209,7 @@ local function watchJob(endpoint, key, jobId, token)
         if not _running or _epoch ~= token then return end
         local ok, response = pcall(requestFn, {
             Url = jobUrl, Method = "GET",
-            Headers = { ["X-WhiteAI-Key"] = key },
+            Headers = sessionHeaders(key),
         })
         if ok and type(response) == "table" then
             local status = tonumber(response.StatusCode or response.Status)
@@ -246,7 +262,8 @@ function WhiteAI:GetStatus()
         enabled = _config and _config:Get("WhiteAIEnabled") == true or false,
         endpoint_set = _config and validEndpoint(_config:Get("WhiteAIEndpoint")) == true or false,
         ingest_key_set = #_ingestKey > 0,
-        private_owner_session = #_adminKey >= 32,
+        private_owner_session = #_ownerSession > 0,
+        pairing = _pairing,
         incidents = #_history,
         latest = _latest,
         sending = _sending,
@@ -278,7 +295,7 @@ function WhiteAI:Submit(report)
         return false, "Set a valid HTTPS report endpoint first"
     end
 
-    if _ingestKey == "" then
+    if _ingestKey == "" and _ownerSession == "" then
         return false, "Set your report-ingest key for this session"
     end
     _sending = true
@@ -304,7 +321,7 @@ function WhiteAI:Submit(report)
                 _lastStatus = "Diagnostic received, but job tracking is unavailable"
             end
         else
-            _lastStatus = "Delivery failed: " .. safeText(ok and reason or delivered, 150)
+            _lastStatus = "Delivery failed: " .. safeText(ok and reason or "HTTP transport unavailable", 150)
         end
     end)
     return true, "Report queued"
@@ -317,7 +334,7 @@ function WhiteAI:FlushPending()
     local workerEpoch = _epoch
     task.spawn(function()
         while _running and workerEpoch == _epoch and #_pendingAutoReports > 0 do
-            if not _config or _config:Get("WhiteAIEnabled") ~= true or _ingestKey == "" then
+            if not _config or _config:Get("WhiteAIEnabled") ~= true or (_ingestKey == "" and _ownerSession == "") then
                 break -- retain pending events until the owner enables private delivery
             end
             if _sending then
@@ -377,9 +394,90 @@ function WhiteAI:SendManualReport()
     return self:Submit(report)
 end
 
+local function authRequest(endpoint, path, method, headers)
+    local requestFn = (syn and syn.request) or http_request or request or (http and http.request)
+    if type(requestFn) ~= "function" then return nil end
+    local base = endpoint:match("^(https://[%w%.%-]+)/reports$")
+    if not base then return nil end
+    local ok, response = pcall(requestFn, { Url = base .. path, Method = method,
+        Headers = headers, Body = method == "POST" and "{}" or nil })
+    if not ok or type(response) ~= "table" then return nil end
+    if tonumber(response.StatusCode or response.Status) ~= 200 then return nil end
+    local body = response.Body or response.body
+    if type(body) ~= "string" or #body > 2000 then return nil end
+    local decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
+    return decoded and type(data) == "table" and data or nil
+end
+
+function WhiteAI:PairDevice(masterKey)
+    if _pairing then return false, "Pairing already in progress" end
+    if type(masterKey) ~= "string" or #masterKey < 32 or #masterKey > 128 then
+        return false, "Enter your private owner key to pair once"
+    end
+    local endpoint = _config and _config:Get("WhiteAIEndpoint")
+    if not validEndpoint(endpoint) then return false, "Save an HTTPS /reports endpoint first" end
+    _pairing = true
+    local epoch = _epoch
+    task.spawn(function()
+        local data = authRequest(endpoint, "/auth/pair", "POST", {
+            ["X-WhiteAI-Admin-Key"] = masterKey, ["Content-Type"] = "application/json" })
+        masterKey = nil
+        if epoch ~= _epoch then return end
+        _pairing = false
+        if _config:Get("WhiteAIEndpoint") ~= endpoint then return end
+        if not data or type(data.session_token) ~= "string" or #data.session_token > 256
+            or type(data.expires_at) ~= "number" or data.expires_at <= os.time() then
+            _lastStatus = "Pairing failed; check owner key and backend settings"
+            return
+        end
+        _ownerSession = data.session_token
+        _sessionExpires = data.expires_at
+        local saved = false
+        if type(writefile) == "function" then
+            saved = pcall(writefile, SESSION_FILE, HttpService:JSONEncode({
+                endpoint = endpoint, token = _ownerSession, expires_at = _sessionExpires }))
+        end
+        _lastStatus = saved and "Device paired; session restored automatically on next start"
+            or "Device paired in memory; local file storage unavailable"
+        WhiteAI:FlushPending()
+    end)
+    return true, "Pairing device..."
+end
+
+function WhiteAI:RecoverSession()
+    if type(readfile) ~= "function" then return end
+    local epoch = _epoch
+    local endpoint = _config and _config:Get("WhiteAIEndpoint")
+    if not validEndpoint(endpoint) then return end
+    task.spawn(function()
+        local ok, raw = pcall(readfile, SESSION_FILE)
+        if not ok or type(raw) ~= "string" or #raw > 2000 then return end
+        local decoded, data = pcall(HttpService.JSONDecode, HttpService, raw)
+        if not decoded or type(data) ~= "table" or data.endpoint ~= endpoint
+            or type(data.token) ~= "string" or #data.token > 256
+            or type(data.expires_at) ~= "number" or data.expires_at <= os.time() then return end
+        local result = authRequest(endpoint, "/auth/session", "GET", { ["X-WhiteAI-Session"] = data.token })
+        if epoch ~= _epoch or _pairing or #_ownerSession > 0
+            or _config:Get("WhiteAIEndpoint") ~= endpoint then return end
+        if result and result.authenticated == true then
+            _ownerSession = data.token
+            _sessionExpires = data.expires_at
+            _lastStatus = "Owner device session restored"
+            WhiteAI:FlushPending()
+        else
+            _lastStatus = "Could not restore session; retry or pair this device"
+        end
+    end)
+end
+
 function WhiteAI:SetEndpoint(url)
     if not validEndpoint(url) then return false, "HTTPS URL required" end
+    if _config:Get("WhiteAIEndpoint") ~= url then
+        _ownerSession = ""
+        _sessionExpires = 0
+    end
     _config:Set("WhiteAIEndpoint", url)
+    self:RecoverSession()
     return true
 end
 
@@ -448,6 +546,7 @@ function WhiteAI:Init(modules)
     _epoch = _epoch + 1
     local token = _epoch
     _questChangedAt = now()
+    self:RecoverSession()
     task.spawn(function()
         while _running and _epoch == token do
             task.wait(5)
@@ -472,6 +571,9 @@ function WhiteAI:Destroy()
     _jobHistory = {}
     _ingestKey = ""
     _adminKey = ""
+    _ownerSession = ""
+    _sessionExpires = 0
+    _pairing = false
 end
 
 return WhiteAI

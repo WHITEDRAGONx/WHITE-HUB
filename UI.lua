@@ -1408,13 +1408,16 @@ function UI:Create()
 
     local aiAdminButton = Instance.new("TextButton", AIPage)
     aiAdminButton.Size = UDim2.new(1, -8, 0, 32)
-    aiAdminButton.Text = "AUTHORIZE PRIVATE DEV AUTO-PATCH"
+    aiAdminButton.Text = "PAIR THIS DEVICE"
     aiAdminButton.Font = Enum.Font.GothamBold
     aiAdminButton.TextSize = 12
     styleActionButton(aiAdminButton, false)
     trackConnection(aiAdminButton.MouseButton1Click:Connect(function()
-        if not _whiteAI or type(_whiteAI.SetAdminKey) ~= "function" then return end
-        local ok, why = _whiteAI:SetAdminKey(adminBox.Text)
+        if not _whiteAI or type(_whiteAI.PairDevice) ~= "function" then return end
+        local credential = adminBox.Text
+        adminBox.Text = ""
+        local ok, why = _whiteAI:PairDevice(credential)
+        credential = nil
         adminBox.Text = "" -- key exists only in private session memory
         aiStatus.Text = tostring(why or (ok and "Authorized." or "Not authorized."))
     end))

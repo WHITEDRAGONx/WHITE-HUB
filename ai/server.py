@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from ai.owner_session import issue_owner_session, verify_owner_session
 from ai.autofix import checked_candidate
 
 REPO = "WHITEDRAGONx/WHITE-HUB-V3"
@@ -319,11 +320,13 @@ def publish_review_artifact(content: str, incident_id: str) -> str:
 
 def owner_autopatch_enabled(request: Request) -> bool:
     """Separate owner credential. Ingest keys alone NEVER authorize source writes."""
+    if valid_session(request):
+        return os.environ.get("WHITEAI_AUTOPATCH_ENABLED", "").lower() in ("1", "true")
     provided = request.headers.get("X-WhiteAI-Admin-Key", "")
     if not provided:
         return False
     expected = os.environ.get("WHITEAI_ADMIN_KEY", "")
-    if len(expected) < 32 or not hmac.compare_digest(expected, provided):
+    if len(expected) < 32 or not hmac.compare_digest(expected.encode(), provided.encode()):
         raise HTTPException(status_code=403, detail="Owner authorization rejected")
     return os.environ.get("WHITEAI_AUTOPATCH_ENABLED", "").lower() in ("1", "true")
 
@@ -451,10 +454,49 @@ def health():
         ),
     }
 
+def valid_session(request: Request) -> bool:
+    try:
+        cutoff = int(os.environ.get("WHITEAI_SESSION_NOT_BEFORE", "0"))
+    except ValueError:
+        return False
+    return verify_owner_session(request.headers.get("X-WhiteAI-Session", ""),
+                                os.environ.get("WHITEAI_ADMIN_KEY", ""),
+                                not_before=cutoff)
+
+
+@app.post("/auth/pair")
+def pair_device(request: Request):
+    # Master credential is used once, only in a header; never returned or logged.
+    ip = request.client.host if request.client else "unknown"
+    throttle("pair:" + hashlib.sha256(ip.encode()).hexdigest())
+    expected = os.environ.get("WHITEAI_ADMIN_KEY", "")
+    provided = request.headers.get("X-WhiteAI-Admin-Key", "")
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="Owner pairing not configured")
+    if not hmac.compare_digest(expected.encode(), provided.encode()):
+        raise HTTPException(status_code=403, detail="Owner authorization rejected")
+    token, expires = issue_owner_session(expected)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"session_token": token, "expires_at": expires},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/auth/session")
+def recover_session(request: Request):
+    if not valid_session(request):
+        raise HTTPException(status_code=401, detail="Owner session expired or rejected")
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
+
+
 def authorize(request: Request) -> None:
+    if request.headers.get("X-WhiteAI-Session"):
+        if valid_session(request):
+            return
+        raise HTTPException(status_code=401, detail="Owner session expired or rejected")
     expected = os.environ.get("WHITEAI_INGEST_KEY", "")
     candidate = request.headers.get("X-WhiteAI-Key", "")
-    if len(expected) < 12 or not hmac.compare_digest(expected, candidate):
+    if len(expected) < 12 or not hmac.compare_digest(expected.encode(), candidate.encode()):
         raise HTTPException(status_code=401, detail="Invalid report ingestion key")
 
 def throttle(client: str) -> None:

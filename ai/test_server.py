@@ -14,6 +14,8 @@ from ai.server import (
 )
 
 from ai.autofix import checked_candidate, check_luau
+# Keep owner authentication checks in the existing Render build test command.
+from ai.test_owner_session import OwnerSessionTests
 
 class WhiteAITests(unittest.TestCase):
     def test_active_dev_luau_files_parse_without_syntax_errors(self):

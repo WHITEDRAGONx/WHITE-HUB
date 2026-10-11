@@ -81,3 +81,27 @@ Esses testes simulam as chamadas externas sem gastar cota do Gemini.
 Os estados dos trabalhos ficam somente na memória do Render. Reiniciar
 o serviço pode invalidar um `job_id`, mas propostas já gravadas no
 GitHub permanecem. O Render Free pode hibernar quando inativo.
+
+## Owner device pairing
+
+Save the HTTPS backend `/reports` endpoint, enter the private owner key once,
+and click **PAIR THIS DEVICE**. `POST /auth/pair` exchanges the master key
+for a signed 30-day bearer session; the master key is never saved.
+The local executor file `WHITE_AI_DEVICE_SESSION.json` contains the session
+and exact endpoint. Treat this file as a credential; do not share or commit it.
+`GET /auth/session` validates it on the next initialization. Sessions authenticate
+both reports and job polling without the ingestion key. External reporting still
+requires the existing opt-in toggle. Without file APIs, pairing lasts in memory.
+A network failure retains the file for a later recovery attempt.
+
+The backend uses the existing `WHITEAI_ADMIN_KEY` (at least 32 characters).
+Rotate it or advance `WHITEAI_SESSION_NOT_BEFORE` (Unix timestamp) to revoke
+sessions. Invalid cutoff configuration fails closed. Sessions do not auto-renew;
+expired sessions require pairing again. Auto-patch additionally requires
+`WHITEAI_AUTOPATCH_ENABLED=1`; ingestion keys alone cannot authorize it.
+Pairing is rate-limited separately from reports. Credentials only travel in
+HTTPS headers; no secret is included in diagnostics, status, or rollback records.
+
+Validation: `python -m unittest ai.test_server ai.test_owner_session` and
+`python -m compileall -q ai`. These are offline backend and static Luau tests,
+not a Roblox executor runtime test.
