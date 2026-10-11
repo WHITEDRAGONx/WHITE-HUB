@@ -202,7 +202,15 @@ local function watchJob(endpoint, key, jobId, token)
                         if payload.status == "proposal_ready" then
                             _proposalUrl = type(payload.proposal_url) == "string"
                                 and payload.proposal_url or nil
-                            _lastStatus = "AI analysis complete! Proposal saved in GitHub dev branch."
+                            local patchState = type(payload.auto_patch) == "table"
+                                and payload.auto_patch.state or nil
+                            if patchState == "dev_committed_unverified" then
+                                _lastStatus = "PRIVATE DEV patch committed with rollback. NOT TESTED IN ROBLOX."
+                            elseif patchState == "review_only" then
+                                _lastStatus = "AI proposal saved; auto-patch held for review."
+                            else
+                                _lastStatus = "AI analysis complete! Proposal saved in GitHub dev branch."
+                            end
                             recordJob(jobId, "proposal_ready", payload)
                             return
                         elseif payload.status == "no_incident" then
