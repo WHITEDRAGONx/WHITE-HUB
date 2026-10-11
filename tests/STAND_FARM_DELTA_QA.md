@@ -1,5 +1,9 @@
 # Stand Farm beta — current Shiny R6 / target-list R5 / dialogue speed R4
 
+Current loader build is R7 (`SF-RIB-RESTOCK-20261011-R7`). Keep source=Arrow and
+Auto Restock OFF for the historical R5/R6 procedures below. New Rib/restock QA
+and limits are documented in RIB_RESTOCK_DELTA_QA.md.
+
 ## R6 Shiny mode (not validated in Roblox)
 
 Confirm `SF-SHINY-20261011-R6` after loading DevMain. R6 uses the same Stand Farm

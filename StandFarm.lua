@@ -6,12 +6,14 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local StandFarm = {}
 
-local config, inventory, logger, movement
+local config, inventory, logger, movement, itemFarm
 local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
 local activeTargets = {}
 local activeMode = "stand"
+local activeConsumable = "Mysterious Arrow"
+local restockInFlight, restockingItem = 0, nil
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
 local callbackInFlight, skillInFlight = 0, 0
@@ -395,7 +397,7 @@ local function interact(token, name, selected, mode)
     local char, humanoid = getCharacter()
     if not char or not humanoid then return false, "Character unavailable" end
     local before = readStand()
-    if before == nil or (name == "Mysterious Arrow" and before ~= "None")
+    if before == nil or (name ~= "Rokakaka" and before ~= "None")
         or (name == "Rokakaka" and before == "None") then
         return false, "Stand state changed before " .. name
     end
@@ -600,10 +602,44 @@ local function prepareWorthiness(token)
     return true
 end
 
-local function loop(token, selected, mode)
+local function ensureItem(token, name)
+    if getTool(name) then return true, nil, false end
+    if not config:Get("StandFarmAutoRestock") then return false, "Out of " .. name end
+    if not itemFarm or type(itemFarm.Restock) ~= "function" then return false, "Item Farm restock API unavailable" end
+    if pending or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 or dialogueGui() then
+        return false, "Restock blocked by unresolved interaction"
+    end
+    log("INFO", "Restock handoff: collecting one " .. name .. " on current server; consumption paused")
+    restockInFlight, restockingItem = restockInFlight + 1, name
+    local ok, restored, reason = pcall(function()
+        return itemFarm:Restock(name, function()
+            local pity = readPity()
+            local limit = tonumber(config:Get("StandFarmPityLimit")) or 0
+            return active(token) and not pending and not interactionBusy and not dialogueGui()
+                and config:Get("StandFarmAutoRestock") == true and pity ~= nil
+                and (limit <= 0 or pity < limit)
+        end)
+    end)
+    restockInFlight, restockingItem = restockInFlight - 1, nil
+    if not active(token) then return false, "Stopped" end
+    if not ok or not restored then return false, reason or "Restock failed; no item consumed" end
+    if not getTool(name) then return false, "Restock inventory/tool not confirmed for " .. name end
+    preparedCharacter = nil
+    local ready, recoveryReason = prepareCharacter(token)
+    if not active(token) then return false, "Stopped" end
+    if not ready then return false, recoveryReason end
+    log("INFO", "Restock confirmed: " .. name .. "; safe spot ready; rechecking Stand/skin/pity")
+    return true, nil, true
+end
+
+local function loop(token, selected, mode, consumable)
     log("INFO", mode == "shiny"
         and "Searching for ANY skin; common Stand targets ignored; unknown skins protected"
         or "Searching for " .. table.concat(selected, ", ") .. "; rare skins are always protected")
+    log("INFO", "Consumable: " .. consumable .. "; auto-restock=" .. tostring(config:Get("StandFarmAutoRestock") == true))
+    if consumable ~= "Mysterious Arrow" then
+        log("INFO", "Rib beta uses existing Worthiness; configure required skills manually before starting")
+    end
     local unavailableSince
     while active(token) do
         local ready, readyReason = prepareCharacter(token)
@@ -644,6 +680,20 @@ local function loop(token, selected, mode)
         end
 
         if replace then
+            -- Check stock for both the reset and the next roll before discarding
+            -- a common Stand. A restock yield requires a fresh safety pass.
+            local stocked, stockReason, changed = ensureItem(token, consumable)
+            if not active(token) then break end
+            if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
+            if changed then
+                continue
+            end
+            stocked, stockReason, changed = ensureItem(token, "Rokakaka")
+            if not active(token) then break end
+            if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
+            if changed then
+                continue
+            end
             local ok, err = interact(token, "Rokakaka", selected, mode)
             if not active(token) then break end
             if not ok then
@@ -668,19 +718,21 @@ local function loop(token, selected, mode)
                 log("WARN", stoppedOn)
                 break
             end
-            if not getTool("Mysterious Arrow") then
-                stoppedOn = "Out of Mysterious Arrow"
-                log("WARN", stoppedOn)
-                break
+            local stocked, stockReason, changed = ensureItem(token, consumable)
+            if not active(token) then break end
+            if not stocked then stoppedOn = stockReason; log("WARN", stockReason); break end
+            if changed then
+                continue
             end
-            local skillReady, skillReason = prepareWorthiness(token)
+            local skillReady, skillReason = true, nil
+            if consumable == "Mysterious Arrow" then skillReady, skillReason = prepareWorthiness(token) end
             if not active(token) then break end
             if not skillReady then
                 stoppedOn = skillReason
                 log("WARN", skillReason)
                 break
             end
-            local ok, err = interact(token, "Mysterious Arrow")
+            local ok, err = interact(token, consumable)
             if not active(token) then break end
             if not ok then
                 stoppedOn = err
@@ -698,13 +750,13 @@ local function loop(token, selected, mode)
             end
             if not active(token) then break end
             if not obtained or obtained == "None" then
-                stoppedOn = "Arrow result unconfirmed"
-                log("WARN", "Stand not obtained after Arrow; stopped safely")
+                stoppedOn = consumable .. " result unconfirmed"
+                log("WARN", "Stand not obtained after " .. consumable .. "; stopped safely")
                 break
             end
             rolls = rolls + 1
-            log("INFO", ("Arrow result %d: %s | pity=%s"):format(
-                rolls, tostring(obtained), tostring(readPity())))
+            log("INFO", ("%s result %d: %s | pity=%s"):format(
+                consumable == "Mysterious Arrow" and "Arrow" or "Rib", rolls, tostring(obtained), tostring(readPity())))
             if not waitActive(token, 0.8) then break end
         end
     end
@@ -719,10 +771,12 @@ function StandFarm:Init(modules)
     cleanupDialogue(true)
     runToken = runToken + 1
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
+    itemFarm = modules.Farm
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
     activeMode = "stand"
-    log("INFO", "Build SF-SHINY-20261011-R6; experimental any-skin mode, Roblox validation pending")
+    activeConsumable = "Mysterious Arrow"
+    log("INFO", "Build SF-RIB-RESTOCK-20261011-R7; experimental Rib/restock, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -733,7 +787,7 @@ end
 
 function StandFarm:Start()
     clearConfirmedPending()
-    if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 then
+    if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 or restockInFlight > 0 then
         return false, "Stand Farm already running or cancelling callbacks"
     end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
@@ -741,6 +795,11 @@ function StandFarm:Start()
     local mode = config and config:Get("StandFarmMode")
     if mode == nil then mode = "stand" end
     if mode ~= "stand" and mode ~= "shiny" then return false, "Invalid farm mode; nothing consumed" end
+    local consumable = config:Get("StandFarmConsumable")
+    if consumable == nil then consumable = "Mysterious Arrow" end
+    if consumable ~= "Mysterious Arrow" and consumable ~= "Rib Cage of The Saint's Corpse" then
+        return false, "Invalid Stand consumable; nothing consumed"
+    end
     local selected, selectionReason = {}
     if mode == "stand" then
         selected, selectionReason = targetSelection()
@@ -766,16 +825,20 @@ function StandFarm:Start()
     local currentMode = config:Get("StandFarmMode")
     if currentMode == nil then currentMode = "stand" end
     if currentMode ~= mode then return false, "Farm mode changed during skin check; Start cancelled" end
+    local currentConsumable = config:Get("StandFarmConsumable")
+    if currentConsumable == nil then currentConsumable = "Mysterious Arrow" end
+    if currentConsumable ~= consumable then return false, "Consumable changed during skin check; Start cancelled" end
     if dialogueGui() then return false, "Dialogue opened during skin check" end
     runToken = runToken + 1
     local token = runToken
     running, stoppedOn = true, nil
     activeTargets = selected -- Private snapshot; config edits cannot change this run.
     activeMode = mode
+    activeConsumable = consumable
     preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
     task.spawn(function()
-        local ok, err = xpcall(function() loop(token, selected, mode) end, debug.traceback)
+        local ok, err = xpcall(function() loop(token, selected, mode, consumable) end, debug.traceback)
         if not ok then cleanupDialogue(true); interactionBusy = false end
         if not ok and runToken == token then
             running = false
@@ -805,7 +868,8 @@ function StandFarm:GetStatus()
     for index, name in ipairs(activeTargets) do targets[index] = name end
     return { running = running, message = status,
         rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn,
-        mode = activeMode, targets = targets, pending_item = pending and pending.name or nil }
+        mode = activeMode, consumable = activeConsumable, restocking_item = restockingItem,
+        targets = targets, pending_item = pending and pending.name or nil }
 end
 
 function StandFarm:Destroy()

@@ -885,9 +885,24 @@ function UI:Create()
 
     -- WHITE STAND FARM target list (DEV BETA): no inventory/merchant core changes.
     MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
-    UI:AddLabel(FarmPage, "Uses your own Rokakaka + Mysterious Arrow.")
+    UI:AddLabel(FarmPage, "Uses Rokakaka + selected Arrow/Rib consumable.")
     UI:AddLabel(FarmPage, "Stops for skins, pity, missing items or dialogue errors.")
-    UI:AddLabel(FarmPage, "Disable other farms before starting. No auto-restock yet.")
+    UI:AddLabel(FarmPage, "Disable other farms. Optional restock: current server, 90s limit.")
+
+    local sourceDropdown = MakeStyledDropdown(FarmPage, "Stand consumable",
+        {"Mysterious Arrow", "Rib Cage of The Saint's Corpse"}, function(selected)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmConsumable", selected) end
+        end)
+    local savedSource = _config and _config:Get("StandFarmConsumable")
+    sourceDropdown.Text = (savedSource == "Mysterious Arrow" or savedSource == "Rib Cage of The Saint's Corpse")
+        and savedSource or "Mysterious Arrow"
+    UI:AddLabel(FarmPage, "Choose targets obtainable from your source. Rib: configure Worthiness manually.")
+    MakeToggle(FarmPage, "Auto Restock Consumables (BETA)",
+        (_config and _config:Get("StandFarmAutoRestock")) == true, function(enabled)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmAutoRestock", enabled) end
+        end)
 
     local refreshTargetList
     UI:AddLabel(FarmPage, "Shiny mode: ANY skin stops the farm. Common targets may be replaced.")

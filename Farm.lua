@@ -26,6 +26,8 @@ local isRunning = false
 local stopRequested = false
 local runtimeSetup = false
 local runtimeConnections = {}
+local restockBusy, cycleBusy, startupBusy = false, false, false
+local restockFreeze, restockEpoch = nil, 0
 
 local _runtimeLog = nil
 local _rawPrint, _rawWarn = print, warn
@@ -195,8 +197,12 @@ end
 
 local SAFE_SPOT = CFrame.new(978, -42, -49)
 
-local function CollectItem(itemInfo, index)
-    if not _config:Get("FarmEnabled") or stopRequested then return false end
+local function CollectItem(itemInfo, index, restockGuard)
+    local function allowed()
+        if restockGuard then return restockGuard() end
+        return _config:Get("FarmEnabled") and not stopRequested
+    end
+    if not allowed() then return false end
 
     local hrp = _movement:GetCharacter("HumanoidRootPart")
     if not hrp or not itemInfo then return false end
@@ -209,19 +215,20 @@ local function CollectItem(itemInfo, index)
     local model = itemInfo.Model or index
     local oldCF = hrp.CFrame
     local bv = _movement:Freeze()
+    if restockGuard then restockFreeze = bv end
     _movement:SetNoclip(true)
     _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
     task.wait(.35)
 
     local fired = pcall(function()
-        if itemInfo.ProximityPrompt and itemInfo.ProximityPrompt.Parent then
+        if allowed() and itemInfo.ProximityPrompt and itemInfo.ProximityPrompt.Parent then
             fireproximityprompt(itemInfo.ProximityPrompt)
         end
     end)
 
     local deadline = tick() + 1.5
     local collected = false
-    while tick() < deadline do
+    while tick() < deadline and allowed() do
         if _inventory:Count(itemInfo.Name) > beforeCount then
             collected = true
             break
@@ -234,11 +241,13 @@ local function CollectItem(itemInfo, index)
     end
 
     _movement:Unfreeze(bv)
-    if oldCF and hrp.Parent then
+    if oldCF and hrp.Parent and (not restockGuard or allowed()) then
         _movement:Teleport(SAFE_SPOT)
     end
     task.wait(.15)
     _movement:SetNoclip(false)
+
+    if restockGuard and not allowed() then return false end
 
     if collected and fired then
         SpawnedItems[index] = nil
@@ -328,7 +337,64 @@ local function Startup()
 end
 
 local function shouldPauseCycle()
-    return stopRequested or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+    return stopRequested or restockBusy or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+end
+
+-- Synchronous handoff from StandFarm. It never enables the normal phases,
+-- sells/buys, changes persistent item filters, or hops with a result in flight.
+function Farm:Restock(name, ownerActive)
+    local allowedNames = { ["Rokakaka"]=true, ["Mysterious Arrow"]=true,
+        ["Rib Cage of The Saint's Corpse"]=true }
+    if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
+    if restockBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    restockBusy = true
+    local epoch, char, movementUsed = restockEpoch, Player.Character, false
+    local function permitted()
+        local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+        return epoch == restockEpoch and not stopRequested and ownerActive()
+            and humanoid and humanoid.Health > 0
+            and Player.Character == char and _config:Get("StandFarmEnabled") == true and not _config:Get("FarmEnabled")
+            and not _config:Get("AutoSell") and not _config:Get("AutoPrestige")
+            and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
+    end
+    local ok, success, reason = pcall(function()
+        local deadline, attempts, nextScan = tick() + 90, 0, 0
+        while permitted() and tick() < deadline and attempts < 8 do
+            if _inventory:Count(name) >= 1 then return true, "Stock confirmed" end
+            if not cycleBusy and not startupBusy then
+                -- Refresh from the existing detection source: phase filters may
+                -- have removed previously cached items which are still alive.
+                if ItemSpawnFolder and tick() >= nextScan then
+                    nextScan = tick() + 1
+                    for _, model in ipairs(ItemSpawnFolder:GetChildren()) do
+                        local info = GetItemInfo(model)
+                        if info and info.Name == name then SpawnedItems[model] = info end
+                    end
+                end
+                local candidate, index
+                for key, info in pairs(SpawnedItems) do
+                    if info.Name == name and info.Model and info.Model.Parent then
+                        candidate, index = info, key; break
+                    end
+                end
+                if candidate then
+                    attempts = attempts + 1
+                    movementUsed = true
+                    CollectItem(candidate, index, permitted)
+                    -- A despawn is not proof of inventory acquisition.
+                    if permitted() and _inventory:Count(name) >= 1 then return true, "Stock confirmed" end
+                end
+            end
+            task.wait(0.2)
+        end
+        if not permitted() then return false, "Restock cancelled/character changed" end
+        return false, "Restock limit reached (90s/8 attempts); missing " .. name
+    end)
+    if restockFreeze then pcall(function() _movement:Unfreeze(restockFreeze) end) end
+    if movementUsed then pcall(function() _movement:SetNoclip(false) end) end
+    restockFreeze, restockBusy = nil, false
+    if not ok then return false, "Restock collection failed; nothing consumed" end
+    return success, reason
 end
 
 local function runCycle()
@@ -475,13 +541,16 @@ function Farm:Start()
         ApplyAntiAfk()
         InitItemDetection()
         SetupWebhookListener()
-        Startup()
+        startupBusy = true
+        local startupOk, startupError = pcall(Startup)
+        startupBusy = false
+        if not startupOk then isRunning = false; error(startupError) end
     end
 
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and not _config:Get("FarmEnabled") do
+        while not stopRequested and (restockBusy or not _config:Get("FarmEnabled")) do
             task.wait(0.5)
         end
         while not stopRequested and _config:Get("AutoPrestige") do
@@ -489,7 +558,9 @@ function Farm:Start()
         end
         if stopRequested then break end
 
+        cycleBusy = true
         local ok, err = pcall(runCycle)
+        cycleBusy = false
         if not ok then
             moduleLog("WARN", "[Farm] Cycle error: " .. tostring(err))
             task.wait(2)
@@ -502,6 +573,7 @@ function Farm:Start()
 end
 
 function Farm:Stop()
+    restockEpoch = restockEpoch + 1
     stopRequested = true
     _movement:SetNoclip(false)
     moduleLog("INFO", "[Farm] Stop requested.")
