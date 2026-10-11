@@ -1,11 +1,40 @@
-# Stand Farm V1 — experimental dialogue speed R4
+# Stand Farm beta — current target-list R5 / dialogue speed R4
+
+## Current R5 target-list test (not validated in Roblox)
+
+Load DevMain in a fresh session and confirm `SF-MULTI-20261011-R5` in Console.
+Keep all other farms, Auto Prestige and Auto Sell off; close existing dialogues.
+Use only an empty Stand slot or a known unwanted non-skin Stand, with conservative
+pity and consumable limits. The R4 speed protections and tests below still apply.
+
+1. Choose Aerosmith in Target Stand and press ADD SELECTED STAND TO LIST.
+2. Choose Cream and add it too. Confirm the label shows `Stop on ANY: Aerosmith, Cream`.
+   A nonempty list overrides the single dropdown choice; it is not a priority queue.
+3. Enable the beta. Check `Searching for` lists both targets. On either result,
+   confirm the real Stand is preserved, no next Roka is used, and the toggle stops.
+4. Test REMOVE for the selected entry and CLEAR LIST / USE SINGLE TARGET.
+   Empty list must use the current dropdown target exactly as before. Reload with
+   the farm off to verify settings persist without reactivating consumption.
+5. Edit the list during a controlled run: it must stop immediately. Check no late
+   inputs. A submitted item can still finish on the server; an unresolved result
+   must continue blocking Start. Never clear that lock by repeated reloads.
+6. Repeat Stop, skin/unknown-skin, pity, missing-stock and Roka/respawn tests below.
+   Export logs plus before/after inventory, Stand and pity. Do not send session files.
+
+R5 changes target selection only; it does not implement Rib, Shiny or restock.
+The existing dropdown includes results from different sources; adding a result
+does not make it obtainable from Mysterious Arrow. Use known Arrow results for QA.
+Rollback R5 runtime files to `5a958f6a8c23813a759bd9512a176c6311ab89a1` on dev
+with a new commit (Config.lua, StandFarm.lua, UI.lua). No Render redeploy is needed.
+
+## Historical R4 dialogue baseline
 
 R4 NOT VALIDATED IN ROBLOX. Offline: 40 simulated tests + 34 existing backend/static tests. R3 runtime 8bab0a5f confirms two rolls reaching Aerosmith across a Roka/respawn/safe-spot recovery, plus a later Whitesnake roll stopping on missing Roka. This does not validate all protections or R4 performance.
 Adapts the existing quest fast Option1 selection and bound Continue handlers. Strict U[2] button-container checks gate U[1] selection. No GC scans or constant patches. Delta/mobile support must be measured in game.
 
 ## Delta test procedure (owner)
 
-1. Load the existing DevMain.lua from dev/2026-10-10-autosell-compat in a fresh YBA session. Keep Stand Farm off until ready. Confirm the GOLD UI loads with no compilation/init errors and Console shows Build SF-SPEED-20261011-R4.
+1. Load the existing DevMain.lua from dev/2026-10-10-autosell-compat in a fresh YBA session. Keep Stand Farm off until ready. Confirm the GOLD UI loads with no compilation/init errors. Current R5 uses SF-MULTI-20261011-R5; the R4 timing driver remains unchanged.
 2. Disable Item Farm, Quest Farm, NPC Farm, Auto Prestige AND Auto Sell. Close all existing game dialogues. Keep the YBA dialogue area visible and unobstructed by the hub. Do not open other dialogues or use items manually during the run.
 3. Arrow case: start with Stand=None, at least one Mysterious Arrow and enough Worthiness for normal manual use. Select Aerosmith; keep a conservative pity limit above current pity. Enable Stand Farm (BETA).
 4. Watch Console for dialogue fast-option Option1 / connection-fire ClickContinue (or bound-callback/firesignal), then 'Mysterious Arrow confirmed by PlayerStats.Stand'. Verify the actual Stand and inventory in YBA. An input log alone does NOT mean an item succeeded. Each interaction is limited to one activation, 22 seconds, 12 total clicks and two clicks per unchanged page.

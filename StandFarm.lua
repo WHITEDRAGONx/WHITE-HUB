@@ -10,6 +10,7 @@ local config, inventory, logger, movement
 local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
+local activeTargets = {}
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
 local callbackInFlight, skillInFlight = 0, 0
@@ -95,11 +96,39 @@ local function getSkin(char, token)
     return result
 end
 
+local function targetSelection()
+    local list = config and config:Get("StandFarmTargets")
+    if list ~= nil and type(list) ~= "table" then return nil, "Invalid target list; no items consumed" end
+    local selected, seen, count = {}, {}, 0
+    for index, name in pairs(list or {}) do
+        count = count + 1
+        if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > #list
+            or count > 25 or type(name) ~= "string" or name == "" or name == "None"
+            or #name > 80 or name:find("%c") then
+            return nil, "Invalid target list; no items consumed"
+        end
+        if not seen[name] then selected[#selected + 1], seen[name] = name, true end
+    end
+    if list and count ~= #list then return nil, "Invalid target list; no items consumed" end
+    if #selected == 0 then
+        local single = config and config:Get("StandFarmTarget")
+        if type(single) ~= "string" or single == "" or single == "None"
+            or #single > 80 or single:find("%c") then return nil, "Choose target Stand first" end
+        selected[1] = single
+    end
+    return selected
+end
+
+local function isDesiredStand(stand, selected)
+    for _, name in ipairs(selected) do if stand == name then return true end end
+    return false
+end
+
 -- Returns true only when a stand is safe to overwrite.
 local function shouldReplace(stand, selected, char, token)
     if stand == nil then return false, "PlayerStats.Stand unavailable" end
     if stand == "None" then return false, nil end
-    if stand == selected then return false, "Desired Stand found: " .. stand end
+    if isDesiredStand(stand, selected) then return false, "Desired Stand found: " .. stand end
     local skin, reason = getSkin(char, token)
     if not skin then return false, reason end
     if readStand() ~= stand or getCharacter() ~= char then
@@ -561,13 +590,8 @@ local function prepareWorthiness(token)
     return true
 end
 
-local function loop(token)
-    local selected = config:Get("StandFarmTarget")
-    if type(selected) ~= "string" or selected == "" then
-        log("WARN", "Select a target Stand before enabling the farm")
-        return
-    end
-    log("INFO", "Searching for " .. selected .. "; rare skins are always protected")
+local function loop(token, selected)
+    log("INFO", "Searching for " .. table.concat(selected, ", ") .. "; rare skins are always protected")
     local unavailableSince
     while active(token) do
         local ready, readyReason = prepareCharacter(token)
@@ -684,8 +708,8 @@ function StandFarm:Init(modules)
     runToken = runToken + 1
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
-    running, rolls, stoppedOn = false, 0, nil
-    log("INFO", "Build SF-SPEED-20261011-R4; experimental dialogue timing, Roblox validation pending")
+    running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
+    log("INFO", "Build SF-MULTI-20261011-R5; experimental target list, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -701,10 +725,8 @@ function StandFarm:Start()
     end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
     if dialogueGui() then return false, "Close existing dialogue before starting Stand Farm" end
-    local selected = config and config:Get("StandFarmTarget")
-    if type(selected) ~= "string" or selected == "" then
-        return false, "Choose target Stand first"
-    end
+    local selected, selectionReason = targetSelection()
+    if not selected then return false, selectionReason end
     if config:Get("FarmEnabled") or config:Get("QuestFarmEnabled")
         or config:Get("NPCFarmEnabled") or config:Get("AutoPrestige") or config:Get("AutoSell") then
         return false, "Disable Item/Quest/NPC Farm, Auto Prestige and Auto Sell first"
@@ -726,10 +748,11 @@ function StandFarm:Start()
     runToken = runToken + 1
     local token = runToken
     running, stoppedOn = true, nil
+    activeTargets = selected -- Private snapshot; config edits cannot change this run.
     preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
     task.spawn(function()
-        local ok, err = xpcall(function() loop(token) end, debug.traceback)
+        local ok, err = xpcall(function() loop(token, selected) end, debug.traceback)
         if not ok then cleanupDialogue(true); interactionBusy = false end
         if not ok and runToken == token then
             running = false
@@ -755,8 +778,11 @@ function StandFarm:IsRunning()
 end
 
 function StandFarm:GetStatus()
+    local targets = {}
+    for index, name in ipairs(activeTargets) do targets[index] = name end
     return { running = running, message = status,
-        rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn, pending_item = pending and pending.name or nil }
+        rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn,
+        targets = targets, pending_item = pending and pending.name or nil }
 end
 
 function StandFarm:Destroy()

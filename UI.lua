@@ -883,7 +883,7 @@ function UI:Create()
         end
     end)
 
-    -- WHITE STAND FARM V1 (DEV BETA): no inventory/merchant core changes.
+    -- WHITE STAND FARM target list (DEV BETA): no inventory/merchant core changes.
     MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
     UI:AddLabel(FarmPage, "Uses your own Rokakaka + Mysterious Arrow.")
     UI:AddLabel(FarmPage, "Stops for skins, pity, missing items or dialogue errors.")
@@ -897,12 +897,14 @@ function UI:Create()
         "Mr. President", "Scary Monsters", "The World Alternate Universe",
         "D4C", "Tusk ACT 1", "Soft & Wet", "Sticky Fingers", "Anubis",
     }
+    local refreshTargetList
     local standDropdown = MakeStyledDropdown(FarmPage, "Target Stand", availableStands, function(selected)
         if _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
         end
         if _config then _config:Set("StandFarmTarget", selected) end
+        if refreshTargetList then refreshTargetList() end
     end)
     local savedTarget = _config and _config:Get("StandFarmTarget")
     if type(savedTarget) == "string" and table.find(availableStands, savedTarget) then
@@ -910,6 +912,77 @@ function UI:Create()
     else
         standDropdown.Text = "Select Stand"
     end
+
+    local targetListLabel = UI:AddLabel(FarmPage, "")
+    targetListLabel.TextScaled = false
+    targetListLabel.TextWrapped = true
+    targetListLabel.Size = UDim2.new(1, -4, 0, 42)
+    targetListLabel.AutomaticSize = Enum.AutomaticSize.Y
+    local targetListButton = Instance.new("TextButton", FarmPage)
+    targetListButton.Size = UDim2.new(1, -4, 0, 32)
+    targetListButton.Font = Enum.Font.GothamBold
+    targetListButton.TextSize = 11
+    styleActionButton(targetListButton, false)
+    local clearTargetsButton = Instance.new("TextButton", FarmPage)
+    clearTargetsButton.Size = UDim2.new(1, -4, 0, 32)
+    clearTargetsButton.Font = Enum.Font.GothamBold
+    clearTargetsButton.TextSize = 11
+    clearTargetsButton.Text = "CLEAR LIST / USE SINGLE TARGET"
+    styleActionButton(clearTargetsButton, false)
+
+    refreshTargetList = function()
+        local list = _config and _config:Get("StandFarmTargets")
+        if list ~= nil and type(list) ~= "table" then
+            targetListLabel.Text = "Invalid saved list. Clear it before starting."
+            targetListButton.Text = "CLEAR INVALID LIST FIRST"
+            return
+        end
+        list = list or {}
+        local names = {}
+        for _, name in ipairs(list) do
+            if type(name) ~= "string" then
+                targetListLabel.Text = "Invalid saved list. Clear it before starting."
+                targetListButton.Text = "CLEAR INVALID LIST FIRST"
+                return
+            end
+            names[#names + 1] = name
+        end
+        targetListLabel.Text = #names > 0 and ("Stop on ANY: " .. table.concat(names, ", "))
+            or "Single target mode. Add selected Stands to stop on any in a list."
+        targetListButton.Text = table.find(list, _config and _config:Get("StandFarmTarget"))
+            and "REMOVE SELECTED STAND FROM LIST" or "ADD SELECTED STAND TO LIST"
+    end
+    local function stopForTargetEdit()
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+    end
+    trackConnection(targetListButton.MouseButton1Click:Connect(function()
+        if not _config then return end
+        local selected, list = _config:Get("StandFarmTarget"), _config:Get("StandFarmTargets")
+        if not table.find(availableStands, selected) then UI:ShowPopup("Select a Stand first", 4); return end
+        if list ~= nil and type(list) ~= "table" then UI:ShowPopup("Clear invalid list first", 4); return end
+        local copy = {}
+        for _, name in ipairs(list or {}) do
+            if type(name) ~= "string" then UI:ShowPopup("Clear invalid list first", 4); return end
+            copy[#copy + 1] = name
+        end
+        local index = table.find(copy, selected)
+        if index then table.remove(copy, index)
+        elseif #copy < 25 then copy[#copy + 1] = selected
+        else UI:ShowPopup("Target list limit: 25", 4); return end
+        stopForTargetEdit()
+        _config:Set("StandFarmTargets", copy)
+        refreshTargetList()
+    end))
+    trackConnection(clearTargetsButton.MouseButton1Click:Connect(function()
+        if not _config then return end
+        stopForTargetEdit()
+        _config:Set("StandFarmTargets", {})
+        refreshTargetList()
+    end))
+    refreshTargetList()
 
     local pityInput = Instance.new("TextBox", FarmPage)
     pityInput.Size = UDim2.new(1, -4, 0, 30)

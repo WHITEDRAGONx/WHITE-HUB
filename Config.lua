@@ -25,6 +25,7 @@ local Defaults = {
     -- Stand Farm V1 is opt-in and never auto-starts after reload.
     StandFarmEnabled = false,
     StandFarmTarget = "",
+    StandFarmTargets = {}, -- Empty list keeps the existing single-target mode.
     StandFarmPityLimit = 20,
 
     NPCFarmEnabled = false,

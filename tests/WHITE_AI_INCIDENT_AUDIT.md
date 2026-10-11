@@ -1,5 +1,25 @@
 # WHITE AI incident retention audit — 2026-10-11
 
+## Implemented follow-up — backend 5a958f6
+
+The historical findings below describe the previous implementation. Backend
+`5a958f6a8c23813a759bd9512a176c6311ab89a1` now persists sanitized incidents as
+AES-GCM ciphertext on dev before acknowledging actionable reports. StandFarm is
+diagnostic read-only. CAS leases, at most three analysis attempts, 60/300-second
+backoff and authenticated recovery are covered by offline tests. Recovered jobs
+do not inherit AutoFix authority. See ai/incidents/README.md for storage limits,
+key rotation, endpoints and owner QA.
+
+Deploy `dep-db5rgig473hc73c5kulg` reached LIVE on 2026-10-11; the Render build ran
+51 passing tests. Real HTTP health returned 200, configured=true and
+incident_storage_configured=true. Anonymous /incidents and /retry returned 403;
+anonymous /jobs returned 401. This verifies deployment/configuration/access
+guards, NOT a real authenticated queue write, Gemini recovery or Delta behavior.
+Those need the owner's paired-device test. No free-service always-on guarantee;
+authenticated polling resumes due jobs when the service is awake.
+
+## Original audit
+
 Investigation only; no backend code, provider settings, authentication or deployment changed.
 Inspected server.py at dev baseline b5783ac, unchanged in Stand Farm fix 0f6c2f0.
 Render still LIVE at 74d56ce with auto-deploy off. Public health returned status=ok and configured=true; this does not verify Gemini availability.
