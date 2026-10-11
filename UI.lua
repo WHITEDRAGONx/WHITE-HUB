@@ -889,6 +889,19 @@ function UI:Create()
     UI:AddLabel(FarmPage, "Stops for skins, pity, missing items or dialogue errors.")
     UI:AddLabel(FarmPage, "Disable other farms before starting. No auto-restock yet.")
 
+    local refreshTargetList
+    UI:AddLabel(FarmPage, "Shiny mode: ANY skin stops the farm. Common targets may be replaced.")
+    MakeToggle(FarmPage, "Shiny Farm Mode (BETA)", (_config and _config:Get("StandFarmMode") == "shiny") == true, function(enabled)
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+        if _config then _config:Set("StandFarmMode", enabled and "shiny" or "stand") end
+        if refreshTargetList then refreshTargetList() end
+        runtimeLog("INFO", enabled and "Shiny mode selected: common Stand targets ignored; every skin protected"
+            or "Stand target mode selected")
+    end)
+
     local availableStands = {
         "Star Platinum", "The World", "Crazy Diamond", "Killer Queen",
         "Gold Experience", "King Crimson", "Silver Chariot", "Whitesnake",
@@ -897,7 +910,6 @@ function UI:Create()
         "Mr. President", "Scary Monsters", "The World Alternate Universe",
         "D4C", "Tusk ACT 1", "Soft & Wet", "Sticky Fingers", "Anubis",
     }
-    local refreshTargetList
     local standDropdown = MakeStyledDropdown(FarmPage, "Target Stand", availableStands, function(selected)
         if _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
@@ -931,6 +943,11 @@ function UI:Create()
     styleActionButton(clearTargetsButton, false)
 
     refreshTargetList = function()
+        if _config and _config:Get("StandFarmMode") == "shiny" then
+            targetListLabel.Text = "Shiny mode: stop on ANY skin. Stand target list ignored."
+            targetListButton.Text = "EDIT SAVED STAND TARGET LIST"
+            return
+        end
         local list = _config and _config:Get("StandFarmTargets")
         if list ~= nil and type(list) ~= "table" then
             targetListLabel.Text = "Invalid saved list. Clear it before starting."
@@ -1033,8 +1050,8 @@ function UI:Create()
             if not standStatus.Parent then break end
             if _standFarm then
                 local state = _standFarm:GetStatus()
-                standStatus.Text = ("Stand: %s | Pity: %s | Rolls: %d | %s"):format(
-                    tostring(state.stand or "?"), tostring(state.pity or "?"),
+                standStatus.Text = ("Mode: %s | Stand: %s | Pity: %s | Rolls: %d | %s"):format(
+                    tostring(state.mode or "stand"), tostring(state.stand or "?"), tostring(state.pity or "?"),
                     tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
                 if not state.running then
                     UI:SetToggleValue("Stand Farm (BETA)", false)

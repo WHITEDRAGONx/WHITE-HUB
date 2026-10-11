@@ -1,8 +1,53 @@
-# Stand Farm beta — current target-list R5 / dialogue speed R4
+# Stand Farm beta — current Shiny R6 / target-list R5 / dialogue speed R4
+
+## R6 Shiny mode (not validated in Roblox)
+
+Confirm `SF-SHINY-20261011-R6` after loading DevMain. R6 uses the same Stand Farm
+worker, dialogue driver and consumption locks; no parallel Shiny worker exists.
+`Shiny Farm Mode (BETA)` selects the mode; `Stand Farm (BETA)` starts/stops it.
+Default mode is stand. Reload keeps the preference but never starts consumption.
+
+1. Disable Item/Quest/NPC Farm, Auto Prestige and Auto Sell; close old dialogues.
+2. Start only with None or a common Stand you explicitly accept replacing. Set a
+   small pity budget and limited stock. Shiny mode IGNORES the Stand target list,
+   and can replace a common Cream/Aerosmith even when it is a desired Stand.
+3. Enable Shiny Farm Mode, then Stand Farm. Expect `Searching for ANY skin`.
+   No Stand selection is required. It uses only Mysterious Arrow and Rokakaka.
+4. Confirm normal results continue through verified Roka/NEW Character/safe spot.
+   Any detected skin must stop the farm without another Roka. Missing/invalid,
+   empty or timed-out skin lookup must also stop and preserve the current Stand.
+   Only the exact existing game response `None` authorizes replacement.
+5. With an already owned skin, Start must refuse without consumption. Do not
+   risk a valuable skin to stress-test this beta. Keep the result if detection
+   is uncertain; never bypass it by repeated reloads.
+6. Change modes during a controlled run and test Stop during dialogue, replication
+   and skin lookup. Mode changes through UI stop first; an action already sent
+   may still finish on the server. An uncertain result continues locking Start.
+7. Confirm pity/stock/exclusivity safeguards and single/multiple target behavior
+   with Shiny mode OFF. Export before/after Stand, skin, pity, stock and logs;
+   never include session files or credentials.
+
+Offline coverage: 13 new Shiny simulations, including late skin replication
+while equipping Roka, config/mode guards, and cancellation. Actual YBA skin
+replication and Delta behavior remain unverified. No skin-specific selection,
+storage, Rib consumables or restock in R6.
+Rollback runtime files to `6581f5840c371719b60fa607a4e8e057cafc361f` on dev using
+a new commit. Preserve incident/proposal files. No Render deployment required.
+
+## R5 observed owner runtime
+
+The owner's Delta 1.0.739.687 log from 2026-10-11 13:50–13:52 showed selection
+Aerosmith/Cream, Six Pistols then Stone Free then Cream, verified Roka resets,
+NEW Character safe-spot recovery, and stopping on Cream with no later consumption
+shown. No WARN/ERROR occurred in that supplied log. This validates those observed
+R5 paths only; not Shiny R6, Stop, skin detection or pity edge cases.
+Arrow input spans were 0.73–0.83s; Stand confirmation followed the last input by
+8.48–8.56s. The log does not identify the source of that later game delay.
 
 ## Current R5 target-list test (not validated in Roblox)
 
-Load DevMain in a fresh session and confirm `SF-MULTI-20261011-R5` in Console.
+Load DevMain in a fresh session and confirm the current R6 build in Console.
+Keep Shiny mode OFF for the following target-list tests.
 Keep all other farms, Auto Prestige and Auto Sell off; close existing dialogues.
 Use only an empty Stand slot or a known unwanted non-skin Stand, with conservative
 pity and consumable limits. The R4 speed protections and tests below still apply.

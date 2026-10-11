@@ -26,6 +26,7 @@ local Defaults = {
     StandFarmEnabled = false,
     StandFarmTarget = "",
     StandFarmTargets = {}, -- Empty list keeps the existing single-target mode.
+    StandFarmMode = "stand", -- Opt-in "shiny" ignores common Stand targets.
     StandFarmPityLimit = 20,
 
     NPCFarmEnabled = false,

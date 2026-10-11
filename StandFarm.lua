@@ -11,6 +11,7 @@ local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
 local activeTargets = {}
+local activeMode = "stand"
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
 local callbackInFlight, skillInFlight = 0, 0
@@ -125,10 +126,12 @@ local function isDesiredStand(stand, selected)
 end
 
 -- Returns true only when a stand is safe to overwrite.
-local function shouldReplace(stand, selected, char, token)
+local function shouldReplace(stand, selected, char, token, mode)
     if stand == nil then return false, "PlayerStats.Stand unavailable" end
     if stand == "None" then return false, nil end
-    if isDesiredStand(stand, selected) then return false, "Desired Stand found: " .. stand end
+    if mode ~= "shiny" and isDesiredStand(stand, selected) then
+        return false, "Desired Stand found: " .. stand
+    end
     local skin, reason = getSkin(char, token)
     if not skin then return false, reason end
     if readStand() ~= stand or getCharacter() ~= char then
@@ -384,7 +387,7 @@ local function clearConfirmedPending()
     end
 end
 
-local function interact(token, name)
+local function interact(token, name, selected, mode)
     if not active(token) then return false, "Stopped" end
     if interactionBusy or pending or dialogueGui() then
         return false, "Existing dialogue or pending result; close and verify it manually"
@@ -401,6 +404,13 @@ local function interact(token, name)
     local equipped = pcall(function() humanoid:EquipTool(tool) end)
     if not equipped then return false, "Could not equip " .. name end
     if not waitActive(token, 0.2) then return false, "Stopped" end
+    if mode == "shiny" and name == "Rokakaka" then
+        -- Skin replication can change while equipping even if Stand stays the
+        -- same. Require another conclusive None immediately before activation.
+        local replace, reason = shouldReplace(before, selected, char, token, mode)
+        if not active(token) then return false, "Stopped" end
+        if not replace then return false, reason or "Stand no longer replaceable; nothing consumed" end
+    end
     if dialogueGui() then return false, "Another dialogue opened before activation" end
     if getCharacter() ~= char or readStand() ~= before then
         return false, "Stand/character changed before activation; nothing consumed"
@@ -590,8 +600,10 @@ local function prepareWorthiness(token)
     return true
 end
 
-local function loop(token, selected)
-    log("INFO", "Searching for " .. table.concat(selected, ", ") .. "; rare skins are always protected")
+local function loop(token, selected, mode)
+    log("INFO", mode == "shiny"
+        and "Searching for ANY skin; common Stand targets ignored; unknown skins protected"
+        or "Searching for " .. table.concat(selected, ", ") .. "; rare skins are always protected")
     local unavailableSince
     while active(token) do
         local ready, readyReason = prepareCharacter(token)
@@ -623,7 +635,7 @@ local function loop(token, selected)
             break
         end
 
-        local replace, reason = shouldReplace(stand, selected, char, token)
+        local replace, reason = shouldReplace(stand, selected, char, token, mode)
         if not active(token) then break end
         if reason then
             stoppedOn = reason
@@ -632,7 +644,7 @@ local function loop(token, selected)
         end
 
         if replace then
-            local ok, err = interact(token, "Rokakaka")
+            local ok, err = interact(token, "Rokakaka", selected, mode)
             if not active(token) then break end
             if not ok then
                 stoppedOn = err
@@ -709,7 +721,8 @@ function StandFarm:Init(modules)
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
-    log("INFO", "Build SF-MULTI-20261011-R5; experimental target list, Roblox validation pending")
+    activeMode = "stand"
+    log("INFO", "Build SF-SHINY-20261011-R6; experimental any-skin mode, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -725,8 +738,14 @@ function StandFarm:Start()
     end
     if pending then return false, "Previous item result unresolved; verify manually before reloading" end
     if dialogueGui() then return false, "Close existing dialogue before starting Stand Farm" end
-    local selected, selectionReason = targetSelection()
-    if not selected then return false, selectionReason end
+    local mode = config and config:Get("StandFarmMode")
+    if mode == nil then mode = "stand" end
+    if mode ~= "stand" and mode ~= "shiny" then return false, "Invalid farm mode; nothing consumed" end
+    local selected, selectionReason = {}
+    if mode == "stand" then
+        selected, selectionReason = targetSelection()
+        if not selected then return false, selectionReason end
+    end
     if config:Get("FarmEnabled") or config:Get("QuestFarmEnabled")
         or config:Get("NPCFarmEnabled") or config:Get("AutoPrestige") or config:Get("AutoSell") then
         return false, "Disable Item/Quest/NPC Farm, Auto Prestige and Auto Sell first"
@@ -739,20 +758,24 @@ function StandFarm:Start()
     if stand ~= "None" then
         local char = getCharacter()
         if not char then return false, "Character not ready" end
-        local _, reason = shouldReplace(stand, selected, char)
+        local _, reason = shouldReplace(stand, selected, char, nil, mode)
         if reason then return false, reason end
     end
     -- Skin lookup yields: a Stop or competing Start invalidates this request.
     if runToken ~= startToken or running then return false, "Start cancelled" end
+    local currentMode = config:Get("StandFarmMode")
+    if currentMode == nil then currentMode = "stand" end
+    if currentMode ~= mode then return false, "Farm mode changed during skin check; Start cancelled" end
     if dialogueGui() then return false, "Dialogue opened during skin check" end
     runToken = runToken + 1
     local token = runToken
     running, stoppedOn = true, nil
     activeTargets = selected -- Private snapshot; config edits cannot change this run.
+    activeMode = mode
     preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
     task.spawn(function()
-        local ok, err = xpcall(function() loop(token, selected) end, debug.traceback)
+        local ok, err = xpcall(function() loop(token, selected, mode) end, debug.traceback)
         if not ok then cleanupDialogue(true); interactionBusy = false end
         if not ok and runToken == token then
             running = false
@@ -782,7 +805,7 @@ function StandFarm:GetStatus()
     for index, name in ipairs(activeTargets) do targets[index] = name end
     return { running = running, message = status,
         rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn,
-        targets = targets, pending_item = pending and pending.name or nil }
+        mode = activeMode, targets = targets, pending_item = pending and pending.name or nil }
 end
 
 function StandFarm:Destroy()
