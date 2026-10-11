@@ -12,6 +12,9 @@ local _latest = nil
 local _history = {}
 local _dedupe = {}
 local _sending = false
+local _pendingAutoReports = {} -- bounded diagnostics queue, never stores keys
+local _autoWorkerRunning = false
+local _lastAutoSentAt = -math.huge
 local _lastJobId = nil
 local _proposalUrl = nil
 local _jobHistory = {} -- Last 5 local job outcomes only; no secrets.
@@ -307,6 +310,39 @@ function WhiteAI:Submit(report)
     return true, "Report queued"
 end
 
+function WhiteAI:FlushPending()
+    if _autoWorkerRunning then return end
+    if #_pendingAutoReports == 0 then return end
+    _autoWorkerRunning = true
+    local workerEpoch = _epoch
+    task.spawn(function()
+        while _running and workerEpoch == _epoch and #_pendingAutoReports > 0 do
+            if not _config or _config:Get("WhiteAIEnabled") ~= true or _ingestKey == "" then
+                break -- retain pending events until the owner enables private delivery
+            end
+            if _sending then
+                task.wait(0.5)
+            elseif now() - _lastAutoSentAt < 27 then
+                task.wait(math.min(1, 27 - (now() - _lastAutoSentAt)))
+            else
+                local report = table.remove(_pendingAutoReports, 1)
+                local ok, reason = WhiteAI:Submit(report)
+                if ok then
+                    _lastAutoSentAt = now()
+                elseif reason == "Another report is being sent" then
+                    table.insert(_pendingAutoReports, 1, report)
+                    task.wait(0.5)
+                else
+                    -- Never retry a permanently unconfigured endpoint on a hot loop.
+                    table.insert(_pendingAutoReports, 1, report)
+                    break
+                end
+            end
+        end
+        _autoWorkerRunning = false
+    end)
+end
+
 function WhiteAI:Observe(category, message, moduleName, urgent)
     local reason = safeText(message, 450)
     local kind = safeText(category, 45)
@@ -323,8 +359,13 @@ function WhiteAI:Observe(category, message, moduleName, urgent)
 
     -- Logging to RuntimeLog can cause recursive subscriptions; use native print.
     print("[WhiteAI][Observation] " .. _lastStatus)
-    if urgent and _config and _config:Get("WhiteAIEnabled") then
-        self:Submit(report)
+    if urgent then
+        if #_pendingAutoReports >= 6 then
+            table.remove(_pendingAutoReports, 1)
+            print("[WhiteAI][Queue] capacity reached; oldest incident was dropped.")
+        end
+        _pendingAutoReports[#_pendingAutoReports + 1] = report
+        self:FlushPending()
     end
     return true
 end
@@ -347,6 +388,7 @@ function WhiteAI:SetIngestKey(token)
         return false, "Expected a 12-128 character ingestion key"
     end
     _ingestKey = token
+    self:FlushPending()
     return true
 end
 
@@ -364,6 +406,7 @@ end
 
 function WhiteAI:SetEnabled(enabled)
     _config:Set("WhiteAIEnabled", enabled == true)
+    if enabled then self:FlushPending() end
     return true
 end
 
@@ -422,6 +465,8 @@ function WhiteAI:Destroy()
         _subscription = nil
     end
     _sending = false
+    _pendingAutoReports = {}
+    _autoWorkerRunning = false
     _lastJobId = nil
     _proposalUrl = nil
     _jobHistory = {}
