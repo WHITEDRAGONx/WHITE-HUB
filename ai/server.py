@@ -174,7 +174,7 @@ def gemini_error_classification(status: int) -> tuple[str, str]:
 def gemini_model() -> str:
     model = os.environ.get("GEMINI_MODEL", GEMINI_DEFAULT_MODEL).strip()
     # Prevent external URL/path selection through a Render setting.
-    if not re.fullmatch(r"gemini-[0-9]+(?:\\.[0-9]+)?-[a-z0-9-]+", model):
+    if not re.fullmatch(r"gemini-[0-9]+(?:\.[0-9]+)?-[a-z0-9-]+", model):
         raise ValueError("Invalid GEMINI_MODEL identifier")
     return model
 
