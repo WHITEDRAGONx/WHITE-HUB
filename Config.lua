@@ -22,6 +22,10 @@ local Defaults = {
     StayInPrivateServer = false,
     WhiteAIEnabled = false,
     WhiteAIEndpoint = "",
+    -- Stand Farm V1 is opt-in and never auto-starts after reload.
+    StandFarmEnabled = false,
+    StandFarmTarget = "",
+    StandFarmPityLimit = 20,
 
     NPCFarmEnabled = false,
     QuestFarmEnabled = false,
