@@ -2,6 +2,7 @@
 import json
 import os
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,6 +16,13 @@ from ai.server import (
 from ai.autofix import checked_candidate, check_luau
 
 class WhiteAITests(unittest.TestCase):
+    def test_active_dev_luau_files_parse_without_syntax_errors(self):
+        project = Path(__file__).resolve().parents[1]
+        for module in ("CombatFarm.lua", "WhiteAI.lua", "UI.lua"):
+            with self.subTest(module=module):
+                self.assertTrue(check_luau((project / module).read_text(encoding="utf-8")),
+                                f"{module} has syntax errors or unrecognized grammar")
+
     def test_private_admin_requires_separate_secret_and_explicit_enable(self):
         request = SimpleNamespace(headers={"X-WhiteAI-Admin-Key": "x" * 40})
         with patch.dict(os.environ, {"WHITEAI_ADMIN_KEY": "x" * 40,
