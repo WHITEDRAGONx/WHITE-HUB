@@ -23,7 +23,7 @@ from urllib.parse import quote
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 REPO = "WHITEDRAGONx/WHITE-HUB-V3"
 DEV_BRANCH = "dev/2026-10-10-autosell-compat"
@@ -211,6 +211,21 @@ def publish_review_artifact(content: str, incident_id: str) -> str:
         response.raise_for_status()
     return f"https://github.com/{REPO}/blob/{quote(DEV_BRANCH, safe='/')}/{path}"
 
+def rate_limit_diagnostic(exc: Exception) -> tuple[str, str]:
+    """Classify safe provider error codes without exposing raw messages or headers."""
+    codes = [getattr(exc, "code", None), getattr(exc, "type", None)]
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        codes.extend((body.get("code"), body.get("type")))
+        nested = body.get("error")
+        if isinstance(nested, dict):
+            codes.extend((nested.get("code"), nested.get("type")))
+    if "insufficient_quota" in codes:
+        return ("insufficient_quota", "Check OpenAI API billing, credits, and project budget.")
+    if "rate_limit_exceeded" in codes:
+        return ("rate_limit_exceeded", "OpenAI rate limit reached; check usage limits and retry later.")
+    return ("http_429_unclassified", "OpenAI HTTP 429; check API billing and rate limits.")
+
 def run_job(job_id: str, report: dict[str, Any]) -> None:
     try:
         _jobs[job_id]["status"] = "reading_source"
@@ -226,6 +241,12 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
         _jobs[job_id] = {"status": "proposal_ready", "proposal_url": url,
                          "patch_valid": bool(diff)}
         print("[WhiteAI backend] proposal saved", job_id, flush=True)
+    except RateLimitError as exc:
+        # Never print provider payloads, keys, raw errors, or request headers.
+        error_code, hint = rate_limit_diagnostic(exc)
+        print("[WhiteAI backend] job failed", job_id, "RateLimitError", error_code, flush=True)
+        _jobs[job_id] = {"status": "failed", "error": "RateLimitError",
+                         "error_code": error_code, "hint": hint}
     except Exception as exc:
         # Never expose tokens, raw provider errors or prompt text in API/logs.
         error_type = type(exc).__name__
