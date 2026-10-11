@@ -94,6 +94,7 @@ end
 local _config      = nil
 local _webhook     = nil
 local _combatFarm  = nil
+local _standFarm = nil
 local _serverHop   = nil
 local _whiteAI     = nil
 local _runtimeLog   = nil
@@ -117,6 +118,7 @@ function UI:Init(Modules)
     _config      = Modules.Config
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
+    _standFarm   = Modules.StandFarm
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
@@ -797,6 +799,10 @@ function UI:Create()
     MakeSection(FarmPage, "FARM SETTINGS")
     
     MakeToggle(FarmPage, "Enable Farm", _config and _config:Get("FarmEnabled"), function(v)
+        if v and _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
         if _config then _config:Set("FarmEnabled", v) end
         if not v then
             print("[UI] Farm disabled by user.")
@@ -862,6 +868,10 @@ function UI:Create()
         end
         getgenv().AutoPrestigeEnabled = v
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("NPC Farm", false)
             if _combatFarm then _combatFarm:Stop() end
@@ -870,6 +880,93 @@ function UI:Create()
         else
             print("[UI] Auto Prestige disabled.")
             runtimeLog("INFO", "Auto Prestige disabled.")
+        end
+    end)
+
+    -- WHITE STAND FARM V1 (DEV BETA): no inventory/merchant core changes.
+    MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
+    UI:AddLabel(FarmPage, "Uses your own Rokakaka + Mysterious Arrow.")
+    UI:AddLabel(FarmPage, "Stops for skins, pity, missing items or dialogue errors.")
+    UI:AddLabel(FarmPage, "Disable other farms before starting. No auto-restock yet.")
+
+    local availableStands = {
+        "Star Platinum", "The World", "Crazy Diamond", "Killer Queen",
+        "Gold Experience", "King Crimson", "Silver Chariot", "Whitesnake",
+        "Stone Free", "The Hand", "Hierophant Green", "Magician's Red",
+        "Purple Haze", "White Album", "Aerosmith", "Six Pistols", "Cream",
+        "Mr. President", "Scary Monsters", "The World Alternate Universe",
+        "D4C", "Tusk ACT 1", "Soft & Wet", "Sticky Fingers", "Anubis",
+    }
+    local standDropdown = MakeStyledDropdown(FarmPage, "Target Stand", availableStands, function(selected)
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+        if _config then _config:Set("StandFarmTarget", selected) end
+    end)
+    local savedTarget = _config and _config:Get("StandFarmTarget")
+    if type(savedTarget) == "string" and table.find(availableStands, savedTarget) then
+        standDropdown.Text = savedTarget
+    else
+        standDropdown.Text = "Select Stand"
+    end
+
+    local pityInput = Instance.new("TextBox", FarmPage)
+    pityInput.Size = UDim2.new(1, -4, 0, 30)
+    pityInput.BackgroundColor3 = THEME.PANEL2
+    pityInput.BorderSizePixel = 0
+    pityInput.Font = Enum.Font.Code
+    pityInput.TextColor3 = THEME.WHITE
+    pityInput.TextSize = 12
+    pityInput.ClearTextOnFocus = false
+    pityInput.PlaceholderText = "Stop at pity (0 disables limit)"
+    pityInput.Text = "Stop at pity: " .. tostring(_config and _config:Get("StandFarmPityLimit") or 20)
+    Instance.new("UICorner", pityInput).CornerRadius = UDim.new(0, 6)
+    trackConnection(pityInput.FocusLost:Connect(function()
+        local raw = pityInput.Text:match("(%d+)")
+        local num = raw and tonumber(raw)
+        if num == nil or num < 0 or num > 125 then
+            num = _config and _config:Get("StandFarmPityLimit") or 20
+        elseif _config then
+            _config:Set("StandFarmPityLimit", num)
+        end
+        pityInput.Text = "Stop at pity: " .. tostring(num)
+    end))
+
+    MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+        if not _standFarm then
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+            return
+        end
+        if enabled then
+            local ok, reason = _standFarm:Start()
+            if not ok then
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+                runtimeLog("WARN", "Stand Farm not started: " .. tostring(reason))
+                UI:ShowPopup(tostring(reason), 5)
+            end
+        else
+            _standFarm:Stop()
+        end
+    end)
+
+    local standStatus = UI:AddLabel(FarmPage, "Stand Farm: idle")
+    standStatus.TextScaled = false
+    standStatus.TextWrapped = true
+    standStatus.Size = UDim2.new(1, -4, 0, 45)
+    task.spawn(function()
+        while standStatus.Parent do
+            task.wait(2)
+            if not standStatus.Parent then break end
+            if _standFarm then
+                local state = _standFarm:GetStatus()
+                standStatus.Text = ("Stand: %s | Pity: %s | Rolls: %d | %s"):format(
+                    tostring(state.stand or "?"), tostring(state.pity or "?"),
+                    tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
+                if not state.running then
+                    UI:SetToggleValue("Stand Farm (BETA)", false)
+                end
+            end
         end
     end)
 
@@ -928,6 +1025,10 @@ function UI:Create()
             end
         end
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("NPC Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
@@ -963,6 +1064,10 @@ function UI:Create()
             end
         end
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
