@@ -1,0 +1,2 @@
+# Local simulation only; not required by the Render backend.
+lupa==2.8
