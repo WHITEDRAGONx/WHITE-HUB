@@ -1336,7 +1336,7 @@ function UI:Create()
 
     local aiStatus = Instance.new("TextLabel", AIPage)
     aiStatus.BackgroundTransparency = 1
-    aiStatus.Size = UDim2.new(1, -8, 0, 80)
+    aiStatus.Size = UDim2.new(1, -8, 0, 152)
     aiStatus.TextWrapped = true
     aiStatus.TextYAlignment = Enum.TextYAlignment.Top
     aiStatus.TextColor3 = THEME.GOLD_WHITE
@@ -1415,7 +1415,24 @@ function UI:Create()
     trackConnection(aiSendButton.MouseButton1Click:Connect(function()
         if not _whiteAI then return end
         local ok, reason = _whiteAI:SendManualReport()
-        aiStatus.Text = ok and "Report queued; backend will propose a patch for review." or tostring(reason)
+        aiStatus.Text = ok and "Report received; checking backend job status..." or tostring(reason)
+    end))
+
+    local aiCopyProposal = Instance.new("TextButton", AIPage)
+    aiCopyProposal.Size = UDim2.new(1, -8, 0, 32)
+    aiCopyProposal.Text = "COPY LATEST PROPOSAL LINK"
+    aiCopyProposal.Font = Enum.Font.GothamBold
+    aiCopyProposal.TextSize = 12
+    styleActionButton(aiCopyProposal, false)
+    trackConnection(aiCopyProposal.MouseButton1Click:Connect(function()
+        if not _whiteAI then return end
+        local status = _whiteAI:GetStatus()
+        local url = status and status.proposal_url
+        if type(url) ~= "string" or not url:match("^https://github%.com/") then
+            aiStatus.Text = "No completed GitHub proposal in this session."
+            return
+        end
+        aiStatus.Text = copyToClipboard(url) and "Proposal URL copied." or "Clipboard unavailable."
     end))
 
     task.spawn(function()
@@ -1424,9 +1441,25 @@ function UI:Create()
             if not aiStatus.Parent then break end
             if _whiteAI and type(_whiteAI.GetStatus) == "function" then
                 local status = _whiteAI:GetStatus()
-                aiStatus.Text = tostring(status.message or "Ready")
-                    .. "\nDetected incidents: " .. tostring(status.incidents or 0)
-                    .. " | External reports: " .. (status.enabled and "ON" or "OFF")
+                local lines = {
+                    tostring(status.message or "Ready"),
+                    "Detected incidents: " .. tostring(status.incidents or 0)
+                        .. " | External reports: " .. (status.enabled and "ON" or "OFF"),
+                }
+                local jobs = status.jobs or {}
+                for i = 1, math.min(2, #jobs) do
+                    local job = jobs[i]
+                    if type(job) == "table" then
+                        local confidence = type(job.confidence) == "number"
+                            and (" confidence=" .. string.format("%.2f", job.confidence)) or ""
+                        lines[#lines + 1] = ("Job %d: %s | %s%s"):format(
+                            i, tostring(job.module or "-"), tostring(job.status or "?"), confidence)
+                        if i == 1 and type(job.diagnosis) == "string" and job.diagnosis ~= "" then
+                            lines[#lines + 1] = "Diagnosis: " .. job.diagnosis:sub(1, 140)
+                        end
+                    end
+                end
+                aiStatus.Text = table.concat(lines, "\n")
             end
         end
     end)
