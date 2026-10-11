@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from ai.autofix import checked_candidate
 
 REPO = "WHITEDRAGONx/WHITE-HUB-V3"
 DEV_BRANCH = "dev/2026-10-10-autosell-compat"
@@ -316,7 +317,78 @@ def publish_review_artifact(content: str, incident_id: str) -> str:
         response.raise_for_status()
     return f"https://github.com/{REPO}/blob/{quote(DEV_BRANCH, safe='/')}/{path}"
 
-def run_job(job_id: str, report: dict[str, Any]) -> None:
+def owner_autopatch_enabled(request: Request) -> bool:
+    """Separate owner credential. Ingest keys alone NEVER authorize source writes."""
+    provided = request.headers.get("X-WhiteAI-Admin-Key", "")
+    if not provided:
+        return False
+    expected = os.environ.get("WHITEAI_ADMIN_KEY", "")
+    if len(expected) < 32 or not hmac.compare_digest(expected, provided):
+        raise HTTPException(status_code=403, detail="Owner authorization rejected")
+    return os.environ.get("WHITEAI_AUTOPATCH_ENABLED", "").lower() in ("1", "true")
+
+def attempt_dev_commit(job_id: str, path: str, source: str, original_sha: str,
+                       ai: dict[str, Any]) -> dict[str, str]:
+    """Backup record BEFORE modifying a file. Dev only, compare-and-swap SHA.
+
+    Exact historical commit is preserved in Git and in an ai/backups record.
+    Never touches main, Inventory or protected combat sections.
+    """
+    candidate, reason = checked_candidate(path, source, ai)
+    if candidate is None:
+        return {"state": "review_only", "reason": reason}
+    with _send_lock:
+        # Catch manual changes or another worker's commit before writing.
+        current, sha = read_github_file(path)
+        if sha != original_sha or current != source:
+            return {"state": "review_only", "reason": "stale_source"}
+        branch_url = f"{GITHUB_API}/branches/{quote(DEV_BRANCH, safe='')}"
+        branch_response = requests.get(branch_url, headers=github_headers(), timeout=20)
+        branch_response.raise_for_status()
+        previous_commit = branch_response.json()["commit"]["sha"]
+        backup_path = f"ai/backups/{datetime.now(timezone.utc):%Y%m%d}-{job_id}.md"
+        backup_text = (
+            "# WHITE AI dev rollback checkpoint\\n\\n"
+            f"File: {path}\\n\\n"
+            f"Before patch commit: {previous_commit}\\n\\n"
+            f"Original blob: {original_sha}\\n\\n"
+            f"SHA256: {hashlib.sha256(source.encode('utf-8')).hexdigest()}\\n\\n"
+            "Rollback: restore this file from the pre-patch commit shown above.\\n"
+            "Static Luau syntax was checked; NEVER VERIFIED IN ROBLOX.\\n"
+        )
+        backup_response = requests.put(
+            f"{GITHUB_API}/contents/{quote(backup_path, safe='/')}",
+            headers=github_headers(),
+            json={
+                "message": "WHITE AI: immutable pre-patch rollback checkpoint",
+                "content": base64.b64encode(backup_text.encode()).decode(),
+                "branch": DEV_BRANCH,
+            }, timeout=20)
+        backup_response.raise_for_status()
+        patch_response = requests.put(
+            f"{GITHUB_API}/contents/{quote(path, safe='/')}",
+            headers=github_headers(),
+            json={
+                "message": f"WHITE AI dev-only candidate: {job_id} (unverified in Roblox)",
+                "content": base64.b64encode(candidate.encode()).decode(),
+                "sha": original_sha,
+                "branch": DEV_BRANCH,
+            }, timeout=20)
+        patch_response.raise_for_status()
+        commit_sha = patch_response.json()["commit"]["sha"]
+    print("[WhiteAI backend] dev-only candidate committed", job_id, path, flush=True)
+    return {
+        "state": "dev_committed_unverified",
+        "commit": commit_sha,
+        "pre_patch_commit": previous_commit,
+        "backup_url": (
+            f"https://github.com/{REPO}/blob/{quote(DEV_BRANCH, safe='/')}/{backup_path}"
+        ),
+    }
+
+
+def run_job(job_id: str, report: dict[str, Any],
+            owner_autopatch: bool = False) -> None:
     try:
         _jobs[job_id]["status"] = "reading_source"
         path = allowed_module_path(report)
@@ -337,8 +409,21 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
             "patch_valid": bool(diff), "module": path,
             "diagnosis": scrub(ai.get("summary", ""), 240),
             "confidence": round(conf, 2),
+            "auto_patch": {"state": "disabled" if not owner_autopatch else "pending"},
         }
         print("[WhiteAI backend] proposal saved", job_id, flush=True)
+        if owner_autopatch:
+            # Proposal is persistent even if this separately authorized step fails.
+            try:
+                result = attempt_dev_commit(job_id, path, source, source_sha, ai)
+                _jobs[job_id]["auto_patch"] = result
+            except Exception as exc:
+                error_type = type(exc).__name__
+                print("[WhiteAI backend] auto patch not committed", job_id, error_type,
+                      flush=True)
+                _jobs[job_id]["auto_patch"] = {
+                    "state": "review_only", "reason": "backup_or_commit_failed"
+                }
     except GeminiAPIError as exc:
         # Only whitelisted codes/hints; never log external response bodies.
         print("[WhiteAI backend] job failed", job_id, exc.code, flush=True)
@@ -354,8 +439,14 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
 def health():
     missing = [name for name in ("GEMINI_API_KEY", "GITHUB_TOKEN")
                if not os.environ.get(name)]
-    return {"status": "ok", "mode": "proposal-only",
-            "target_branch": DEV_BRANCH, "configured": len(missing) == 0}
+    return {
+        "status": "ok", "mode": "private-gated-dev-autopatch",
+        "target_branch": DEV_BRANCH, "configured": len(missing) == 0,
+        "autopatch_enabled": (
+            os.environ.get("WHITEAI_AUTOPATCH_ENABLED", "").lower() in ("1", "true")
+            and len(os.environ.get("WHITEAI_ADMIN_KEY", "")) >= 32
+        ),
+    }
 
 def authorize(request: Request) -> None:
     expected = os.environ.get("WHITEAI_INGEST_KEY", "")
@@ -376,6 +467,7 @@ def throttle(client: str) -> None:
 @app.post("/reports", status_code=202)
 async def accept_report(request: Request, background: BackgroundTasks):
     authorize(request)
+    owner_autopatch = owner_autopatch_enabled(request)
     missing = [name for name in ("GEMINI_API_KEY", "GITHUB_TOKEN")
                if not os.environ.get(name)]
     if missing:
@@ -402,9 +494,9 @@ async def accept_report(request: Request, background: BackgroundTasks):
         return {"status": "no_incident", "job_id": job_id,
                 "message": "No actionable incident; no Gemini quota used"}
     _jobs[job_id] = {"status": "queued"}
-    background.add_task(run_job, job_id, report)
+    background.add_task(run_job, job_id, report, owner_autopatch)
     return {"status": "queued", "job_id": job_id,
-            "message": "Only an unexecuted review proposal may be created in dev"}
+            "message": "Private dev candidate may be committed only with separate owner authorization"}
 
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str, request: Request):
