@@ -45,7 +45,7 @@ function node(name, class, parent)
     end
     function n:FindFirstChild(name, recursive)
         for _,c in ipairs(self.children) do if c.Name==name then return c end end
-        if recursive then for _,c in ipairs(self:GetDescendants()) do if c.Name==name then return c end end end
+        if recursive then for _,c in ipairs(self.children) do local found=c:FindFirstChild(name,true); if found then return found end end end
     end
     function n:FindFirstChildWhichIsA(c, recursive)
         local list=recursive and self:GetDescendants() or self.children
@@ -325,6 +325,83 @@ class StandDialogueTests(unittest.TestCase):
         assert(farm:Start()); advance(8)
         assert(presses==0 and selected==2 and signalCalls==1 and activations==1)
         assert(farm:GetStatus().rolls==1)
+        ''')
+
+    def test_fast_pages_do_not_wait_for_body_typewriter(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function()
+            fastPage("Option1","Body animation",true)
+            for i=1,100 do after(i*0.02,function()
+                if pg.children[1] then pg.children[1]:FindFirstChild("Message",true).Text=tostring(now) end
+            end) end
+        end
+        onSelect=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(2.2)
+        assert(farm:GetStatus().rolls==1 and activations==1 and presses==0)
+        ''')
+
+    def test_fast_multipage_input_span_under_two_tenths(self):
+        self.enable_fast()
+        self.run_lua('''
+        local started, finished
+        selected=0
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function()
+            selected=selected+1; started=started or now
+            if selected==1 then fastPage("ClickContinue","Continue")
+            else finished=now; stand.Value="Aerosmith"; closeGui() end
+        end
+        onSignal=function() fastPage("Option1","Confirm") end
+        assert(farm:Start()); advance(4)
+        assert(finished-started < 0.2 and selected==2 and signalCalls==1)
+        ''')
+
+    def test_option_signature_does_not_walk_whole_gui(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function()
+            local b,gui=fastPage("Option1","Use?",true)
+            function gui:GetDescendants() error("full GUI scan must not occur") end
+        end
+        onSelect=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(4)
+        assert(farm:GetStatus().rolls==1 and presses==0)
+        ''')
+
+    def test_timing_separates_closed_gui_from_late_stat(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function() closeGui(); after(8,function() stand.Value="Aerosmith" end) end
+        assert(farm:Start()); advance(13)
+        local timing
+        for _,message in ipairs(logs) do if message:find("timing:",1,true) then timing=message end end
+        assert(timing and activations==1 and farm:GetStatus().rolls==1)
+        local statTime,closedTime,afterTime=timing:match("stat=([%d.]+)s; closed=([%d.]+)s; after%-input=([%d.]+)s")
+        assert(tonumber(statTime)>=8 and tonumber(closedTime)<0.3 and tonumber(afterTime)>=8)
+        ''')
+
+    def test_result_before_gui_close_has_no_extra_input(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("Option1","Use?",true) end
+        onSelect=function() stand.Value="Aerosmith"; after(3,closeGui) end
+        assert(farm:Start()); advance(7)
+        assert(#mutations==1 and signalCalls==0 and activations==1)
+        local timing
+        for _,message in ipairs(logs) do if message:find("timing:",1,true) then timing=message end end
+        local statTime,closedTime=timing:match("stat=([%d.]+)s; closed=([%d.]+)s")
+        assert(tonumber(statTime)<0.3 and tonumber(closedTime)>=3)
+        ''')
+
+    def test_fast_option_can_be_image_button(self):
+        self.enable_fast()
+        self.run_lua('''
+        onActivate=function() fastPage("Option1","Use?",true); lastButton.class="ImageButton"; lastButton.Text=nil end
+        onSelect=function() stand.Value="Aerosmith"; closeGui() end
+        assert(farm:Start()); advance(4)
+        assert(farm:GetStatus().rolls==1 and activations==1 and presses==0)
         ''')
 
     def test_fast_roka_then_arrow(self):

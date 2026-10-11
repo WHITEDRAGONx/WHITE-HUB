@@ -178,13 +178,15 @@ local function stageSignature(gui, kind)
         -- typewriter to settle before using the already-bound fast callback.
         return kind .. "|" .. tostring(gui:FindFirstChild("ClickContinue", true))
     end
+    -- Only the option controls describe a choice page. Scanning the whole GUI
+    -- every poll adds work and makes body typewriter updates delay selection.
+    local options = gui:FindFirstChild("Options", true)
     local parts = {kind}
-    for _, object in ipairs(gui:GetDescendants()) do
+    for _, object in ipairs(options and options:GetDescendants() or {}) do
         if (object:IsA("TextLabel") or object:IsA("TextButton")) and visible(object, gui) then
             parts[#parts + 1] = object.Name .. "=" .. tostring(object.Text):sub(1, 200)
         end
     end
-    table.sort(parts)
     return table.concat(parts, "|")
 end
 
@@ -313,7 +315,7 @@ local function dispatchBoundSignal(token, button, gui)
     return true, method
 end
 
-local function advanceDialogue(token, button, gui, kind, attempt)
+local function advanceDialogue(token, button, gui, kind, attempt, renderedReady)
     if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
     if not visible(button, gui) then
         if kind == "ClickContinue" then return dispatchBoundSignal(token, button, gui) end
@@ -331,6 +333,9 @@ local function advanceDialogue(token, button, gui, kind, attempt)
     local ok, method = dispatchBoundSignal(token, button, gui)
     if ok then return true, method end
     if not active(token) or method == "callback-pending" then return false, method end
+    -- Verified internal handlers need no rendered-page settling delay. Keep
+    -- that delay for physical input, which depends on a stable visible button.
+    if not renderedReady then return false, "render-wait" end
     cleanupDialogue(true) -- real input requires a rendered ScreenGui
     if clickButton(token, button, gui) then
         return true, "visible-fallback:" .. reason .. ":" .. method
@@ -394,10 +399,20 @@ local function interact(token, name)
     local lastClick, clicks, lastSignature = 0, 0, nil
     local stageAttempts = {}
     local callbackWaitLogged = false
+    local firstInputAt, lastInputAt, statAt, closedAt
+    local pageNumber = 0
     while active(token) and os.clock() - openedAt < 22 do
+        local now = os.clock()
+        local pollDelay = 0.1
+        if ownedGui and not dialogueGui() and not closedAt then closedAt = now end
         if resultConfirmed(name) then
+            if not statAt then statAt = now end
             if not dialogueGui() then
                 log("INFO", name .. " confirmed by PlayerStats.Stand; clicks=" .. clicks)
+                log("INFO", ("%s timing: inputs=%.2fs; stat=%.2fs; closed=%.2fs; after-input=%.2fs")
+                    :format(name, firstInputAt and lastInputAt - firstInputAt or 0,
+                        statAt - openedAt, (closedAt or now) - openedAt,
+                        lastInputAt and statAt - lastInputAt or statAt - openedAt))
                 return finish(true)
             end
             -- Result exists: never send another confirmation input.
@@ -411,21 +426,28 @@ local function interact(token, name)
                 local nextButton, kind = dialogueButton(gui)
                 local nextSignature = stageSignature(gui, kind)
                 if nextSignature ~= signature or nextButton ~= button then
+                    pageNumber = pageNumber + 1
                     signature, button, stableSince = nextSignature, nextButton, os.clock()
                 end
-                if button and os.clock() - stableSince >= 0.1
+                local pageKey = pageNumber .. "|" .. signature
+                if button
                     and (callbackInFlight == 0 or kind == "Option1")
-                    and (signature ~= lastSignature or os.clock() - lastClick >= 0.8) then
-                    local attempts = stageAttempts[signature] or 0
+                    and (pageKey ~= lastSignature or os.clock() - lastClick >= 0.8) then
+                    local attempts = stageAttempts[pageKey] or 0
                     if attempts >= 2 or clicks >= 12 then
                         return finish(false, name .. " dialogue stalled; clicks=" .. clicks .. "; result pending")
                     end
-                    local advanced, method = advanceDialogue(token, button, gui, kind, attempts)
+                    local advanced, method = advanceDialogue(token, button, gui, kind, attempts,
+                        os.clock() - stableSince >= 0.1)
                     if not active(token) then return finish(false, "Stopped") end
                     if advanced then
-                        clicks, stageAttempts[signature], lastClick = clicks + 1, attempts + 1, os.clock()
-                        lastSignature = signature
+                        clicks, stageAttempts[pageKey], lastClick = clicks + 1, attempts + 1, os.clock()
+                        firstInputAt, lastInputAt = firstInputAt or lastClick, lastClick
+                        lastSignature = pageKey
+                        pollDelay = 0.03
                         log("INFO", name .. " dialogue " .. method .. " " .. kind .. " #" .. clicks .. "; result pending")
+                    elseif method == "render-wait" then
+                        pollDelay = 0.03
                     elseif method ~= "callback-pending" then
                         return finish(false, name .. " dialogue " .. method .. "; result pending")
                     end
@@ -438,7 +460,9 @@ local function interact(token, name)
             callbackWaitLogged = true
             log("INFO", name .. " dialogue handler pending; waiting for Option1/result, no extra signal fired")
         end
-        task.wait(0.1)
+        -- Briefly watch for the next page after input; pending results and
+        -- unchanged pages remain at 10 Hz throughout the item animation.
+        task.wait(pollDelay)
     end
     if not active(token) then return finish(false, "Stopped") end
     return finish(false, name .. " result/closed dialogue not confirmed within 22s; clicks=" .. clicks)
@@ -661,7 +685,7 @@ function StandFarm:Init(modules)
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn = false, 0, nil
-    log("INFO", "Build SF-RESPAWN-20261011-R3; experimental fast dialogue, Roblox validation pending")
+    log("INFO", "Build SF-SPEED-20261011-R4; experimental dialogue timing, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
