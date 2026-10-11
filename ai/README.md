@@ -1,4 +1,4 @@
-# WHITE AI V1 — Gemini API, branch experimental
+# WHITE AI V2 — agente privado, Gemini API, branch experimental
 
 Este backend de diagnóstico do WHITE HUB V3 mantém o serviço existente
 [white-ai-v1 no Render](https://dashboard.render.com/web/srv-db527jflot8c73df8mr0)
@@ -39,15 +39,26 @@ relatório. O POST devolve HTTP 202 e um `job_id`; o Lua acompanha
 GET /jobs/{job_id} para verificar `analyzing`, `saving_proposal`,
 `proposal_ready` ou `failed`.
 
-Somente propostas Markdown de revisão são gravadas em `ai/proposals/`
-na branch de desenvolvimento. Nenhum patch é aplicado nem executado
-automaticamente. Nunca altera `main` nem o módulo de venda
-`Inventory.lua`. Combate, Farm, UI e outras funcionalidades de jogo
-permanecem inalteradas pela migração de provedor.
+## Separação público/privado e commits experimentais
 
-O servidor limita acesso por chave, taxa e tamanho, restringe os
-arquivos e caminhos de escrita, e sanitiza os registros. A análise
-continua precisando de revisão e teste humano antes de qualquer alteração.
+- `Main.lua` (público) carrega `main` e não carrega WHITE AI.
+- `DevMain.lua` (somente uso do proprietário) carrega `dev/2026-10-10-autosell-compat` e a aba AI DEBUG. O código da branch é publicamente visível: a segurança está na credencial **não publicada**, não no segredo do nome do loader.
+- Qualquer pessoa com a antiga chave de ingestão pode **enviar relatórios**, mas **NUNCA autorizar commits de código** sem a credencial adicional. A chave existente não precisa ser substituída para usar o fluxo privado.
+- `WHITEAI_ADMIN_KEY` deve ser gerada pelo proprietário com pelo menos 32 caracteres aleatórios e cadastrada **somente em Render Environment**, nunca em arquivos, logs, chat ou Config.lua.
+- `WHITEAI_AUTOPATCH_ENABLED=1` habilita o caminho de commits apenas para **relatórios que também apresentem o cabeçalho `X-WhiteAI-Admin-Key` correto**. Sem essa variável, ou sem autorização individual na sessão privada, todos os relatórios continuam só criando propostas.
+- Na aba AI DEBUG da branch dev, use **AUTHORIZE PRIVATE DEV AUTO-PATCH** com essa chave privada, somente na sua sessão. A caixa limpa o texto imediatamente; reiniciar o hub apaga a credencial.
+- **Somente** `CombatFarm.lua` (trecho de quest, fora do XenonLock), `Farm.lua`, `ServerHop.lua` e `UI.lua` podem receber commits automáticos na branch dev. Inventory.lua, Main.lua, Config.lua, DevMain.lua, o núcleo de combate e `main` são protegidos.
+- O agente exige confiança >=0.94, substituição textual única, patch pequeno, sintaxe válida de Luau com tree-sitter-luau para origem e destino, confirmação do blob SHA vigente e ausência de novas APIs perigosas.
+- Antes do commit, cria `ai/backups/YYYYMMDD-jobid.md` com o SHA do commit anterior e SHA do blob original, garantindo ponto de rollback pelo histórico do Git. Se falhar a criação desse registro ou a atualização do arquivo, não afirma que a correção foi aplicada.
+- **Sintaxe validada não significa comportamento verificado no Roblox.** Qualquer commit automático fica na dev com o estado `dev_committed_unverified` para revisão e teste manual. Nunca há merge ou deploy na `main` automaticamente.
+- O endpoint `GET /health` mostra apenas booleanos (`configured`, `autopatch_enabled`); não expõe credenciais.
+- O WHITE AI monitora WARN/ERROR e quest_stall automaticamente quando envio externo está ligado e a ingest key foi inserida. SEND REPORT permanece opcional.
+
+Para desativar instantaneamente commits automáticos, ajuste `WHITEAI_AUTOPATCH_ENABLED=0` no Render. Nenhum código precisa ser removido.
+
+## Limitações relevantes
+
+Os diagnósticos podem falhar ou resultar em propostas sem patch. Um sucesso em testes Python e no parser Luau **não prova** que o patch funciona no YBA; o servidor não executa o jogo. Antes de publicar para usuários, testar a dev manualmente.
 
 ## Erros comuns
 
