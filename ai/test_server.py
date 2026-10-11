@@ -33,11 +33,11 @@ class WhiteAITests(unittest.TestCase):
                 owner_autopatch_enabled(request)
 
     def test_luau_syntax_gate_rejects_invalid_code(self):
-        self.assertTrue(check_luau("local x = 1\\nreturn x\\n"))
+        self.assertTrue(check_luau("local x = 1\nreturn x\n"))
         self.assertFalse(check_luau("local x ="))
 
     def test_private_patch_requires_high_confidence_and_exact_match(self):
-        base = "local enabled = true\\nreturn enabled\\n"
+        base = "local enabled = true\nreturn enabled\n"
         ai = {"file": "Farm.lua", "confidence": 0.99,
               "old_text": "true", "new_text": "false"}
         code, reason = checked_candidate("Farm.lua", base, ai)
@@ -50,13 +50,13 @@ class WhiteAITests(unittest.TestCase):
         self.assertIsNone(checked_candidate("Farm.lua", base, ai)[0])
 
     def test_inventory_and_protected_core_never_auto_patch(self):
-        src = "local x = true\\nreturn x\\n"
+        src = "local x = true\nreturn x\n"
         ai = {"file": "Inventory.lua", "confidence": 1,
               "old_text": "true", "new_text": "false"}
         self.assertIsNone(checked_candidate("Inventory.lua", src, ai)[0])
-        src = ("function CombatFarm:StartQuest() end\\n"
-               "-- QUEST FARM\\nlocal active = true\\n"
-               "-- PUBLIC API\\nfunction CombatFarm:StartNPC() end\\n")
+        src = ("function CombatFarm:StartQuest() end\n"
+               "-- QUEST FARM\nlocal active = true\n"
+               "-- PUBLIC API\nfunction CombatFarm:StartNPC() end\n")
         ai.update(file="CombatFarm.lua", old_text="function CombatFarm:StartQuest() end",
                   new_text="function CombatFarm:StartQuest() return true end")
         self.assertEqual(checked_candidate("CombatFarm.lua", src, ai)[1],
