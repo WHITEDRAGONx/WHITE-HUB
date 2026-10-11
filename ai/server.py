@@ -23,7 +23,6 @@ from urllib.parse import quote
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from openai import OpenAI, RateLimitError
 
 REPO = "WHITEDRAGONx/WHITE-HUB-V3"
 DEV_BRANCH = "dev/2026-10-10-autosell-compat"
@@ -132,22 +131,89 @@ def read_github_file(path: str) -> tuple[str, str]:
         content = content[:MAX_SOURCE]
     return content, str(obj["sha"])
 
+# Only the explicitly configured Gemini model may be called. Never enable
+# paid fallbacks, tool use, web search, or provider retries behind the scenes.
+GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
+GEMINI_JSON_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary": {"type": "STRING"},
+        "hypothesis": {"type": "STRING"},
+        "confidence": {"type": "NUMBER"},
+        "file": {"type": "STRING"},
+        "old_text": {"type": "STRING"},
+        "new_text": {"type": "STRING"},
+        "tests": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": ["summary", "hypothesis", "confidence", "file",
+                 "old_text", "new_text", "tests"],
+}
+
+class GeminiAPIError(Exception):
+    """Safe provider failure; never retain raw HTTP response or credentials."""
+    def __init__(self, code: str, hint: str):
+        super().__init__(code)
+        self.code = code
+        self.hint = hint
+
+def gemini_error_classification(status: int) -> tuple[str, str]:
+    # Do not expose raw provider messages; they may contain supplied input.
+    if status == 429:
+        return ("gemini_rate_limited", "Free API quota or rate limit reached; check AI Studio limits.")
+    if status in (401, 403):
+        return ("gemini_auth_error", "Check Gemini API key and project permissions.")
+    if status == 404:
+        return ("gemini_model_unavailable", "Check access to GEMINI_MODEL in Google AI Studio.")
+    if status == 400:
+        return ("gemini_bad_request", "Check selected model and supported JSON output settings.")
+    if status >= 500:
+        return ("gemini_unavailable", "Gemini service unavailable; retry later.")
+    return ("gemini_http_error", "Gemini request failed; inspect account and model configuration.")
+
+def gemini_model() -> str:
+    model = os.environ.get("GEMINI_MODEL", GEMINI_DEFAULT_MODEL).strip()
+    # Prevent external URL/path selection through a Render setting.
+    if not re.fullmatch(r"gemini-[0-9]+(?:\\.[0-9]+)?-[a-z0-9-]+", model):
+        raise ValueError("Invalid GEMINI_MODEL identifier")
+    return model
+
 def ask_ai(report: dict[str, Any], path: str, source: str) -> dict[str, Any]:
-    key = os.environ["OPENAI_API_KEY"]
-    model = os.environ["OPENAI_MODEL"]
-    client = OpenAI(api_key=key, timeout=55, max_retries=1)
-    response = client.responses.create(
-        model=model,
-        instructions=SYSTEM_INSTRUCTIONS,
-        input=json.dumps({"report": report, "filename": path, "source": source},
-                         ensure_ascii=False),
-        max_output_tokens=2400,
-        store=False,
+    key = os.environ["GEMINI_API_KEY"]
+    model = gemini_model()
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{
+            "text": json.dumps({"report": report, "filename": path, "source": source},
+                               ensure_ascii=False),
+        }]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": GEMINI_JSON_SCHEMA,
+            "maxOutputTokens": 8192,
+        },
+    }
+    response = requests.post(
+        f"{GEMINI_API_BASE}{model}:generateContent",
+        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+        json=payload, timeout=(10, 90), allow_redirects=False,
     )
-    answer = (response.output_text or "").strip()
+    if response.status_code != 200:
+        code, hint = gemini_error_classification(response.status_code)
+        raise GeminiAPIError(code, hint)
+    data = response.json()
+    candidates = data.get("candidates") if isinstance(data, dict) else None
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("Gemini returned no candidate")
+    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list):
+        raise ValueError("Gemini returned no text parts")
+    answer = "".join(part.get("text", "") for part in parts
+                     if isinstance(part, dict) and isinstance(part.get("text"), str))
     result = json.loads(answer)
     if not isinstance(result, dict):
-        raise ValueError("Model did not return JSON object")
+        raise ValueError("Gemini did not return JSON object")
     return result
 
 def validate_proposal(ai: dict[str, Any], path: str, source: str) -> str:
@@ -211,21 +277,6 @@ def publish_review_artifact(content: str, incident_id: str) -> str:
         response.raise_for_status()
     return f"https://github.com/{REPO}/blob/{quote(DEV_BRANCH, safe='/')}/{path}"
 
-def rate_limit_diagnostic(exc: Exception) -> tuple[str, str]:
-    """Classify safe provider error codes without exposing raw messages or headers."""
-    codes = [getattr(exc, "code", None), getattr(exc, "type", None)]
-    body = getattr(exc, "body", None)
-    if isinstance(body, dict):
-        codes.extend((body.get("code"), body.get("type")))
-        nested = body.get("error")
-        if isinstance(nested, dict):
-            codes.extend((nested.get("code"), nested.get("type")))
-    if "insufficient_quota" in codes:
-        return ("insufficient_quota", "Check OpenAI API billing, credits, and project budget.")
-    if "rate_limit_exceeded" in codes:
-        return ("rate_limit_exceeded", "OpenAI rate limit reached; check usage limits and retry later.")
-    return ("http_429_unclassified", "OpenAI HTTP 429; check API billing and rate limits.")
-
 def run_job(job_id: str, report: dict[str, Any]) -> None:
     try:
         _jobs[job_id]["status"] = "reading_source"
@@ -241,12 +292,11 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
         _jobs[job_id] = {"status": "proposal_ready", "proposal_url": url,
                          "patch_valid": bool(diff)}
         print("[WhiteAI backend] proposal saved", job_id, flush=True)
-    except RateLimitError as exc:
-        # Never print provider payloads, keys, raw errors, or request headers.
-        error_code, hint = rate_limit_diagnostic(exc)
-        print("[WhiteAI backend] job failed", job_id, "RateLimitError", error_code, flush=True)
-        _jobs[job_id] = {"status": "failed", "error": "RateLimitError",
-                         "error_code": error_code, "hint": hint}
+    except GeminiAPIError as exc:
+        # Only whitelisted codes/hints; never log external response bodies.
+        print("[WhiteAI backend] job failed", job_id, exc.code, flush=True)
+        _jobs[job_id] = {"status": "failed", "error": "GeminiAPIError",
+                         "error_code": exc.code, "hint": exc.hint}
     except Exception as exc:
         # Never expose tokens, raw provider errors or prompt text in API/logs.
         error_type = type(exc).__name__
@@ -255,7 +305,7 @@ def run_job(job_id: str, report: dict[str, Any]) -> None:
 
 @app.get("/health")
 def health():
-    missing = [name for name in ("OPENAI_API_KEY", "OPENAI_MODEL", "GITHUB_TOKEN")
+    missing = [name for name in ("GEMINI_API_KEY", "GITHUB_TOKEN")
                if not os.environ.get(name)]
     return {"status": "ok", "mode": "proposal-only",
             "target_branch": DEV_BRANCH, "configured": len(missing) == 0}
@@ -279,7 +329,7 @@ def throttle(client: str) -> None:
 @app.post("/reports", status_code=202)
 async def accept_report(request: Request, background: BackgroundTasks):
     authorize(request)
-    missing = [name for name in ("OPENAI_API_KEY", "OPENAI_MODEL", "GITHUB_TOKEN")
+    missing = [name for name in ("GEMINI_API_KEY", "GITHUB_TOKEN")
                if not os.environ.get(name)]
     if missing:
         # Key names only. Never print or return environment variable values.
