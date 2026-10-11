@@ -131,9 +131,10 @@ def read_github_file(path: str) -> tuple[str, str]:
         content = content[:MAX_SOURCE]
     return content, str(obj["sha"])
 
-# Only the explicitly configured Gemini model may be called. Never enable
-# paid fallbacks, tool use, web search, or provider retries behind the scenes.
+# All provider calls use Gemini's Free-compatible text models only.
+# Bounded recovery is used exclusively for transient 5xx errors.
 GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
 GEMINI_JSON_SCHEMA = {
     "type": "OBJECT",
@@ -193,13 +194,34 @@ def ask_ai(report: dict[str, Any], path: str, source: str) -> dict[str, Any]:
             "maxOutputTokens": 8192,
         },
     }
-    response = requests.post(
-        f"{GEMINI_API_BASE}{model}:generateContent",
-        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-        json=payload, timeout=(10, 90), allow_redirects=False,
-    )
+    headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
+
+    def generate(selected_model: str):
+        return requests.post(
+            f"{GEMINI_API_BASE}{selected_model}:generateContent",
+            headers=headers, json=payload, timeout=(10, 90),
+            allow_redirects=False,
+        )
+
+    response = generate(model)
+    if response.status_code >= 500:
+        # One bounded retry with backoff; do not retry exhausted quota (429).
+        print("[WhiteAI backend] Gemini transient HTTP", response.status_code,
+              "retrying once", flush=True)
+        time.sleep(1.5)
+        response = generate(model)
+
+    if response.status_code >= 500 and model == GEMINI_DEFAULT_MODEL:
+        # Supported structured JSON model, Free-tier eligible. Fail closed if
+        # unavailable; never fall back to paid providers or arbitrary endpoints.
+        print("[WhiteAI backend] Gemini main model still unavailable; "
+              "trying Flash-Lite", flush=True)
+        response = generate(GEMINI_FALLBACK_MODEL)
+
     if response.status_code != 200:
         code, hint = gemini_error_classification(response.status_code)
+        print("[WhiteAI backend] Gemini response status", response.status_code,
+              code, flush=True)
         raise GeminiAPIError(code, hint)
     data = response.json()
     candidates = data.get("candidates") if isinstance(data, dict) else None
