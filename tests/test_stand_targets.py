@@ -86,10 +86,12 @@ class StandTargetTests(unittest.TestCase):
         self.run_lua('''
         table.find=function(t,x) for i,v in ipairs(t) do if v==x then return i end end end
         UDim2={new=function() return {} end}; Enum={AutomaticSize={Y="Y"},Font={GothamBold="Bold"}}
+        THEME={PANEL2="panel",WHITE="white"}
         buttons,labels={},{}
         Instance={new=function(class,parent)
             local n=node(class,class,parent)
             n.MouseButton1Click={Connect=function(_,fn) n.click=fn; return {} end}
+            n.FocusLost={Connect=function(_,fn) n.blur=fn; return {} end}
             table.insert(buttons,n); return n
         end}
         FarmPage=node("Farm","Frame"); _config=config; _standFarm=farm

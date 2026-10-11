@@ -134,7 +134,9 @@ class RestockHopTests(unittest.TestCase):
     def test_option_toggle_cancels_running_beta_and_does_not_enable_restock(self):
         targets.StandTargetTests.build_ui(self)
         self.run_lua('''
-        function MakeToggle(_,label,default,fn) hopChange=fn; hopDefault=default end
+        function MakeToggle(_,label,default,fn)
+            if label=="Hop After Restock Limit (BETA)" then hopChange=fn; hopDefault=default end
+        end
         ''')
         source = (ROOT / 'UI.lua').read_text()
         chunk = source[source.index('    MakeToggle(FarmPage, "Hop After Restock Limit'):source.index('    local refreshTargetList')]

@@ -22,7 +22,7 @@ class WhiteAITests(unittest.TestCase):
     def test_active_dev_luau_files_parse_without_syntax_errors(self):
         project = Path(__file__).resolve().parents[1]
         for module in ("CombatFarm.lua", "WhiteAI.lua", "UI.lua",
-                       "StandFarm.lua", "Config.lua", "DevMain.lua"):
+                       "StandFarm.lua", "StandTransfer.lua", "StandV2UI.lua", "ServerHop.lua", "Farm.lua", "Config.lua", "DevMain.lua"):
             with self.subTest(module=module):
                 self.assertTrue(check_luau((project / module).read_text(encoding="utf-8")),
                                 f"{module} has syntax errors or unrecognized grammar")
@@ -36,10 +36,10 @@ class WhiteAITests(unittest.TestCase):
             encoding="utf-8")
         ui = (Path(__file__).resolve().parents[1] / "UI.lua").read_text(
             encoding="utf-8")
-        self.assertIn('StandFarm  = {"Init", "Start", "Stop", "GetStatus"}', loader)
+        self.assertRegex(loader, r'StandFarm\s*=\s*\{"Init", "Start", "Stop", "GetStatus"[,}]')
         self.assertIn('StandFarmEnabled = false', cfg)
         self.assertIn('StandFarmPityLimit = 20', cfg)
-        self.assertIn('function StandFarm:Start()', src)
+        self.assertIn('function StandFarm:Start(', src)
         self.assertIn('function StandFarm:Stop()', src)
         self.assertIn('return nil, "Stand skin check unavailable:', src)
         self.assertIn('if skin ~= "None" and skin ~= "" then', src)

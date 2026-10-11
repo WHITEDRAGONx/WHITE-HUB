@@ -53,7 +53,7 @@ local function resetHourlyCacheIfNeeded()
     end
 end
 
-local function TPReturner(canContinue)
+local function TPReturner(canContinue, onDestination)
     if canContinue and not canContinue() then return false end
     resetHourlyCacheIfNeeded()
 
@@ -84,6 +84,8 @@ local function TPReturner(canContinue)
                 if canContinue and not canContinue() then return false end
                 table.insert(AllIDs, id)
                 saveIds()
+                if canContinue and not canContinue() then return false end
+                if onDestination and not onDestination(id) then return false end
                 if canContinue and not canContinue() then return false end
                 TeleportService:TeleportToPlaceInstance(PlaceID, id, Player)
                 return true
@@ -133,8 +135,9 @@ function ServerHop:Init(Modules)
     end)
 end
 
-function ServerHop:Hop(canContinue)
+function ServerHop:Hop(canContinue, onDestination)
     if canContinue ~= nil and type(canContinue) ~= "function" then return false end
+    if onDestination ~= nil and type(onDestination) ~= "function" then return false end
     if hopBusy then return false end
     if _config and _config:Get("StayInPrivateServer") then
         moduleLog("INFO", "[ServerHop] StayInPrivateServer is ON — skipping hop.")
@@ -144,9 +147,9 @@ function ServerHop:Hop(canContinue)
     moduleLog("INFO", "[ServerHop] Hopping to a new server...")
     hopBusy = true
     local ok, result = pcall(function()
-        if TPReturner(canContinue) then return true end
+        if TPReturner(canContinue,onDestination) then return true end
         if canContinue and not canContinue() then return false end
-        if foundAnything ~= "" then return TPReturner(canContinue) end
+        if foundAnything ~= "" then return TPReturner(canContinue,onDestination) end
         return false
     end)
     hopBusy = false

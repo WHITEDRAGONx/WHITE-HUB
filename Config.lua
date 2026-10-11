@@ -30,6 +30,9 @@ local Defaults = {
     StandFarmConsumable = "Mysterious Arrow",
     StandFarmAutoRestock = false, -- Local collection; optional transfer configured separately.
     StandFarmRestockHop = false, -- One guarded transfer, then manual beta restart.
+    StandFarmResumeAfterHop = false, -- Explicit opt-in exception for owned transfer only.
+    StandFarmMaxHops = 3,
+    StandFarmSkinTargets = {}, -- Exact wishlist; every skin is still protected.
     StandFarmRestockPendingItem = "", -- Non-secret restart notice, never a resume command.
     StandFarmPityLimit = 20,
 

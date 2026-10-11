@@ -15,11 +15,50 @@ local activeMode = "stand"
 local activeConsumable = "Mysterious Arrow"
 local restockInFlight, restockingItem = 0, nil
 local serverHop, hopInFlight = nil, 0
+local transfer, failureConnection, claimedResume
+local recovering = false
+local awaitingTransfer = false
+local chain = {hops=0,visited={}}
+local activeSkins = {}
+local metrics, metricClock = {}, nil
 local interactionBusy, pending = false, nil
 local hiddenDialogues, selectedCallbacks = {}, {}
 local callbackInFlight, skillInFlight = 0, 0
 local preparedCharacter, respawnFrom, worthinessCharacter
 local cleanupDialogue
+
+local function newMetrics()
+    return {attempts=0,arrows=0,ribs=0,rokas=0,rolls=0,restocks=0,elapsed=0,lastStand="",lastSkin=""}
+end
+local function metricSnapshot()
+    local out={}
+    for k,v in pairs(metrics) do out[k]=v end
+    out.elapsed=(out.elapsed or 0)+(metricClock and os.clock()-metricClock or 0)
+    return out
+end
+local function freezeMetrics()
+    metrics=metricSnapshot(); metricClock=nil
+end
+local function clearTransfer()
+    if failureConnection then pcall(function() failureConnection:Disconnect() end); failureConnection=nil end
+    if transfer then transfer:Invalidate() end
+end
+local function skinSelection()
+    local value=config:Get("StandFarmSkinTargets")
+    if value==nil then return {} end
+    if type(value)~="table" then return nil,"Invalid skin list; no items consumed" end
+    local out,seen,count={},{},0
+    for key,name in pairs(value) do
+        count=count+1
+        if type(key)~="number" or key%1~=0 or key<1 or key>#value or count>25
+            or type(name)~="string" or name=="" or name=="None" or #name>100 or name:find("%c") then
+            return nil,"Invalid skin list; no items consumed"
+        end
+        if not seen[name] then out[#out+1]=name; seen[name]=true end
+    end
+    if count~=#value then return nil,"Invalid skin list; no items consumed" end
+    return out
+end
 
 local function log(level, message)
     status = message
@@ -128,8 +167,14 @@ local function isDesiredStand(stand, selected)
     return false
 end
 
+local function sameNames(a,b)
+    if not a or not b or #a~=#b then return false end
+    for _,name in ipairs(a) do if not isDesiredStand(name,b) then return false end end
+    return true
+end
+
 -- Returns true only when a stand is safe to overwrite.
-local function shouldReplace(stand, selected, char, token, mode)
+local function shouldReplace(stand, selected, char, token, mode, skins)
     if stand == nil then return false, "PlayerStats.Stand unavailable" end
     if stand == "None" then return false, nil end
     if mode ~= "shiny" and isDesiredStand(stand, selected) then
@@ -142,6 +187,10 @@ local function shouldReplace(stand, selected, char, token, mode)
     end
     if skin == "" then return false, "Stand skin check inconclusive; preserving current Stand" end
     if skin ~= "None" and skin ~= "" then
+        metrics.lastSkin=skin:sub(1,100)
+        if isDesiredStand(skin,skins or activeSkins) then
+            return false,"Desired skin found: " .. skin:sub(1,100) .. "; preserved, stopping."
+        end
         return false, "Skin detected (" .. skin .. "); preserved, stopping."
     end
     return true, nil
@@ -434,6 +483,7 @@ local function interact(token, name, selected, mode)
         return ok, reason
     end
     -- Exactly one activation per item. A missing GUI is not permission to retry.
+    metrics.attempts=(metrics.attempts or 0)+1
     local activated = pcall(function() tool:Activate() end)
     if not activated then return finish(false, "Could not activate " .. name .. "; result pending") end
     local openedAt = os.clock()
@@ -450,6 +500,8 @@ local function interact(token, name, selected, mode)
         if resultConfirmed(name) then
             if not statAt then statAt = now end
             if not dialogueGui() then
+                local counter=name=="Rokakaka" and "rokas" or (name=="Mysterious Arrow" and "arrows" or "ribs")
+                metrics[counter]=(metrics[counter] or 0)+1
                 log("INFO", name .. " confirmed by PlayerStats.Stand; clicks=" .. clicks)
                 log("INFO", ("%s timing: inputs=%.2fs; stat=%.2fs; closed=%.2fs; after-input=%.2fs")
                     :format(name, firstInputAt and lastInputAt - firstInputAt or 0,
@@ -628,21 +680,70 @@ local function restockHop(token, name, selected, mode)
         return permitted() -- Skin lookup can yield; check cancellation again.
     end
     if not guarded() then return false, "Restock hop blocked by Stand/skin/state check" end
+    local resume=config:Get("StandFarmResumeAfterHop")==true
+    local maxHops=tonumber(config:Get("StandFarmMaxHops")) or 3
+    if maxHops%1~=0 or maxHops<1 or maxHops>5 then return false,"Invalid hop budget" end
+    if resume and chain.hops>=maxHops then return false,"Auto-resume hop budget reached" end
+    local teleportService=game:GetService("TeleportService")
+    if resume and (not transfer or not transfer:Available() or not teleportService
+        or not teleportService.TeleportInitFailed) then
+        resume=false
+        log("WARN","Auto-resume unavailable in this executor; transfer will require manual restart")
+    end
+    clearTransfer()
+    local issuedRecord, transferFailed
+    if resume then
+        local connected,connection=pcall(function()
+            return teleportService.TeleportInitFailed:Connect(function(who)
+                if who==player and runToken==token then
+                    transferFailed=true
+                    awaitingTransfer=false
+                    if transfer then transfer:Invalidate() end
+                    config:Set("StandFarmRestockPendingItem","")
+                    stoppedOn="Teleport failed; automatic resume cancelled"
+                    log("WARN",stoppedOn)
+                end
+            end)
+        end)
+        if connected and connection then failureConnection=connection else resume=false end
+    end
+    if not guarded() then clearTransfer(); return false,"Restock transfer cancelled before submission" end
+    local function destination(id)
+        if not resume then return true end
+        if transferFailed or not guarded() then return false end
+        local visited={}
+        for i,job in ipairs(chain.visited) do visited[i]=job end
+        visited[#visited+1]=tostring(game.JobId)
+        local issuedAt=os.time()
+        issuedRecord={id=game:GetService("HttpService"):GenerateGUID(false),created=issuedAt,expires=issuedAt+900,
+            place=game.PlaceId,origin=tostring(game.JobId),destination=id,hops=chain.hops+1,maxHops=maxHops,
+            visited=visited,mode=mode,source=activeConsumable,targets=activeTargets,skins=activeSkins,
+            pityLimit=tonumber(config:Get("StandFarmPityLimit")) or 0,stand=stand,pity=readPity(),metrics=metricSnapshot()}
+        if not transfer:Issue(issuedRecord) then return false end
+        return guarded()
+    end
+    freezeMetrics()
     running = false
     config:Set("StandFarmEnabled", false)
     config:Set("StandFarmRestockPendingItem", name)
     stoppedOn = "Restock transfer pending; consumption stopped"
     log("INFO", "Restock exhausted for " .. name .. "; requesting ONE server transfer, beta stopped")
     hopInFlight = hopInFlight + 1
-    local ok, requested = pcall(function() return serverHop:Hop(guarded) end)
+    local ok, requested = pcall(function() return serverHop:Hop(guarded,destination) end)
     hopInFlight = hopInFlight - 1
     if runToken ~= token then return false, "Stopped" end
+    if transferFailed then return false,stoppedOn end
     if ok and requested then
-        stoppedOn = "Teleport requested; reload DevMain and restart beta manually after joining"
+        awaitingTransfer=true
+        chain.hops=chain.hops+1
+        if issuedRecord then chain.visited=issuedRecord.visited end
+        stoppedOn = issuedRecord and "Teleport requested; one-use opt-in resume armed for destination"
+            or "Teleport requested; reload DevMain and restart beta manually after joining"
         log("INFO", stoppedOn)
         return true
     end
     config:Set("StandFarmRestockPendingItem", "")
+    clearTransfer()
     stoppedOn = "Restock transfer not confirmed; beta remains stopped"
     log("WARN", stoppedOn)
     return false, stoppedOn
@@ -682,6 +783,7 @@ local function ensureItem(token, name, selected, mode)
     if not active(token) then return false, "Stopped" end
     if not ready then return false, recoveryReason end
     log("INFO", "Restock confirmed: " .. name .. "; safe spot ready; rechecking Stand/skin/pity")
+    metrics.restocks=(metrics.restocks or 0)+1
     return true, nil, true
 end
 
@@ -808,12 +910,15 @@ local function loop(token, selected, mode, consumable)
                 break
             end
             rolls = rolls + 1
+            metrics.rolls=(metrics.rolls or 0)+1
+            metrics.lastStand=obtained
             log("INFO", ("%s result %d: %s | pity=%s"):format(
                 consumable == "Mysterious Arrow" and "Arrow" or "Rib", rolls, tostring(obtained), tostring(readPity())))
             if not waitActive(token, 0.8) then break end
         end
     end
     if runToken == token then
+        freezeMetrics()
         running = false
         config:Set("StandFarmEnabled", false)
         if not stoppedOn then log("INFO", "Stand Farm stopped") end
@@ -821,16 +926,22 @@ local function loop(token, selected, mode, consumable)
 end
 
 function StandFarm:Init(modules)
-    cleanupDialogue(true)
     runToken = runToken + 1
+    running=false
+    clearTransfer() -- Cancels an old instance; new module has no transfer reference yet.
+    cleanupDialogue(true)
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
     itemFarm = modules.Farm
     serverHop = modules.ServerHop
+    transfer=modules.StandTransfer
+    metrics,metricClock,activeSkins,chain=newMetrics(),nil,{}, {hops=0,visited={}}
+    recovering,claimedResume=false,nil
+    awaitingTransfer=false
     preparedCharacter, respawnFrom, worthinessCharacter = nil, nil, nil
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
     activeMode = "stand"
     activeConsumable = "Mysterious Arrow"
-    log("INFO", "Build SF-RESTOCK-HOP-20261011-R8; experimental guarded hop, Roblox validation pending")
+    log("INFO", "Build SF-V2-20261011-R9; resume/skins/pity beta, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -843,7 +954,9 @@ function StandFarm:Init(modules)
     end
 end
 
-function StandFarm:Start()
+function StandFarm:Start(resumeRecord)
+    if resumeRecord~=nil and resumeRecord~=claimedResume then return false,"Unclaimed resume request" end
+    if awaitingTransfer then return false,"Teleport already requested; wait for arrival or verify failure before reloading" end
     clearConfirmedPending()
     if running or interactionBusy or callbackInFlight > 0 or skillInFlight > 0 or restockInFlight > 0 or hopInFlight > 0 then
         return false, "Stand Farm already running or cancelling callbacks"
@@ -853,6 +966,8 @@ function StandFarm:Start()
     local mode = config and config:Get("StandFarmMode")
     if mode == nil then mode = "stand" end
     if mode ~= "stand" and mode ~= "shiny" then return false, "Invalid farm mode; nothing consumed" end
+    local skins,skinReason=skinSelection()
+    if not skins then return false,skinReason end
     local consumable = config:Get("StandFarmConsumable")
     if consumable == nil then consumable = "Mysterious Arrow" end
     if consumable ~= "Mysterious Arrow" and consumable ~= "Rib Cage of The Saint's Corpse" then
@@ -875,7 +990,7 @@ function StandFarm:Start()
     if stand ~= "None" then
         local char = getCharacter()
         if not char then return false, "Character not ready" end
-        local _, reason = shouldReplace(stand, selected, char, nil, mode)
+        local _, reason = shouldReplace(stand, selected, char, nil, mode,skins)
         if reason then return false, reason end
     end
     -- Skin lookup yields: a Stop or competing Start invalidates this request.
@@ -886,6 +1001,15 @@ function StandFarm:Start()
     local currentConsumable = config:Get("StandFarmConsumable")
     if currentConsumable == nil then currentConsumable = "Mysterious Arrow" end
     if currentConsumable ~= consumable then return false, "Consumable changed during skin check; Start cancelled" end
+    if not sameNames(skinSelection(),skins) or (mode=="stand" and not sameNames(targetSelection(),selected)) then
+        return false,"Targets changed during skin check; Start cancelled"
+    end
+    if resumeRecord and config:Get("StandFarmResumeAfterHop")~=true then return false,"Auto-resume disabled" end
+    if resumeRecord and (os.time()>=resumeRecord.expires or readStand()~=resumeRecord.stand or readPity()~=resumeRecord.pity
+        or (tonumber(config:Get("StandFarmPityLimit")) or 0)~=resumeRecord.pityLimit
+        or (tonumber(config:Get("StandFarmMaxHops")) or 3)~=resumeRecord.maxHops) then
+        return false,"Arrival state/budget changed during verification; no consumption"
+    end
     if dialogueGui() then return false, "Dialogue opened during skin check" end
     runToken = runToken + 1
     local token = runToken
@@ -893,6 +1017,15 @@ function StandFarm:Start()
     activeTargets = selected -- Private snapshot; config edits cannot change this run.
     activeMode = mode
     activeConsumable = consumable
+    activeSkins=skins
+    clearTransfer()
+    if resumeRecord then
+        metrics=resumeRecord.metrics; rolls=metrics.rolls
+        chain={hops=resumeRecord.hops,visited=resumeRecord.visited}
+    else chain={hops=0,visited={}} end
+    metrics.startPity=metrics.startPity or readPity()
+    metricClock=os.clock()
+    claimedResume=nil
     preparedCharacter, worthinessCharacter = nil, nil
     config:Set("StandFarmEnabled", true)
     config:Set("StandFarmRestockPendingItem", "")
@@ -908,9 +1041,73 @@ function StandFarm:Start()
     return true, "Stand Farm started"
 end
 
+function StandFarm:GetResumeSupport()
+    local service=game:GetService("TeleportService")
+    return transfer~=nil and transfer:Available() and service~=nil and service.TeleportInitFailed~=nil
+end
+
+function StandFarm:RecoverTransfer()
+    if recovering or not transfer or not transfer:Read() then return false end
+    local record,reason=transfer:Claim(game.PlaceId,tostring(game.JobId))
+    if not record then log("INFO",reason .. "; beta remains stopped"); return false end
+    local token=runToken
+    local function settingsMatch()
+        local source=config:Get("StandFarmConsumable") or "Mysterious Arrow"
+        local mode=config:Get("StandFarmMode") or "stand"
+        local targets=mode=="stand" and targetSelection() or {}
+        local skins=skinSelection()
+        return runToken==token and not running and not pending and not interactionBusy
+            and callbackInFlight==0 and skillInFlight==0 and hopInFlight==0 and restockInFlight==0
+            and config:Get("StandFarmResumeAfterHop")==true and config:Get("StandFarmAutoRestock")==true
+            and config:Get("StandFarmRestockHop")==true and not config:Get("StayInPrivateServer")
+            and not config:Get("FarmEnabled") and not config:Get("AutoSell") and not config:Get("AutoPrestige")
+            and not config:Get("QuestFarmEnabled") and not config:Get("NPCFarmEnabled")
+            and source==record.source and mode==record.mode and sameNames(targets,record.targets) and sameNames(skins,record.skins)
+            and (tonumber(config:Get("StandFarmPityLimit")) or 0)==record.pityLimit
+            and (tonumber(config:Get("StandFarmMaxHops")) or 3)==record.maxHops
+    end
+    if not settingsMatch() then log("WARN","Arrival transfer settings changed; beta remains stopped"); return false end
+    recovering=true
+    log("INFO","Owned transfer claimed once; waiting for player state before optional resume")
+    task.spawn(function()
+        local ok=pcall(function()
+            local deadline=os.clock()+30
+            while settingsMatch() and os.clock()<deadline and os.time()<record.expires do
+                local char=getCharacter()
+                if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("RemoteFunction")
+                    and player:FindFirstChildOfClass("Backpack") and not dialogueGui()
+                    and readStand()==record.stand and readPity()==record.pity then
+                    claimedResume=record
+                    local started,startReason=self:Start(record)
+                    claimedResume=nil
+                    if not started and runToken==token then log("WARN","Resume held: " .. tostring(startReason)) end
+                    return
+                end
+                task.wait(0.2)
+            end
+            if runToken==token then log("WARN","Arrival state unconfirmed or settings changed; no automatic consumption") end
+        end)
+        recovering=false
+        claimedResume=nil
+        if not ok and runToken==token then log("WARN","Arrival recovery failed safely; enable beta manually") end
+    end)
+    return true
+end
+
+function StandFarm:ResetStatistics()
+    if running or pending or interactionBusy or hopInFlight>0 or restockInFlight>0 or recovering or awaitingTransfer then
+        return false,"Stop and resolve pending actions before resetting statistics"
+    end
+    metrics,metricClock,rolls=newMetrics(),nil,0
+    return true
+end
+
 function StandFarm:Stop()
     runToken = runToken + 1
     running = false
+    freezeMetrics()
+    clearTransfer()
+    claimedResume=nil
     cleanupDialogue(true)
     if config then config:Set("StandFarmEnabled", false); config:Set("StandFarmRestockPendingItem", "") end
     stoppedOn = "Stopped by user"
@@ -925,16 +1122,26 @@ end
 function StandFarm:GetStatus()
     local targets = {}
     for index, name in ipairs(activeTargets) do targets[index] = name end
+    local counters=metricSnapshot()
+    counters.hops=chain.hops
+    counters.pity_delta=readPity() and counters.startPity and readPity()-counters.startPity or nil
+    local limit=tonumber(config and config:Get("StandFarmPityLimit")) or 0
+    counters.pity_remaining=limit>0 and readPity() and math.max(0,limit-readPity()) or nil
+    counters.rolls_per_hour=(counters.elapsed or 0)>0 and (counters.rolls or 0)*3600/counters.elapsed or 0
     return { running = running, message = status,
         rolls = rolls, pity = readPity(), stand = readStand(), stop_reason = stoppedOn,
         mode = activeMode, consumable = activeConsumable, restocking_item = restockingItem,
         hopping = hopInFlight > 0,
+        metrics=counters,recovering=recovering,awaiting_transfer=awaitingTransfer,
         targets = targets, pending_item = pending and pending.name or nil }
 end
 
 function StandFarm:Destroy()
     runToken = runToken + 1
     running = false
+    freezeMetrics()
+    clearTransfer()
+    claimedResume=nil
     cleanupDialogue(true)
 end
 

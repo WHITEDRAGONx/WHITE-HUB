@@ -95,6 +95,7 @@ local _config      = nil
 local _webhook     = nil
 local _combatFarm  = nil
 local _standFarm = nil
+local _standV2UI = nil
 local _serverHop   = nil
 local _whiteAI     = nil
 local _runtimeLog   = nil
@@ -119,6 +120,7 @@ function UI:Init(Modules)
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
+    _standV2UI = Modules.StandV2UI
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
@@ -909,6 +911,7 @@ function UI:Create()
             if _config then _config:Set("StandFarmRestockHop", enabled) end
         end)
     UI:AddLabel(FarmPage, "Restock hop: ONE transfer, no sales. Reload DevMain and restart beta manually after joining.")
+    if _standV2UI then _standV2UI:BuildResume(FarmPage,UI,_config,_standFarm,MakeToggle,trackConnection,THEME) end
     local cancelRestockHop = Instance.new("TextButton", FarmPage)
     cancelRestockHop.Size = UDim2.new(1, -4, 0, 32)
     cancelRestockHop.Text = "CANCEL RESTOCK TRANSFER / STOP"
@@ -1032,6 +1035,8 @@ function UI:Create()
     end))
     refreshTargetList()
 
+    if _standV2UI then _standV2UI:BuildSkins(FarmPage,UI,_config,_standFarm,stopForTargetEdit,trackConnection,THEME) end
+
     local pityInput = Instance.new("TextBox", FarmPage)
     pityInput.Size = UDim2.new(1, -4, 0, 30)
     pityInput.BackgroundColor3 = THEME.PANEL2
@@ -1091,6 +1096,7 @@ function UI:Create()
         end
     end)
 
+    if _standV2UI then _standV2UI:BuildStats(FarmPage,UI,_standFarm,trackConnection,styleActionButton) end
     AutoCanvas(FarmPage)
 
     -- =====================

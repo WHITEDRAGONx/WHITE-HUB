@@ -1,5 +1,9 @@
 # R8 optional restock hop — NOT VALIDATED IN ROBLOX
 
+Current build is R9. Keep Auto Resume Owned Hop OFF to reproduce the manual R8
+procedures. R9's explicit opt-in exception and V2 tests are documented in
+STAND_V2_DELTA_QA.md.
+
 Build: `SF-RESTOCK-HOP-20261011-R8`. R7's local restock and consumable protections
 remain; Hop After Restock Limit is an additional opt-in, default false.
 

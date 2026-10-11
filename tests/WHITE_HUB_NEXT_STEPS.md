@@ -1,5 +1,15 @@
 # WHITE HUB — experimental delivery and next gates
 
+## Current V2 completion package
+
+R9 completes the planned beta feature surface: Arrow/Rib, multi-Stand and exact
+skin wishlist (all skins protected), bounded restock, opt-in owned-hop continuation
+and pity/session counters. New StandTransfer/StandV2UI helpers are dev-only; plain
+reload remains stopped. Native marker + strict one-use intent + queue/file support
+are required for auto continuation. See STAND_V2_DELTA_QA.md. Implementation is not
+YBA validation; storage and discarding skins remain excluded until validated.
+Next development milestone: incremental Smart Farm Engine ownership/scheduler.
+
 Only dev/2026-10-10-autosell-compat is authorized. Main, Inventory and XenonLock
 remain protected. Offline tests and an HTTP health check are not YBA validation.
 
@@ -35,7 +45,7 @@ successful job. Owner reports sales working; preserve Merchant as is.
 
 ## Owner QA now
 
-1. Run DevMain on Delta, confirm R8 build and no bootstrap failures.
+1. Run DevMain on Delta, confirm R9 build and no bootstrap failures.
 2. Follow the controlled list/Stop/respawn/skin/pity tests in the Stand QA guide.
 3. On the already paired device, enable WHITE AI and send an actionable report.
    An idle manual report may legitimately return no_incident without Gemini.
@@ -49,11 +59,10 @@ successful job. Owner reports sales working; preserve Merchant as is.
 
 1. Stable QA: Quest/NPC credit and switching, farm cancellation, reload, respawn,
    hop and prolonged AutoPrestige. Fix only evidenced failures.
-2. Stand V2 next slices: validate any-skin mode, Rib and bounded restock; then
-   skin-specific selection and full cross-server restock recovery. R8 only requests
-   a transfer and requires manual restart; automatic consumption after reload
-   remains prohibited. Each slice needs checkpoint, tests and YBA
-   evidence. No storage integration before functional validation.
+2. Stand V2 QA: validate R9 owned-hop continuation and metrics, plus outstanding
+   Shiny/Rib/restock paths. The owner explicitly authorized opt-in continuation
+   after owned hops; ordinary reload still cannot start consumption. No storage
+   integration or skin destruction before functional validation.
 3. Smart Farm Engine: one owner for character/dialogues, task priorities, bounded
    recovery and progress metrics. Integrate working modules incrementally.
 4. UI V4: mobile scrolling/layout/dashboard after runtime stability; preserve

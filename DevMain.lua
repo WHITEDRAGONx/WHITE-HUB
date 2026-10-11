@@ -660,7 +660,9 @@ local moduleRequirements = {
     ServerHop  = {"Init"},
     Inventory  = {"Init"},
     CombatFarm = {"Init"},
-    StandFarm  = {"Init", "Start", "Stop", "GetStatus"},
+    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
+    StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
+    StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
     Farm       = {"Init", "Start"},
     UI         = {"Init", "Create"},
 }
@@ -738,6 +740,8 @@ local moduleFiles = {
     { key = "Inventory",  file = "Inventory.lua" },
     { key = "CombatFarm", file = "CombatFarm.lua" },
     { key = "StandFarm",  file = "StandFarm.lua" },
+    { key = "StandTransfer", file = "StandTransfer.lua" },
+    { key = "StandV2UI", file = "StandV2UI.lua" },
     { key = "Farm",       file = "Farm.lua" },
     { key = "WhiteAI",    file = "WhiteAI.lua" },
     { key = "UI",         file = "UI.lua" },
@@ -785,7 +789,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandFarm", "Farm", "WhiteAI", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "WhiteAI", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()
@@ -839,3 +843,5 @@ task.spawn(function()
 end)
 
 LOG("BOOT", "WHITE HUB V3 running. All critical modules passed boot validation.")
+-- Only a valid one-use arrival intent can authorize the opt-in exception.
+Modules.StandFarm:RecoverTransfer()
