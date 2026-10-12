@@ -2,9 +2,9 @@
 
 ## Permanent WHITE HUB loader — 2026-10-12
 
-Public installation now uses WHITE-HUB/main/Loader.lua, a versionless entry point
-that forwards to the current public modular release. Existing repository history
-and legacy source are preserved. README requirements updated. 307 offline checks
+Public installation now uses WHITE-HUB/main/Main.lua, the canonical public modular entry point. The owner renamed the current
+repository to WHITE-HUB and the old repository to WHITE-HUB-Legacy. Both histories
+are preserved. README requirements updated. 307 offline checks
 passed, including the Quest/NPC invocation adapter and permanent loader routing.
 
 ## V5 beta combat invocation hotfix — 2026-10-12

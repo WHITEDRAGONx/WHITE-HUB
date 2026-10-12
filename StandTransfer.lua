@@ -99,7 +99,7 @@ local ok,s=pcall(readfile,%q); if not ok then return end
 local d,r=pcall(function() return game:GetService('HttpService'):JSONDecode(s) end)
 if not d or type(r)~='table' or r.id~=%q or r.destination~=game.JobId or r.place~=game.PlaceId or type(r.expires)~='number' or r.expires<=os.time() then return end
 local markerOK,mark=pcall(function() return game:GetService('TeleportService'):GetTeleportSetting('WHITE_HUB_STAND_TRANSFER_V1') end); if not markerOK or mark~=r.id then return end
-local source=game:HttpGet('https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB-V3/main/Main.lua')
+local source=game:HttpGet('https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Main.lua')
 local freshOk,freshText=pcall(readfile,%q); if not freshOk then return end
 local decoded,fresh=pcall(function() return game:GetService('HttpService'):JSONDecode(freshText) end)
 if not decoded or type(fresh)~='table' or fresh.id~=%q or fresh.destination~=game.JobId or fresh.place~=game.PlaceId or type(fresh.expires)~='number' or fresh.expires<=os.time() then return end
