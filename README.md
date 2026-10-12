@@ -29,7 +29,11 @@ and game updates can affect behavior. A syntax test is not proof of live behavio
 
 ## Beta testing
 
-Choose one farm at a time. Stand/Shiny mode protects detected skins and stops when
+Choose one farm at a time. Auto Sell may stay ON during Stand/Shiny/Rib Farm
+when Item Farm is OFF. Restock collects consumables without selling. A finishing
+Item Farm action or sale must complete before Stand Farm can start.
+
+Stand/Shiny mode protects detected skins and stops when
 skin identification is inconclusive. Configure obtainable targets, sufficient
 Worthiness and a pity limit. Restock/hop/resume are optional; ordinary reload does
 not automatically restart Stand consumption. The optional resume requires the
