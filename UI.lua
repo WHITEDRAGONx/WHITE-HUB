@@ -1393,6 +1393,33 @@ function UI:Create()
     local copyErrorBtn = makeConsoleButton("Copy ERROR", 0.54, 0.27, false)
     local clearLogBtn  = makeConsoleButton("Clear",      0.81, 0.19, false)
 
+    -- Controls stay separate from the existing four buttons for mobile readability.
+    local consoleTools = Instance.new("Frame")
+    consoleTools.Size = UDim2.new(1,-4,0,34)
+    consoleTools.BackgroundTransparency = 1
+    consoleTools.Parent = ConsolePage
+
+    local function makeConsoleTool(text, x, w)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(w,-3,1,0)
+        btn.Position = UDim2.new(x,0,0,0)
+        btn.BackgroundColor3 = THEME.PANEL3
+        btn.BorderSizePixel = 0
+        btn.Text = text
+        btn.TextColor3 = THEME.WHITE
+        btn.TextSize = 11
+        btn.Font = Enum.Font.GothamBold
+        btn.AutoButtonColor = false
+        btn.Parent = consoleTools
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
+        styleActionButton(btn, false)
+        return btn
+    end
+
+    local followLogBtn = makeConsoleTool("Follow: ON", 0.00, 0.50)
+    local copySaleBtn = makeConsoleTool("Copy SALE", 0.50, 0.50)
+    local followConsole = true
+
     local warnStroke = copyWarnBtn:FindFirstChildOfClass("UIStroke")
     if warnStroke then warnStroke.Color = THEME.GOLD end
     local errorStroke = copyErrorBtn:FindFirstChildOfClass("UIStroke")
@@ -1422,9 +1449,13 @@ function UI:Create()
                 return TextService:GetTextSize(text, 11, Enum.Font.Code, Vector2.new(width, 100000))
             end)
             local height = ok and math.max(20, bounds.Y + 10) or math.max(20, (#text / 45) * 14)
+            -- Do not force the view to the bottom while the user is reading old entries.
+            -- Always clamp the retained position to the new canvas dimensions.
+            local retainedY = logScroll.CanvasPosition.Y
             logLabel.Size = UDim2.new(1,-8,0,height)
             logScroll.CanvasSize = UDim2.new(0,0,0,height + 6)
-            logScroll.CanvasPosition = Vector2.new(0, math.max(0, height - logScroll.AbsoluteSize.Y))
+            local maxY = math.max(0, height + 6 - logScroll.AbsoluteSize.Y)
+            logScroll.CanvasPosition = Vector2.new(0, followConsole and maxY or math.clamp(retainedY, 0, maxY))
         end)
     end
 
@@ -1490,6 +1521,52 @@ function UI:Create()
         return table.concat(lines, "\n")
     end
 
+    -- Export only Auto Sell performance and Inventory events. Unlike the scrolling
+    -- label, this report can be pasted and searched even as new entries arrive.
+    local function buildSaleRuntimeLog()
+        if not _runtimeLog or type(_runtimeLog.GetEntries) ~= "function" then
+            return "WHITE HUB V5 - Sell performance log unavailable"
+        end
+
+        local lines = {
+            "WHITE HUB V5 - AUTO SELL DIAGNOSTICS",
+            "========================================",
+            "Runtime ID: " .. tostring(_runtimeLog.RuntimeId or "unknown"),
+            "",
+            "AUTO SELL EVENTS",
+            "----------------------------------------",
+        }
+        local count, completed = 0, 0
+        local ok, entries = pcall(function() return _runtimeLog:GetEntries() end)
+        if ok and type(entries) == "table" then
+            for _, entry in ipairs(entries) do
+                local message = tostring(entry.Message or "")
+                local isSellPerf = message:find("[SellPerf]", 1, true) ~= nil
+                local isInventory = tostring(entry.Module or "") == "Inventory"
+                    and (message:find("Sell", 1, true) ~= nil
+                        or message:find("Sold", 1, true) ~= nil
+                        or message:find("Merchant", 1, true) ~= nil)
+                if isSellPerf or isInventory then
+                    count = count + 1
+                    if isSellPerf and message:find("END id=", 1, true) then
+                        completed = completed + 1
+                    end
+                    lines[#lines + 1] = ("[%s] [%s] [%s] %s"):format(
+                        tostring(entry.Time or "?"),
+                        tostring(entry.Level or "INFO"),
+                        tostring(entry.Module or "General"), message
+                    )
+                end
+            end
+        end
+        if count == 0 then
+            lines[#lines + 1] = "No Auto Sell events recorded in this runtime."
+        elseif completed == 0 then
+            lines[#lines + 1] = "Sale has not finished yet: wait for [SellPerf] END before copying the final measurements."
+        end
+        return table.concat(lines, "\n")
+    end
+
     local function copyConsoleReport(button, idleText, report, successMessage)
         if copyToClipboard(report) then
             button.Text = "Copied!"
@@ -1515,6 +1592,16 @@ function UI:Create()
 
     copyErrorBtn.MouseButton1Click:Connect(function()
         copyConsoleReport(copyErrorBtn, "Copy ERROR", buildFilteredRuntimeLog("ERROR"), "ERROR-only runtime report copied to clipboard.")
+    end)
+
+    copySaleBtn.MouseButton1Click:Connect(function()
+        copyConsoleReport(copySaleBtn, "Copy SALE", buildSaleRuntimeLog(), "Auto Sell diagnostic report copied to clipboard.")
+    end)
+
+    followLogBtn.MouseButton1Click:Connect(function()
+        followConsole = not followConsole
+        followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
+        if followConsole then refreshConsole() end
     end)
 
     clearLogBtn.MouseButton1Click:Connect(function()
