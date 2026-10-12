@@ -1,0 +1,62 @@
+"""Build a whitelist-only public beta from dev without merging private history."""
+from pathlib import Path
+import re
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_PREVIOUS = '718018dac21d9a51e1955f68b4a042f28a534ee1'
+FILES = ('Webhook.lua', 'Movement.lua', 'ServerHop.lua', 'CombatFarm.lua',
+         'StandFarm.lua', 'StandTransfer.lua', 'StandV2UI.lua', 'UICompact.lua',
+         'PrestigeDialogue.lua', 'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
+
+
+def build():
+    result = {name: (ROOT / name).read_text() for name in FILES}
+    # Merchant is protected: retain the existing public version, not the dev variant.
+    result['Inventory.lua'] = subprocess.check_output(
+        ['git', 'show', PUBLIC_PREVIOUS + ':Inventory.lua'], cwd=ROOT).decode()
+    main = (ROOT / 'DevMain.lua').read_text()
+    main = main[main.index('-- ====================='):]
+    main = main.replace('dev/2026-10-10-autosell-compat/', 'main/')
+    main = re.sub(r'    -- Retire the removed E1 scheduler.*?    end\n', '', main, count=1, flags=re.S)
+    main = re.sub(r'^    \{ key = "WhiteAI",.*\n', '', main, flags=re.M)
+    main = main.replace('"WhiteAI", ', '')
+    main = main.replace('for _, name in ipairs({"AutoPrestigeRuntime", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do\n        local module = previous[name]', 'for _, module in pairs(previous) do')
+    main = main.replace('WHITE HUB V3 running.', 'WHITE HUB V5 PUBLIC BETA running.')
+    main = '-- WHITE HUB V5 PUBLIC BETA — owner-authorized release; Auto Prestige is experimental.\n' + main
+    result['Main.lua'] = main
+    ui = (ROOT / 'UI.lua').read_text()
+    ui = re.sub(r'^local _whiteAI\s*= nil\n', '', ui, flags=re.M)
+    ui = re.sub(r'^    _whiteAI\s*= Modules.WhiteAI\n', '', ui, flags=re.M)
+    ui = re.sub(r'^    local AIPage\s*= MakePage\("AIPage"\)\n', '', ui, flags=re.M)
+    ui = re.sub(r'^        \{ name="AI DEBUG", page=AIPage \},\n', '', ui, flags=re.M)
+    start = ui.index('    -- =====================\n    -- WHITE AI DEBUG PAGE')
+    end = ui.index('    -- =====================\n    -- CREDITS PAGE', start)
+    ui = ui[:start] + ui[end:]
+    ui = ui.replace('QuestPage,AIPage}', 'QuestPage}')
+    ui = ui.replace('SILVER-V5-20261012-R1', 'SILVER-V5-PUBLIC-BETA-20261012-R1')
+    result['UI.lua'] = ui
+    config = (ROOT / 'Config.lua').read_text()
+    config = re.sub(r'^    WhiteAI(?:Enabled|Endpoint) = .*\n', '', config, flags=re.M)
+    result['Config.lua'] = config
+    result['UICompact.lua'] = result['UICompact.lua'].replace(
+        "local captions={", "local captions={\n ['Auto Prestige']='Auto prestige (BETA)',")
+    for caption in (" ['COPY LATEST PROPOSAL LINK']='COPY PROPOSAL',", " ['SAVE HTTPS ENDPOINT']='SAVE ENDPOINT',", " ['WHITE AI V1 - DIAGNOSTICS']='AI DIAGNOSTICS',"):
+        result['UICompact.lua'] = result['UICompact.lua'].replace(caption, '')
+    result['StandTransfer.lua'] = result['StandTransfer.lua'].replace(
+        'dev/2026-10-10-autosell-compat/DevMain.lua', 'main/Main.lua').replace(
+        'Only our dev loader is queued.', 'Only our public loader is queued.')
+    result['StandFarm.lua'] = result['StandFarm.lua'].replace('reload DevMain', 'reload Main')
+    return result
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('destination', type=Path)
+    args = parser.parse_args()
+    if args.destination.resolve() == ROOT:
+        parser.error('Use an isolated destination; never overwrite the dev checkout.')
+    args.destination.mkdir(parents=True, exist_ok=True)
+    for name, content in build().items():
+        (args.destination / name).write_text(content)
