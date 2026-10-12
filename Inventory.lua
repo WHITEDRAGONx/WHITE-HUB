@@ -617,11 +617,16 @@ if debug then
 end
 
 local _cachedDialogueType = nil
+-- Negative-cache failed GC discoveries across Merchant items. Successful
+-- closures still follow the original fast path and are never suppressed.
+local _dialogueTypeMissRetryAt = 0
+local _line1982MissRetryAt = 0
 local FINAL_SMALL_CONSTANT_MAX = 2.0
 -- Performance guardrails for Delta/mobile. The FINAL route stays fast, but avoids
 -- full getgc scans and deep patch work every rendered frame.
 local FINAL_FORCE_INTERVAL = 0.02
 local FINAL_GC_RESCAN_INTERVAL = 0.035
+local FINAL_GC_MISS_RETRY_INTERVAL = 1.5 -- Only after a full discovery misses
 
 local function getIndexedUpvalue(fn, index)
     if type(_rawGetUpvalue) ~= "function" or type(fn) ~= "function" then
@@ -660,10 +665,17 @@ local function findLiveDialogueType()
     if _cachedDialogueType and isClientFunctionsLine(_cachedDialogueType, 2035) then
         return _cachedDialogueType
     end
-    if type(_rawGetGC) ~= "function" then return nil end
+    -- isClientFunctionsLine relies on debug.info; without it a GC scan
+    -- cannot identify the target and only causes unnecessary client stalls.
+    if type(_rawGetGC) ~= "function"
+        or not (debug and type(debug.info) == "function") then return nil end
+    if tick() < _dialogueTypeMissRetryAt then return nil end
 
     local ok, objects = pcall(_rawGetGC, true)
-    if not ok or type(objects) ~= "table" then return nil end
+    if not ok or type(objects) ~= "table" then
+        _dialogueTypeMissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+        return nil
+    end
 
     local fallback = nil
     for _, obj in pairs(objects) do
@@ -678,6 +690,9 @@ local function findLiveDialogueType()
     end
 
     _cachedDialogueType = fallback
+    if not fallback then
+        _dialogueTypeMissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+    end
     return fallback
 end
 
@@ -806,6 +821,7 @@ local function newFinalState()
         richObjects = 0,
         constantsZeroed = 0,
         gcScans = 0,
+        gcMissSkips = 0,
     }
 end
 
@@ -959,7 +975,8 @@ local function fireButtonSignal(button, state)
 end
 
 local function findFresh1982Closure(state)
-    if type(_rawGetGC) ~= "function" then return nil end
+    if type(_rawGetGC) ~= "function"
+        or not (debug and type(debug.info) == "function") then return nil end
 
     -- Reuse the current stage closure. getgc(true) is one of the most expensive
     -- executor operations here, so only scan again after the stage changes or
@@ -969,6 +986,14 @@ local function findFresh1982Closure(state)
     end
 
     local now = tick()
+    -- On Delta, line 1982 is frequently unavailable even though the real
+    -- dialogue signals work. Do not rescan the entire GC every force tick
+    -- after a confirmed miss. Recheck after a short cooldown for compatibility
+    -- with later dialogue stages and game updates.
+    if now < _line1982MissRetryAt then
+        if state then state.gcMissSkips = (state.gcMissSkips or 0) + 1 end
+        return nil
+    end
     if state and (now - (state.lastGCScan or 0)) < FINAL_GC_RESCAN_INTERVAL then
         return nil
     end
@@ -978,7 +1003,10 @@ local function findFresh1982Closure(state)
     end
 
     local ok, objects = pcall(_rawGetGC, true)
-    if not ok or type(objects) ~= "table" then return nil end
+    if not ok or type(objects) ~= "table" then
+        _line1982MissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+        return nil
+    end
 
     local best, fallback = nil, nil
     local bestTimestamp = -math.huge
@@ -996,6 +1024,9 @@ local function findFresh1982Closure(state)
 
     local found = best or fallback
     if state then state.active1982 = found end
+    if not found then
+        _line1982MissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+    end
     return found
 end
 
@@ -1163,9 +1194,9 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     if soldAmount and soldAmount > 0 then
         moduleLog("INFO", string.format(
-            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d",
+            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d gcMissSkips=%d",
             soldAmount, itemName, tick() - startedAt, state.signalFires, state.direct1982Calls,
-            state.richObjects, state.constantsZeroed, state.gcScans or 0
+            state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcMissSkips or 0
         ))
         return true, soldAmount
     end
