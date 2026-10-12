@@ -1418,7 +1418,8 @@ function UI:Create()
 
     local followLogBtn = makeConsoleTool("Follow: ON", 0.00, 0.50)
     local copySaleBtn = makeConsoleTool("Copy SALE", 0.50, 0.50)
-    local followConsole = true
+    local followConsole = not _config or _config:Get("ConsoleFollow") ~= false
+    followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
 
     local warnStroke = copyWarnBtn:FindFirstChildOfClass("UIStroke")
     if warnStroke then warnStroke.Color = THEME.GOLD end
@@ -1564,6 +1565,20 @@ function UI:Create()
         elseif completed == 0 then
             lines[#lines + 1] = "Sale has not finished yet: wait for [SellPerf] END before copying the final measurements."
         end
+
+        -- The sale normally finishes immediately before Server Hop. Show the
+        -- last completed report saved by Farm.lua in the previous server.
+        -- Never execute file contents: this is plain-text diagnostic output.
+        if completed == 0 and type(readfile) == "function" then
+            local savedOk, saved = pcall(readfile, "WhiteHubLastSellReport.txt")
+            if savedOk and type(saved) == "string"
+                and saved:find("WHITE HUB V5 - LAST COMPLETED AUTO SELL", 1, true) == 1
+                and #saved <= 50000 then
+                lines[#lines + 1] = ""
+                lines[#lines + 1] = "LAST COMPLETED SALE (SAVED ON DEVICE / MAY BE FROM PREVIOUS SERVER)"
+                lines[#lines + 1] = saved
+            end
+        end
         return table.concat(lines, "\n")
     end
 
@@ -1601,6 +1616,7 @@ function UI:Create()
     followLogBtn.MouseButton1Click:Connect(function()
         followConsole = not followConsole
         followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
+        if _config then _config:Set("ConsoleFollow", followConsole) end
         if followConsole then refreshConsole() end
     end)
 
