@@ -1457,15 +1457,20 @@ end
 -- 1) Internal Merchant state injection: hidden Option1 > Option1 > Option6.
 -- 2) If unsupported/failed, use adaptive DialogueGui fallback.
 -- =====================
-function Inventory:SellAll()
-    if not _config:Get("FarmEnabled") then return end
+-- Manual invocation uses the exact same Merchant routes, but does not require
+-- the continuous Farm and Auto Sell toggles. All SellItems filters still apply.
+function Inventory:SellAll(manualRequest)
+    local isManual = manualRequest == true
+    if not isManual and not _config:Get("FarmEnabled") then
+        return false, 0, 0, "Farm disabled"
+    end
     if self:IsMoneyMaxed() then
         moduleLog("INFO", "[Inventory] Money already maxed — skipping sell.")
-        return
+        return false, 0, 0, "Money already maxed"
     end
-    if not _config:Get("AutoSell") then
+    if not isManual and not _config:Get("AutoSell") then
         moduleLog("INFO", "[Inventory] AutoSell disabled — skipping sell.")
-        return
+        return false, 0, 0, "Auto Sell disabled"
     end
 
     local sellItems = _config:GetSellItems()
@@ -1479,7 +1484,7 @@ function Inventory:SellAll()
 
     if #toSell == 0 then
         moduleLog("INFO", "[Inventory] No items to sell.")
-        return
+        return false, 0, 0, "No selected items to sell"
     end
 
     table.sort(toSell)
@@ -1564,6 +1569,7 @@ function Inventory:SellAll()
     closeDialogueIfOpen()
     restoreDialogueRendering()
     moduleLog("INFO", "[Inventory] SellAll done — Types sold: " .. soldTypes .. " | Failed: " .. failedTypes)
+    return soldTypes > 0, soldTypes, failedTypes, soldTypes > 0 and nil or "No sale confirmed"
 end
 
 -- =====================
