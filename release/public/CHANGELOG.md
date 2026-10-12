@@ -1,5 +1,21 @@
 # Changelog
 
+## Permanent WHITE HUB loader — 2026-10-12
+
+Public installation now uses WHITE-HUB/main/Loader.lua, a versionless entry point
+that forwards to the current public modular release. Existing repository history
+and legacy source are preserved. README requirements updated. 307 offline checks
+passed, including the Quest/NPC invocation adapter and permanent loader routing.
+
+## V5 beta combat invocation hotfix — 2026-10-12
+
+- Quest/NPC Stand invocation requests are serialized while waiting for replicated
+  confirmation, preventing duplicate ToggleStand requests under latency.
+- A missing SummonedStand flag with no StandMorph no longer skips the request.
+- Bounded retries, Stop/respawn guards and StandSummon diagnostics added.
+- Combat positioning, attacks, kill credit and Merchant unchanged.
+- 305 offline checks passed; actual Quest/NPC invocation needs Delta validation.
+
 ## V5 beta automatic catalog update — 2026-10-12 (Silver R3)
 
 - Quests prioritize names detected in the game; NPC discovery stays live.
