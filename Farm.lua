@@ -6,6 +6,7 @@
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
+local RunService        = game:GetService("RunService")
 
 local Player = Players.LocalPlayer
 local Farm   = {}
@@ -45,6 +46,55 @@ local function moduleLog(level, ...)
     else
         _rawPrint(...)
     end
+end
+
+-- DEV-ONLY diagnostics: observe sale frame times without changing Inventory.lua.
+-- This is intentionally read-only. One Heartbeat connection exists only during SellAll.
+local sellPerfSerial = 0
+local function SellAllWithDiagnostics(source)
+    -- Preserve the original path when Auto Sell is off or Farm is disabled.
+    if not (_config and _config:Get("FarmEnabled") and _config:Get("AutoSell")) then
+        return _inventory:SellAll()
+    end
+
+    sellPerfSerial = sellPerfSerial + 1
+    local id = sellPerfSerial
+    local sampleCount, over50ms, over100ms = 0, 0, 0
+    local maxFrameSeconds, totalFrameSeconds = 0, 0
+    local listening = true
+    local heartbeatConnection = nil
+
+    -- The sampler is best-effort and must never prevent a sale.
+    pcall(function()
+        heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
+            if not listening or type(dt) ~= "number" or dt < 0 then return end
+            sampleCount = sampleCount + 1
+            totalFrameSeconds = totalFrameSeconds + dt
+            if dt > maxFrameSeconds then maxFrameSeconds = dt end
+            if dt >= 0.05 then over50ms = over50ms + 1 end
+            if dt >= 0.10 then over100ms = over100ms + 1 end
+        end)
+    end)
+
+    moduleLog("INFO", ("[Farm][SellPerf] BEGIN id=%d source=%s"):format(id, tostring(source)))
+    local startedAt = tick()
+    local ok, result = pcall(function() return _inventory:SellAll() end)
+    local elapsedSeconds = math.max(0, tick() - startedAt)
+
+    listening = false
+    if heartbeatConnection then
+        pcall(function() heartbeatConnection:Disconnect() end)
+    end
+
+    local avgFrameMs = sampleCount > 0 and (totalFrameSeconds * 1000 / sampleCount) or 0
+    local message = ("[Farm][SellPerf] END id=%d source=%s ok=%s duration=%.3fs frames=%d avgFrame=%.1fms maxFrame=%.1fms slow50ms=%d slow100ms=%d"):format(
+        id, tostring(source), tostring(ok), elapsedSeconds, sampleCount, avgFrameMs,
+        maxFrameSeconds * 1000, over50ms, over100ms
+    )
+    -- Slow frames are correlation evidence, not proof that SellAll caused them.
+    moduleLog((not ok or over100ms > 0) and "WARN" or "INFO", message)
+    if not ok then error(result, 0) end
+    return result
 end
 
 function Farm:Init(Modules)
@@ -106,6 +156,12 @@ local function ApplyHooks()
 end
 
 local function ApplyCrashBypass()
+    -- A/B diagnostic only. Set BEFORE the dev loader in a fresh client session.
+    local env = getgenv and getgenv() or _G
+    if env.WhiteHubDevSkipCrashBypass == true then
+        moduleLog("WARN", "[Farm][ClientFXTest] FunctionLibrary.pcall hook skipped by DEV flag (fresh-session A/B test).")
+        return
+    end
     task.delay(3, function()
         pcall(function()
             local Modules = ReplicatedStorage:WaitForChild("Modules", 10)
@@ -291,7 +347,7 @@ local function DoHop()
     end
 
     moduleLog("INFO", "[Farm] Server dry — selling, buying, then hopping...")
-    _inventory:SellAll()
+    SellAllWithDiagnostics("server-hop")
     _inventory:BuyLucky()
     _serverHop:Hop()
     lastItemTime = tick()
@@ -439,7 +495,7 @@ local function runCycle()
     -- A pause/prestige transition is not a completed phase.
     if shouldPauseCycle() then return end
 
-    _inventory:SellAll()
+    SellAllWithDiagnostics("phase-1")
     if shouldPauseCycle() then return end
     _inventory:BuyLucky()
     if shouldPauseCycle() then return end
