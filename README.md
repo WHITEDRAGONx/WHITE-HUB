@@ -1,12 +1,13 @@
-# WHITE HUB V5 — Public Beta
+# WHITE HUB — Public Beta
 
-Modular YBA hub by WHITE DRAGON. Compact Silver V5 interface, English controls
-and a copyable runtime Console. Repository name remains WHITE-HUB-V3.
+Modular YBA hub by WHITE DRAGON. Compact Silver interface, English controls
+and a copyable runtime Console. The public Main.lua entry point stays the same
+across feature and UI updates. The permanent public loader is hosted in WHITE-HUB.
 
 ## Loader
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB-V3/main/Main.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Loader.lua"))()
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
@@ -21,6 +22,21 @@ entries do not guarantee current obtainability or Arrow/Rib eligibility. Every
 skin is protected, even when unselected. The Quest selector prioritizes names detected in the game, using documented
 extras when client dialogue objects are unavailable. Unmapped quests appear as INFO when their objectives are not mapped; these entries
 cannot replace your current automated quest.
+
+## Requirements
+
+- Access to the current YBA experience with an eligible Roblox account.
+- An executor supporting `loadstring`, `game:HttpGet`, `getgenv` and the Roblox
+  APIs used by the hub. Executor compatibility can vary; Delta is the primary
+  owner-tested environment.
+- HTTPS access to GitHub raw files. Skin catalog online refresh also uses the
+  public Trello API; fixed names remain available when Trello is unreachable.
+- Filesystem APIs (`isfile`, `readfile`, `writefile`) for saved settings.
+- Optional owned-hop resume additionally needs a supported teleport queue API.
+- Fast dialogue paths depend on executor capabilities and may use fallbacks.
+
+Auto Prestige and Stand features remain beta. Use one character-controlling farm
+at a time; Auto Sell can remain ON while Stand Farm runs with Item Farm OFF.
 
 ## Features
 

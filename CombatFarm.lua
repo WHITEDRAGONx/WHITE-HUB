@@ -243,27 +243,77 @@ local function scanGuiSkillCatalog()
     return ordered
 end
 
-local lastStandSummonAt = 0
-local function ensureStandSummoned(character)
-    if not character then return false, false end
-    local summoned = character:FindFirstChild("SummonedStand")
-    if not summoned then
-        return character:FindFirstChild("StandMorph") ~= nil, false
+-- Stand invocation adapter; XenonLock movement/attack/death logic below is unchanged.
+local lastStandSummonAt = -math.huge
+local summonPending, summonCharacter, summonRun, summonAttempts, summonLimitLogged = nil, nil, nil, 0, false
+local function summonLog(level,message)
+    local all=_G.WhiteHubModules
+    if all and all.RuntimeLog then pcall(all.RuntimeLog.Write,all.RuntimeLog,level,"CombatFarm","[StandSummon] "..message) end
+end
+local function summonedState(character)
+    local flag=character:FindFirstChild("SummonedStand")
+    if flag then
+        local ok,value=pcall(function() return flag.Value end)
+        if ok and type(value)=="boolean" then return value,true end
+        return false,false -- An unknown flag schema must not cause repeated toggles.
     end
-    if summoned.Value == true then return true, false end
-
-    -- The authoritative flag explicitly says the Stand is OFF. Request the
-    -- summon immediately, but keep a short anti-toggle cooldown so repeated
-    -- combat frames cannot accidentally spam ToggleStand.
-    if tick() - lastStandSummonAt < 0.30 then return false, false end
-    local remoteFunc = character:FindFirstChild("RemoteFunction")
-    if not remoteFunc then return false, false end
-    lastStandSummonAt = tick()
-    lastStandSummonLogAt = tick()
-    task.spawn(function()
-        pcall(function() remoteFunc:InvokeServer("ToggleStand", "Toggle") end)
+    return character:FindFirstChild("StandMorph")~=nil,true
+end
+local function ensureStandSummoned(character)
+    if not character then return false,false end
+    local function allowed(token)
+        return isRunning and not stopRequested and token==runId and Player.Character==character
+            and (not _config or (activeMode=="NPC" and _config:Get("NPCFarmEnabled")==true)
+                or (activeMode=="Quest" and _config:Get("QuestFarmEnabled")==true))
+    end
+    if not allowed(runId) then return false,false end
+    if summonCharacter~=character or summonRun~=runId then
+        summonCharacter,summonRun,summonAttempts,summonLimitLogged=character,runId,0,false
+        lastStandSummonAt=-math.huge
+    end
+    local ready,known=summonedState(character)
+    if ready then summonAttempts=0; return true,false end
+    if not known then
+        if not summonLimitLogged then summonLimitLogged=true; summonLog("WARN","Unknown SummonedStand state; no toggle requested") end
+        return false,false
+    end
+    if summonPending or tick()-lastStandSummonAt<1 then return false,false end
+    if summonAttempts>=3 then
+        if not summonLimitLogged then summonLimitLogged=true; summonLog("WARN","Invocation not confirmed after 3 attempts; toggle retries paused") end
+        return false,false
+    end
+    local remote=character:FindFirstChild("RemoteFunction")
+    if not remote then
+        if not summonLimitLogged then summonLimitLogged=true; summonLog("WARN","Character RemoteFunction missing; waiting for readiness") end
+        return false,false
+    end
+    summonAttempts=summonAttempts+1; lastStandSummonAt=tick(); lastStandSummonLogAt=tick()
+    local record={character=character,token=runId,deadline=tick()+4}
+    summonPending=record
+    summonLog("INFO","Request "..tostring(summonAttempts).."/3 | mode="..tostring(activeMode)
+        .." | flag="..tostring(character:FindFirstChild("SummonedStand")~=nil))
+    task.delay(4,function()
+        if summonPending==record and allowed(record.token) and not summonedState(character) then
+            summonLog("WARN","Result still pending; duplicate ToggleStand blocked")
+        end
     end)
-    return false, true
+    task.spawn(function()
+        if not allowed(record.token) or character:FindFirstChild("RemoteFunction")~=remote then
+            if summonPending==record then summonPending=nil end
+            return
+        end
+        local ok=pcall(function() remote:InvokeServer("ToggleStand","Toggle") end)
+        while ok and allowed(record.token) and tick()<record.deadline and not summonedState(character) do task.wait(0.05) end
+        if summonPending==record then summonPending=nil end
+        if not allowed(record.token) then return end
+        if summonedState(character) then
+            summonAttempts=0; summonLimitLogged=false
+            summonLog("INFO","Stand invocation confirmed by character state")
+        else
+            summonLog("WARN",ok and "Stand invocation unconfirmed; bounded retry available" or "ToggleStand request failed; bounded retry available")
+        end
+    end)
+    return false,true
 end
 
 local _runtimeLog = nil
