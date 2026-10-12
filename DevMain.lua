@@ -667,6 +667,8 @@ local moduleRequirements = {
     StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
     StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
     StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
+    GameCatalog = {"Init", "Names", "GetSkins", "GetQuests", "IsInfo"},
+    ChoiceUI = {"Init", "Build", "Toggle", "Filter", "Close", "Destroy"},
     UICompact = {"Init", "Caption", "Arrange", "Observe", "Responsive", "ScaleFor"},
     AutoPrestigeRuntime = {"Init", "Start", "Stop", "IsBusy", "Register", "Watch", "GetStatus", "BuildStatus"},
     PrestigeDialogue = {"Init", "Run", "Drive", "Restore"},
@@ -749,6 +751,8 @@ local moduleFiles = {
     { key = "StandFarm",  file = "StandFarm.lua" },
     { key = "StandTransfer", file = "StandTransfer.lua" },
     { key = "StandV2UI", file = "StandV2UI.lua" },
+    { key = "GameCatalog", file = "GameCatalog.lua" },
+    { key = "ChoiceUI", file = "ChoiceUI.lua" },
     { key = "UICompact", file = "UICompact.lua" },
     { key = "PrestigeDialogue", file = "PrestigeDialogue.lua" },
     { key = "AutoPrestigeRuntime", file = "AutoPrestigeRuntime.lua" },
@@ -799,7 +803,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "UICompact", "WhiteAI", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "UICompact", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()

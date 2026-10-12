@@ -22,7 +22,7 @@ class WhiteAITests(unittest.TestCase):
     def test_active_dev_luau_files_parse_without_syntax_errors(self):
         project = Path(__file__).resolve().parents[1]
         for module in ("CombatFarm.lua", "WhiteAI.lua", "UI.lua",
-                       "StandFarm.lua", "StandTransfer.lua", "StandV2UI.lua", "UICompact.lua", "AutoPrestige.lua", "AutoPrestigeRuntime.lua", "PrestigeDialogue.lua", "ServerHop.lua", "Farm.lua", "Config.lua", "DevMain.lua"):
+                       "StandFarm.lua", "StandTransfer.lua", "StandV2UI.lua", "UICompact.lua", "GameCatalog.lua", "ChoiceUI.lua", "AutoPrestige.lua", "AutoPrestigeRuntime.lua", "PrestigeDialogue.lua", "ServerHop.lua", "Farm.lua", "Config.lua", "DevMain.lua"):
             with self.subTest(module=module):
                 self.assertTrue(check_luau((project / module).read_text(encoding="utf-8")),
                                 f"{module} has syntax errors or unrecognized grammar")

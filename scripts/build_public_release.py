@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_PREVIOUS = '718018dac21d9a51e1955f68b4a042f28a534ee1'
 FILES = ('Webhook.lua', 'Movement.lua', 'ServerHop.lua', 'CombatFarm.lua',
          'StandFarm.lua', 'StandTransfer.lua', 'StandV2UI.lua', 'UICompact.lua',
+         'GameCatalog.lua', 'ChoiceUI.lua',
          'PrestigeDialogue.lua', 'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
 
 
@@ -34,7 +35,7 @@ def build():
     end = ui.index('    -- =====================\n    -- CREDITS PAGE', start)
     ui = ui[:start] + ui[end:]
     ui = ui.replace('QuestPage,AIPage}', 'QuestPage}')
-    ui = ui.replace('SILVER-V5-20261012-R1', 'SILVER-V5-PUBLIC-BETA-20261012-R1')
+    ui = ui.replace('SILVER-V5-20261012-R2', 'SILVER-V5-PUBLIC-BETA-20261012-R2')
     result['UI.lua'] = ui
     config = (ROOT / 'Config.lua').read_text()
     config = re.sub(r'^    WhiteAI(?:Enabled|Endpoint) = .*\n', '', config, flags=re.M)

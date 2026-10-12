@@ -39,13 +39,13 @@ class SilverHelperTests(unittest.TestCase):
   self.run_lua('''
   page=node('ScrollingFrame'); compact:Observe(page,track)
   h=node('Frame',page,'Section'); sw=node('Frame',page,'ToggleRow')
-  box=node('TextBox',page); action=node('TextButton',page); action.Text='CLEAR LIST / USE SINGLE TARGET'
+  box=node('TextBox',page); action=node('TextButton',page); action.Text='CANCEL RESTOCK TRANSFER / STOP'
   status=node('TextLabel',page); dd=node('Frame',page,'DropdownRow')
   action.callback=function() fired=true end
   compact:Arrange(page,track,theme)
   assert(sw.Parent.Name=='Switches' and box.Parent.Name=='Fields' and dd.Parent==box.Parent)
   assert(action.Parent.Name=='Actions' and status.Parent.Name=='Status')
-  action.callback(); assert(fired and action.Text=='CLEAR TARGETS')
+  action.callback(); assert(fired and action.Text=='STOP / CANCEL HOP')
   assert(sw.Parent.Parent==h.Parent and box.TextSize==11 and action.Size.Y.Offset==27)
   ''')
  def test_separate_sections_stay_separate_and_arrange_is_idempotent(self):
@@ -64,7 +64,7 @@ class SilverWiringTests(unittest.TestCase):
   for name in ['UI.lua','UICompact.lua','StandV2UI.lua','WhiteAI.lua','DevMain.lua']:
    self.assertTrue(check_luau((ROOT/name).read_text()),name)
   loader=(ROOT/'DevMain.lua').read_text(); self.assertIn('{ key = "UICompact", file = "UICompact.lua" }',loader)
-  self.assertIn('"UICompact", "WhiteAI", "UI"',loader)
+  self.assertIn('"UICompact", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"',loader)
  def test_stand_is_separate_and_keys_callbacks_preserved(self):
   src=(ROOT/'UI.lua').read_text()
   self.assertIn('local StandPage   = MakePage("StandPage")',src)

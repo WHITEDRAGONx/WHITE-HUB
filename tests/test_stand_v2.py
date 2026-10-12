@@ -259,18 +259,17 @@ class StandV2Tests(unittest.TestCase):
         function stopForEdit() farm:Stop(); UI:SetToggleValue("Stand Farm (BETA)",false) end
         ''')
 
-    def test_ui_skin_list_parses_exact_names_stops_and_rejects_invalid_input(self):
+    def test_ui_skin_selector_preserves_exact_names_stops_and_rejects_invalid_choice(self):
         self.install_v2_ui()
         self.run_lua('''
-        v2ui:BuildSkins(FarmPage,UI,config,farm,stopForEdit,trackConnection,THEME)
-        local input=buttons[#buttons]
+        v2ui:BuildSkins(FarmPage,UI,config,farm,stopForEdit,trackConnection,THEME,_choices,_catalog)
         onActivate=function() page("Option1","Pending") end
         assert(farm:Start()); advance(2)
-        input.Text=" Wanted Skin ; Other Skin ; Wanted Skin "; input.blur()
+        skinChoice("Wanted Skin"); skinChoice("Other Skin")
         assert(not farm:IsRunning() and #values.StandFarmSkinTargets==2)
-        assert(values.StandFarmSkinTargets[1]=="Wanted Skin")
-        input.Text="None"; input.blur(); assert(#values.StandFarmSkinTargets==2)
-        input.Text=""; input.blur(); assert(#values.StandFarmSkinTargets==0)
+        assert(values.StandFarmSkinTargets[1]=="Other Skin")
+        skinChoice("None"); assert(#values.StandFarmSkinTargets==2)
+        skinChoice("Wanted Skin"); skinChoice("Other Skin"); assert(#values.StandFarmSkinTargets==0)
         ''')
 
     def test_ui_resume_opt_in_budget_and_unsupported_executor_message(self):
@@ -289,11 +288,11 @@ class StandV2Tests(unittest.TestCase):
         self.install_v2_ui()
         self.run_lua('''
         v2ui:BuildStats(FarmPage,UI,farm,trackConnection,styleActionButton)
-        local label=labels[#labels]; local reset=buttons[#buttons]
+        local label=labels[#labels]; assert(#buttons==0)
         assert(label.Text:find("Attempts: 0"))
         onActivate=function() page("Option1","Pending") end
-        assert(farm:Start()); advance(2); reset.click()
-        assert(popup:find("pending") and farm:GetStatus().metrics.attempts==1)
+        assert(farm:Start()); advance(2); local ok,reason=farm:ResetStatistics()
+        assert(not ok and reason:find("pending") and farm:GetStatus().metrics.attempts==1)
         label.Parent=nil; farm:Stop(); advance(5)
         ''')
 

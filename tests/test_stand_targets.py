@@ -106,20 +106,38 @@ class StandTargetTests(unittest.TestCase):
         function styleActionButton() end
         function trackConnection(x) return x end
         ''')
-        source = (Path(__file__).resolve().parents[1] / 'UI.lua').read_text()
+        root=Path(__file__).resolve().parents[1]
+        self.lua.globals()._catalog=self.lua.execute((root/'GameCatalog.lua').read_text())
+        self.lua.globals().choiceLogic=self.lua.execute((root/'ChoiceUI.lua').read_text())
+        self.run_lua('''
+        choiceLogic:Init({GameCatalog=_catalog}); selectors={}
+        _choices={Build=function(_,parent,label,options,get,set,before)
+            local n=node('Choice','TextButton',parent)
+            local function change(name)
+                local names,reason=choiceLogic:Toggle(get(),name,25)
+                if not names then UI:ShowPopup(reason); return end
+                if before then before() end
+                return set(names)
+            end
+            selectors[label]={get=get,set=set,change=change,options=options}
+            if label=='Stands' then selectStand=change else skinChoice=change end
+            return n,function() end
+        end}
+        ''')
+        source = (root / 'UI.lua').read_text()
         fragment = source[source.index('    local availableStands = {'):source.index('    local pityInput =')]
         self.lua.execute(fragment)
 
     def test_ui_add_remove_clear_list_and_label(self):
         self.build_ui()
         self.run_lua('''
-        buttons[1].click(); assert(values.StandFarmTargets[1]=="Aerosmith")
-        selectStand("Cream"); buttons[1].click()
+        assert(selectors.Stands.get()[1]=="Aerosmith")
+        selectStand("Cream")
         assert(#values.StandFarmTargets==2 and labels[1].Text:find("Cream"))
-        assert(buttons[1].Text=="REMOVE SELECTED STAND FROM LIST")
-        buttons[1].click(); assert(#values.StandFarmTargets==1)
-        buttons[2].click(); assert(#values.StandFarmTargets==0 and values.StandFarmTarget=="Cream")
-        assert(labels[1].Text:find("Single target"))
+        selectStand("Cream"); assert(#values.StandFarmTargets==1)
+        selectStand("Aerosmith"); assert(#values.StandFarmTargets==0 and values.StandFarmTarget=="")
+        assert(labels[1].Text:find("Select at least one"))
+        assert(#buttons==0)
         ''')
 
     def test_ui_edit_stops_pending_run_without_extra_consumption(self):
@@ -127,7 +145,7 @@ class StandTargetTests(unittest.TestCase):
         self.run_lua('''
         onActivate=function() page("Option1","Pending") end
         assert(farm:Start()); advance(2)
-        buttons[1].click(); assert(not farm:IsRunning() and toggleValue==false)
+        selectStand("Cream"); assert(not farm:IsRunning() and toggleValue==false)
         local inputs=presses; advance(30)
         assert(activations==1 and presses==inputs)
         closeGui(); assert(not farm:Start())

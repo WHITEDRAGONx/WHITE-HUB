@@ -7,8 +7,6 @@ local captions={
  ['Shiny Farm Mode (BETA)']='Shiny mode', ['Stand Farm (BETA)']='Stand farm',
  ['Add Skill (press a key)']='Add skill', ['Clear Skills']='Clear skills',
  ['CANCEL RESTOCK TRANSFER / STOP']='STOP / CANCEL HOP',
- ['CLEAR LIST / USE SINGLE TARGET']='CLEAR TARGETS',
- ['RESET STAND SESSION STATISTICS']='RESET STATS',
  ['COPY LATEST PROPOSAL LINK']='COPY PROPOSAL', ['SAVE HTTPS ENDPOINT']='SAVE ENDPOINT',
  ['Stand consumable']='Consumable', ['Target Stand']='Stand', ['Select Quest']='Quest', ['Select NPC']='NPC',
  ['WHITE AI V1 - DIAGNOSTICS']='AI DIAGNOSTICS', ['STAND FARM - EXPERIMENTAL']='STAND / BETA',
