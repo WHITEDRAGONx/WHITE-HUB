@@ -561,7 +561,7 @@ RuntimeLog.RuntimeId = runtimeId
 
 LOG("BOOT", "Starting runtime " .. runtimeId)
 
-local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB-V3/dev/2026-10-10-autosell-compat/"
+local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/dev/2026-10-10-autosell-compat/"
 local Modules = { RuntimeLog = RuntimeLog }
 
 local function cleanupLoadedModules()

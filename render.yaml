@@ -5,7 +5,7 @@ services:
     name: white-ai-v1
     runtime: python
     plan: free
-    repo: https://github.com/WHITEDRAGONx/WHITE-HUB-V3
+    repo: https://github.com/WHITEDRAGONx/WHITE-HUB
     branch: dev/2026-10-10-autosell-compat
     autoDeployTrigger: off
     buildCommand: pip install -r ai/requirements.txt && python -m compileall -q ai && python -m unittest ai.test_server ai.test_owner_session

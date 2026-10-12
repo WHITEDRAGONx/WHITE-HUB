@@ -14,7 +14,7 @@ from urllib.parse import quote
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-REPO = "WHITEDRAGONx/WHITE-HUB-V3"
+REPO = "WHITEDRAGONx/WHITE-HUB"
 BRANCH = "dev/2026-10-10-autosell-compat"
 PREFIX = "ai/incidents"
 API = f"https://api.github.com/repos/{REPO}/contents/"

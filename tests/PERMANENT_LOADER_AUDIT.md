@@ -1,13 +1,18 @@
-# Permanent WHITE HUB address
+# Canonical WHITE HUB address
 
-Owner requested a versionless public URL. WHITE-HUB already exists as a separate
-legacy repository (id 1200853879), while WHITE-HUB-V3 is the modular repository
-(id 1232157515). No repository was renamed, deleted or replaced.
+The owner renamed the modular repository (id 1232157515) to WHITE-HUB and the
+old repository (id 1200853879) to WHITE-HUB-Legacy during preparation. The legacy
+repository has not been changed. Both histories remain intact.
 
-Legacy WHITE-HUB main rollback: aade7491fc2cbebfca24764028f3fa29b3ddc9d0.
-Preserve WHITE-HUB.lua byte for byte. Add Loader.lua as a permanent public forwarder
-and update README/CHANGELOG. It fetches only the existing modular main/Main.lua,
-with a timestamp query. No dev loader or private component can be loaded by it.
-Development branches, module URLs, backend and Render settings stay unchanged.
-Public installation code now uses WHITE-HUB/main/Loader.lua, with no version name.
-The old modular Main URL remains valid. No backend deployment or rename needed.
+Canonical public code: WHITE-HUB/main/Main.lua. Runtime module downloads,
+owned-hop loaders, source backend defaults and render.yaml now use the new name.
+Experimental source remains on the same dev branch; private components remain
+excluded from main. The optional release/alias wrapper is not needed for normal
+installation. Earlier alias preparation did not modify the legacy repository.
+
+Renamed main before URL correction: 9e8711d038605feceee0d23008f155632fdfca7c.
+Renamed dev before URL correction: 4c8b3c9b2bc0be00f87d416fe925c660e3796095.
+GitHub old-name API redirects preserve current deployed backend reads; repository
+name defaults are updated in source for the next backend deployment. No unrelated
+requirements/dependencies changed. Verify raw loader and all download URLs after
+publication; do not substitute dev or touch legacy.

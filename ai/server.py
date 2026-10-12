@@ -28,7 +28,7 @@ from ai.owner_session import issue_owner_session, verify_owner_session
 from ai.autofix import checked_candidate
 from ai.incident_store import GitHubIncidentStore, StorageError, StorageConflict, incident_key, report_id, valid_id
 
-REPO = "WHITEDRAGONx/WHITE-HUB-V3"
+REPO = "WHITEDRAGONx/WHITE-HUB"
 DEV_BRANCH = "dev/2026-10-10-autosell-compat"
 GITHUB_API = f"https://api.github.com/repos/{REPO}"
 # AI cannot suggest patches to the production loader, Merchant or configuration.

@@ -44,7 +44,7 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_public_owned_hop_returns_only_to_public_loader(self):
         transfer = self.files['StandTransfer.lua']
-        self.assertIn('WHITE-HUB-V3/main/Main.lua', transfer)
+        self.assertIn('WHITE-HUB/main/Main.lua', transfer)
         self.assertNotIn('dev/', transfer)
         # Guard/claim logic is preserved; only the queued loader URL/comment changes.
         original = (ROOT / 'StandTransfer.lua').read_text()

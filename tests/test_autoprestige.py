@@ -182,7 +182,9 @@ class PrestigeTests(unittest.TestCase):
   self.assertNotIn('{ key = "SmartFarmEngine"',(ROOT/'DevMain.lua').read_text())
   self.assertNotIn('Modules.SmartFarmEngine:Start()', (ROOT/'DevMain.lua').read_text())
   for path in ['Inventory.lua','Main.lua']:
-   self.assertEqual((ROOT/path).read_bytes(),subprocess.check_output(['git','show','333ad75:'+path],cwd=ROOT))
+   expected=subprocess.check_output(['git','show','333ad75:'+path],cwd=ROOT)
+   if path=='Main.lua': expected=expected.replace(b'WHITEDRAGONx/WHITE-HUB-V3',b'WHITEDRAGONx/WHITE-HUB')
+   self.assertEqual((ROOT/path).read_bytes(),expected)
   base=subprocess.check_output(['git','show','333ad75:CombatFarm.lua'],cwd=ROOT).decode()
   core=base[base.index('local function killTarget('):base.index('local function runNPCFarm(')]
   self.assertIn(core,(ROOT/'CombatFarm.lua').read_text())

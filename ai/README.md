@@ -2,7 +2,7 @@
 
 Este backend de diagnóstico do WHITE HUB V3 mantém o serviço existente
 [white-ai-v1 no Render](https://dashboard.render.com/web/srv-db527jflot8c73df8mr0)
-e o repositório WHITEDRAGONx/WHITE-HUB-V3 na branch
+e o repositório WHITEDRAGONx/WHITE-HUB na branch
 `dev/2026-10-10-autosell-compat`.
 
 ## Provedor gratuito

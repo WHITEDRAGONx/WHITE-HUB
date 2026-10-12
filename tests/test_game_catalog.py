@@ -115,7 +115,9 @@ class CatalogWiringTests(unittest.TestCase):
  def test_combat_inventory_consumption_and_backend_unchanged(self):
   for n in ('Inventory.lua','CombatFarm.lua','StandFarm.lua','Farm.lua','AutoPrestige.lua','AutoPrestigeRuntime.lua','PrestigeDialogue.lua','WhiteAI.lua','ai/server.py'):
    actual=subprocess.check_output(['git','show','91f87b3:'+n],cwd=ROOT) if n=='CombatFarm.lua' else (ROOT/n).read_bytes()
-   self.assertEqual(actual,subprocess.check_output(['git','show','81aa505:'+n],cwd=ROOT),n)
+   expected=subprocess.check_output(['git','show','81aa505:'+n],cwd=ROOT)
+   if n=='ai/server.py': expected=expected.replace(b'WHITEDRAGONx/WHITE-HUB-V3',b'WHITEDRAGONx/WHITE-HUB')
+   self.assertEqual(actual,expected,n)
  def test_quest_selection_ui_rejects_info_without_config_write(self):
   # Execute the new UI callback wiring with real catalog and minimal native wrapper.
   lua=LuaRuntime(unpack_returned_tuples=True);lua.execute(TREE)

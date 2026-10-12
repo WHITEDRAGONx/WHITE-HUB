@@ -7,7 +7,7 @@ across feature and UI updates. The permanent public loader is hosted in WHITE-HU
 ## Loader
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Loader.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Main.lua"))()
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
@@ -78,6 +78,3 @@ URLs or device session files. Do not repeatedly re-enable a pending consumable.
 See [CHANGELOG.md](CHANGELOG.md) for changes and current limitations.
 
 Discord: https://discord.gg/Qwd23ZRNxJ
-
-The historical WHITE-HUB.lua file is retained for rollback/reference; use Loader.lua
-for the current modular release. The existing development history remains intact.

@@ -379,7 +379,7 @@ class WhiteAITests(unittest.TestCase):
             with patch("ai.server.read_github_file", return_value=("local x = 1", "abc123")):
                 with patch("ai.server.ask_ai", return_value=proposed):
                     with patch("ai.server.publish_review_artifact",
-                               return_value="https://github.com/WHITEDRAGONx/WHITE-HUB-V3/") as save:
+                               return_value="https://github.com/WHITEDRAGONx/WHITE-HUB/") as save:
                         run_job(job, report)
             self.assertEqual(_jobs[job]["status"], "proposal_ready")
             self.assertEqual(_jobs[job]["confidence"], 0.25)

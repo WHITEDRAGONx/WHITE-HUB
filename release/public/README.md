@@ -7,7 +7,7 @@ across feature and UI updates. The permanent public loader is hosted in WHITE-HU
 ## Loader
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Loader.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/Main.lua"))()
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
