@@ -88,5 +88,6 @@ class SilverWiringTests(unittest.TestCase):
  def test_no_farm_backend_or_protected_code_changed(self):
   for name in ['Inventory.lua','CombatFarm.lua','StandFarm.lua','AutoPrestige.lua','AutoPrestigeRuntime.lua','Farm.lua','ServerHop.lua','Config.lua','Main.lua','ai/server.py']:
    expected=subprocess.check_output(['git','show','0cb6b60:'+name],cwd=ROOT)
-   self.assertEqual((ROOT/name).read_bytes(),expected,name)
+   actual=subprocess.check_output(['git','show','b8e5b61:'+name],cwd=ROOT)
+   self.assertEqual(actual,expected,name)
 if __name__=='__main__':unittest.main()

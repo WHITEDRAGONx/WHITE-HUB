@@ -109,8 +109,8 @@ class ShinyModeTests(unittest.TestCase):
 
     def test_pity_stock_and_exclusivity_still_guard_shiny(self):
         self.run_lua('''
-        values.StandFarmMode="shiny"; values.AutoSell=true
-        assert(not farm:Start()); values.AutoSell=false
+        values.StandFarmMode="shiny"; values.QuestFarmEnabled=true
+        assert(not farm:Start()); values.QuestFarmEnabled=false
         pity.Value=20; assert(farm:Start()); advance(4); assert(activations==0)
         pity.Value=0; stand.Value="Cream"
         for i,tool in ipairs(bag.children) do if tool.Name=="Rokakaka" then table.remove(bag.children,i); break end end

@@ -1,5 +1,14 @@
 # Changelog
 
+## V5 beta hotfix — 2026-10-12 (Stand R10)
+
+- Auto Sell may remain enabled during Stand/Shiny/Rib Farm when Item Farm is off.
+- The same preference is accepted for local restock, owned hop and resume.
+- Actual Item Farm work/sales still block Stand startup until they finish.
+- Pending results, active competing farms, skin and pity safeguards remain.
+- Merchant unchanged. Six new offline regression checks; 252 checks total.
+  This hotfix still needs confirmation in Delta.
+
 ## V5 Public Beta — 2026-10-12
 
 - Compact Silver UI with English labels, grouped switches/fields/actions and a

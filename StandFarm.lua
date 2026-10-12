@@ -69,12 +69,15 @@ local function log(level, message)
     end
 end
 
+local function itemFarmBusy()
+    return itemFarm and type(itemFarm.IsBusy)=="function" and itemFarm:IsBusy()
+end
+
 local function active(token)
     return running and runToken == token and config
         and config:Get("StandFarmEnabled") == true
         and not config:Get("FarmEnabled") and not config:Get("QuestFarmEnabled")
         and not config:Get("NPCFarmEnabled") and not config:Get("AutoPrestige")
-        and not config:Get("AutoSell")
 end
 
 local function waitActive(token, seconds)
@@ -667,7 +670,7 @@ local function restockHop(token, name, selected, mode)
             and not pending and not interactionBusy and callbackInFlight == 0 and skillInFlight == 0
             and restockInFlight == 0 and not dialogueGui() and not config:Get("StayInPrivateServer")
             and config:Get("StandFarmRestockHop") == true and config:Get("StandFarmAutoRestock") == true
-            and not config:Get("FarmEnabled") and not config:Get("AutoSell") and not config:Get("AutoPrestige")
+            and not config:Get("FarmEnabled") and not config:Get("AutoPrestige")
             and not config:Get("QuestFarmEnabled") and not config:Get("NPCFarmEnabled")
             and pity ~= nil and (limit <= 0 or pity < limit)
     end
@@ -941,7 +944,7 @@ function StandFarm:Init(modules)
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
     activeMode = "stand"
     activeConsumable = "Mysterious Arrow"
-    log("INFO", "Build SF-V2-20261011-R9; resume/skins/pity beta, Roblox validation pending")
+    log("INFO", "Build SF-V2-20261012-R10; resume/skins/pity beta, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -957,6 +960,7 @@ end
 function StandFarm:Start(resumeRecord)
     local m=_G.WhiteHubModules
     if m and m.AutoPrestigeRuntime and m.AutoPrestigeRuntime:IsBusy() then return false,"Auto Prestige work/result pending" end
+    if itemFarmBusy() then return false,"Item Farm action still finishing; wait before starting Stand Farm" end
     if resumeRecord~=nil and resumeRecord~=claimedResume then return false,"Unclaimed resume request" end
     if awaitingTransfer then return false,"Teleport already requested; wait for arrival or verify failure before reloading" end
     clearConfirmedPending()
@@ -981,8 +985,8 @@ function StandFarm:Start(resumeRecord)
         if not selected then return false, selectionReason end
     end
     if config:Get("FarmEnabled") or config:Get("QuestFarmEnabled")
-        or config:Get("NPCFarmEnabled") or config:Get("AutoPrestige") or config:Get("AutoSell") then
-        return false, "Disable Item/Quest/NPC Farm, Auto Prestige and Auto Sell first"
+        or config:Get("NPCFarmEnabled") or config:Get("AutoPrestige") then
+        return false, "Disable Item/Quest/NPC Farm and Auto Prestige first"
     end
     local startToken = runToken
     local stand = readStand()
@@ -1012,6 +1016,7 @@ function StandFarm:Start(resumeRecord)
         or (tonumber(config:Get("StandFarmMaxHops")) or 3)~=resumeRecord.maxHops) then
         return false,"Arrival state/budget changed during verification; no consumption"
     end
+    if itemFarmBusy() then return false,"Item Farm action started during skin check; nothing consumed" end
     if dialogueGui() then return false, "Dialogue opened during skin check" end
     runToken = runToken + 1
     local token = runToken
@@ -1062,7 +1067,7 @@ function StandFarm:RecoverTransfer()
             and callbackInFlight==0 and skillInFlight==0 and hopInFlight==0 and restockInFlight==0
             and config:Get("StandFarmResumeAfterHop")==true and config:Get("StandFarmAutoRestock")==true
             and config:Get("StandFarmRestockHop")==true and not config:Get("StayInPrivateServer")
-            and not config:Get("FarmEnabled") and not config:Get("AutoSell") and not config:Get("AutoPrestige")
+            and not config:Get("FarmEnabled") and not config:Get("AutoPrestige")
             and not config:Get("QuestFarmEnabled") and not config:Get("NPCFarmEnabled")
             and source==record.source and mode==record.mode and sameNames(targets,record.targets) and sameNames(skins,record.skins)
             and (tonumber(config:Get("StandFarmPityLimit")) or 0)==record.pityLimit
@@ -1077,7 +1082,7 @@ function StandFarm:RecoverTransfer()
             while settingsMatch() and os.clock()<deadline and os.time()<record.expires do
                 local char=getCharacter()
                 if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("RemoteFunction")
-                    and player:FindFirstChildOfClass("Backpack") and not dialogueGui()
+                    and player:FindFirstChildOfClass("Backpack") and not dialogueGui() and not itemFarmBusy()
                     and readStand()==record.stand and readPity()==record.pity then
                     claimedResume=record
                     local started,startReason=self:Start(record)

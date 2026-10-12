@@ -364,7 +364,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             and humanoid and humanoid.Health > 0
             and Player.Character == char and not _config:Get("FarmEnabled")
             and ((prestige and _config:Get("AutoPrestige")==true and not _config:Get("StandFarmEnabled"))
-                or (not prestige and _config:Get("StandFarmEnabled")==true and not _config:Get("AutoSell") and not _config:Get("AutoPrestige")))
+                or (not prestige and _config:Get("StandFarmEnabled")==true and not _config:Get("AutoPrestige")))
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
     end
     local ok, success, reason = pcall(function()

@@ -234,7 +234,7 @@ class StandDialogueTests(unittest.TestCase):
     def test_pity_and_other_modes_prevent_consumption(self):
         self.run_lua('''
         pity.Value=20; assert(farm:Start()); advance(1); assert(activations==0)
-        pity.Value=0; values.AutoSell=true; assert(not farm:Start()); assert(activations==0)
+        pity.Value=0; values.FarmEnabled=true; assert(not farm:Start()); assert(activations==0)
         ''')
 
     def test_mode_enabled_during_dialogue_cancels(self):
