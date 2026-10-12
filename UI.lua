@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261012-R1"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261012-R2"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -98,6 +98,7 @@ local _standFarm = nil
 local _standV2UI = nil
 local _prestigeRuntime = nil
 local _compactUI = nil
+local _catalog, _choices = nil, nil
 local _serverHop   = nil
 local _runtimeLog   = nil
 
@@ -124,6 +125,7 @@ function UI:Init(Modules)
     _standV2UI = Modules.StandV2UI
     _prestigeRuntime = Modules.AutoPrestigeRuntime
     _compactUI = Modules.UICompact
+    _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
     _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
 end
@@ -764,6 +766,7 @@ function UI:Create()
     local C_Text     = THEME.WHITE
 
     local function SetActiveTab(activePage)
+        if _choices then _choices:Close() end
         for _, def in ipairs(tabDefs) do
             def.page.Visible = (def.page == activePage)
             local btn = tabButtons[def.name]
@@ -979,99 +982,43 @@ function UI:Create()
         "Purple Haze", "White Album", "Aerosmith", "Six Pistols", "Cream",
         "Mr. President", "Scary Monsters", "The World Alternate Universe",
         "D4C", "Tusk ACT 1", "Soft & Wet", "Sticky Fingers", "Anubis",
+        "Hermit Purple", "Beach Boy", "Red Hot Chili Pepper",
     }
-    local standDropdown = MakeStyledDropdown(FarmPage, "Target Stand", availableStands, function(selected)
-        if _standFarm and _standFarm:IsRunning() then
-            _standFarm:Stop()
-            UI:SetToggleValue("Stand Farm (BETA)", false)
-        end
-        if _config then _config:Set("StandFarmTarget", selected) end
-        if refreshTargetList then refreshTargetList() end
-    end)
-    local savedTarget = _config and _config:Get("StandFarmTarget")
-    if type(savedTarget) == "string" and table.find(availableStands, savedTarget) then
-        standDropdown.Text = savedTarget
-    else
-        standDropdown.Text = "Select Stand"
-    end
-
-    local targetListLabel = UI:AddLabel(FarmPage, "")
-    targetListLabel.TextScaled = false
-    targetListLabel.TextWrapped = true
-    targetListLabel.Size = UDim2.new(1, -4, 0, 28)
-    targetListLabel.AutomaticSize = Enum.AutomaticSize.Y
-    local targetListButton = Instance.new("TextButton", FarmPage)
-    targetListButton.Size = UDim2.new(1, -4, 0, 32)
-    targetListButton.Font = Enum.Font.GothamBold
-    targetListButton.TextSize = 11
-    styleActionButton(targetListButton, false)
-    local clearTargetsButton = Instance.new("TextButton", FarmPage)
-    clearTargetsButton.Size = UDim2.new(1, -4, 0, 32)
-    clearTargetsButton.Font = Enum.Font.GothamBold
-    clearTargetsButton.TextSize = 11
-    clearTargetsButton.Text = "CLEAR LIST / USE SINGLE TARGET"
-    styleActionButton(clearTargetsButton, false)
-
-    refreshTargetList = function()
-        if _config and _config:Get("StandFarmMode") == "shiny" then
-            targetListLabel.Text = "ANY skin protected | saved targets inactive"
-            targetListButton.Text = "EDIT SAVED STAND TARGET LIST"
-            return
-        end
-        local list = _config and _config:Get("StandFarmTargets")
-        if list ~= nil and type(list) ~= "table" then
-            targetListLabel.Text = "Invalid saved list. Clear it before starting."
-            targetListButton.Text = "CLEAR INVALID LIST FIRST"
-            return
-        end
-        list = list or {}
-        local names = {}
-        for _, name in ipairs(list) do
-            if type(name) ~= "string" then
-                targetListLabel.Text = "Invalid saved list. Clear it before starting."
-                targetListButton.Text = "CLEAR INVALID LIST FIRST"
-                return
-            end
-            names[#names + 1] = name
-        end
-        targetListLabel.Text = #names > 0 and ("Stop on ANY: " .. table.concat(names, ", "))
-            or "Single target mode. Add selected Stands to stop on any in a list."
-        targetListButton.Text = table.find(list, _config and _config:Get("StandFarmTarget"))
-            and "REMOVE SELECTED STAND FROM LIST" or "ADD SELECTED STAND TO LIST"
-    end
     local function stopForTargetEdit()
         if _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
         end
     end
-    trackConnection(targetListButton.MouseButton1Click:Connect(function()
-        if not _config then return end
-        local selected, list = _config:Get("StandFarmTarget"), _config:Get("StandFarmTargets")
-        if not table.find(availableStands, selected) then UI:ShowPopup("Select a Stand first", 4); return end
-        if list ~= nil and type(list) ~= "table" then UI:ShowPopup("Clear invalid list first", 4); return end
-        local copy = {}
-        for _, name in ipairs(list or {}) do
-            if type(name) ~= "string" then UI:ShowPopup("Clear invalid list first", 4); return end
-            copy[#copy + 1] = name
-        end
-        local index = table.find(copy, selected)
-        if index then table.remove(copy, index)
-        elseif #copy < 25 then copy[#copy + 1] = selected
-        else UI:ShowPopup("Target list limit: 25", 4); return end
-        stopForTargetEdit()
-        _config:Set("StandFarmTargets", copy)
-        refreshTargetList()
-    end))
-    trackConnection(clearTargetsButton.MouseButton1Click:Connect(function()
-        if not _config then return end
-        stopForTargetEdit()
-        _config:Set("StandFarmTargets", {})
-        refreshTargetList()
-    end))
+    local targetListLabel = UI:AddLabel(FarmPage, "")
+    targetListLabel.TextWrapped = true
+    targetListLabel.Size = UDim2.new(1,-4,0,28)
+    local function selectedStands()
+        local list = _config and _config:Get("StandFarmTargets")
+        if type(list)=="table" and #list>0 then return _catalog:Names(list) end
+        local single = _config and _config:Get("StandFarmTarget")
+        return _catalog:Names({}, {single})
+    end
+    local standRefresh
+    refreshTargetList = function()
+        local names=selectedStands()
+        targetListLabel.Text = _config and _config:Get("StandFarmMode")=="shiny"
+            and "ANY skin protected | saved targets inactive"
+            or (#names>0 and "Targets: "..table.concat(names,", ") or "Select at least one Stand")
+        if standRefresh then standRefresh() end
+    end
+    local standDropdown
+    standDropdown,standRefresh = _choices:Build(FarmPage,"Stands",
+        function() return availableStands end,selectedStands,function(names)
+            if not _config then return false end
+            _config:Set("StandFarmTargets",names)
+            _config:Set("StandFarmTarget",names[1] or "")
+            refreshTargetList()
+        end,stopForTargetEdit,UI,THEME,trackConnection)
     refreshTargetList()
-
-    if _standV2UI then _standV2UI:BuildSkins(FarmPage,UI,_config,_standFarm,stopForTargetEdit,trackConnection,THEME) end
+    if _standV2UI then
+        _standV2UI:BuildSkins(FarmPage,UI,_config,_standFarm,stopForTargetEdit,trackConnection,THEME,_choices,_catalog)
+    end
 
     local pityInput = Instance.new("TextBox", FarmPage)
     pityInput.Size = UDim2.new(1, -4, 0, 30)
@@ -1174,14 +1121,18 @@ function UI:Create()
         "Doppio [Lvl. 30+]",
         "Dio [Lvl. 35+]"
     }
-    local questDropdown = MakeStyledDropdown(QuestPage, "Select Quest", questList, function(selected)
-        if _config then _config:Set("SelectedQuest", selected) end
-    end)
-    local savedQuest = _config and _config:Get("SelectedQuest")
-    if savedQuest and savedQuest ~= "" and table.find(questList, savedQuest) then
-        questDropdown.Text = savedQuest
-    end
-    
+    local questDropdown = _choices:Build(QuestPage,"Quest",
+        function() return _catalog:GetQuests(questList) end,
+        function() return _catalog:Names({}, {_config and _config:Get("SelectedQuest")}) end,
+        function(names)
+            local selected=names[1]
+            if _catalog:IsInfo(selected) or not table.find(questList,selected) then
+                UI:ShowPopup("Quest catalog only: objective not mapped. Current quest selection unchanged.",5)
+                return false
+            end
+            if _config then _config:Set("SelectedQuest",selected) end
+        end,nil,UI,THEME,trackConnection,true)
+
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
         if v and not stopPrestigeForSwitch("Quest Farm") then return end
@@ -1682,6 +1633,7 @@ function UI:Create()
     local isOpen = false
     local function ToggleWindow()
         isOpen = not isOpen
+        if not isOpen and _choices then _choices:Close() end
         if isOpen then
             MainFrame.Visible = true
             MainFrame.Size = UDim2.new(0,0,0,0)
@@ -1756,6 +1708,7 @@ function UI:SetVisible(value)
 end
 
 function UI:Destroy()
+    if _choices then _choices:Close() end
     if activeSkillCapture then
         pcall(function() activeSkillCapture:Disconnect() end)
         activeSkillCapture = nil

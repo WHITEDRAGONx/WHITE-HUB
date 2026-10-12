@@ -8,8 +8,6 @@ local captions={
  ['Shiny Farm Mode (BETA)']='Shiny mode', ['Stand Farm (BETA)']='Stand farm',
  ['Add Skill (press a key)']='Add skill', ['Clear Skills']='Clear skills',
  ['CANCEL RESTOCK TRANSFER / STOP']='STOP / CANCEL HOP',
- ['CLEAR LIST / USE SINGLE TARGET']='CLEAR TARGETS',
- ['RESET STAND SESSION STATISTICS']='RESET STATS',
 
  ['Stand consumable']='Consumable', ['Target Stand']='Stand', ['Select Quest']='Quest', ['Select NPC']='NPC',
  ['STAND FARM - EXPERIMENTAL']='STAND / BETA',

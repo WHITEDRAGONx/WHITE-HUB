@@ -1,5 +1,17 @@
 # Changelog
 
+## V5 beta UI/catalog update — 2026-10-12 (Silver R2)
+
+- Replaced target edit/clear buttons with searchable multi-selection.
+- Removed Reset Stats from the interface; live statistics remain.
+- Replaced typed skin wishlist with a searchable 236-name Trello catalog, preserving
+  saved and recognized client names. All skins remain protected.
+- Added a quest catalog and bounded read-only client discovery. Unknown objectives
+  are INFO only; no new automatic quest controllers or PvP behavior are claimed.
+- Added Hermit Purple, Beach Boy and Red Hot Chili Pepper to Stand choices.
+- No external code imported. Merchant, combat and consumption logic unchanged.
+- 274 offline checks passed; native Delta selector/discovery validation pending.
+
 ## V5 beta hotfix — 2026-10-12 (Stand R10)
 
 - Auto Sell may remain enabled during Stand/Shiny/Rib Farm when Item Farm is off.

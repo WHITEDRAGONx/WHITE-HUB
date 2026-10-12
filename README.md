@@ -10,14 +10,22 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HU
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
-`SILVER-V5-PUBLIC-BETA-20261012-R1`. Open the WHITE HUB launcher to configure modes.
+`SILVER-V5-PUBLIC-BETA-20261012-R2`. Open the WHITE HUB launcher to configure modes.
 Settings persist in WhiteHubConfig.json when filesystem APIs are available.
+
+Tap Stands or Skins, search and check/uncheck names to edit your selection.
+The skin catalog contains 236 Trello names plus recognized saved/client names;
+entries do not guarantee current obtainability or Arrow/Rib eligibility. Every
+skin is protected, even when unselected. The Quest selector also lists discovered
+and documented quests as INFO when their objectives are not mapped; these entries
+cannot replace your current automated quest.
 
 ## Features
 
 - Item Farm, item sell/keep selection and the existing Merchant workflow.
 - Quest/NPC Farm, manual or automatic quest selection and configurable skills.
-- Stand/Shiny/Rib beta: target lists, skin preservation, pity limit and session stats.
+- Stand/Shiny/Rib beta: searchable touch selection for Stands and skins, skin
+  preservation, pity limit and session stats.
 - Bounded consumable restock and optional owned-hop continuation.
 - Auto Prestige beta: updated dialogue and character lifecycle handling.
 - Webhook notifications, manual server hop and runtime diagnostics.
