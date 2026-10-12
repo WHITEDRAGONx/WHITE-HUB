@@ -12,6 +12,7 @@ local _data = nil
 local Defaults = {
     BuyLucky = true,
     AutoSell = true,
+    ConsoleFollow = true, -- Keep Console follow preference across server hops via WhiteHubConfig.json.
     FastSellHidden = true,
     WebhookURL = "",
     Phase1Notified = false,
