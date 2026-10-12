@@ -27,7 +27,7 @@ class WhiteAITrackingTests(unittest.TestCase):
         self.lua.execute('''
         payloads={{status="waiting_retry",attempts=1},{status="proposal_ready",diagnosis="safe"}}
         task.spawn(function() watch("https://example.test/reports","","aaaaaaaaaaaaaaaaaaaa",1) end)
-        advance(8); assert(_lastStatus:find("Incidente salvo",1,true))
+        advance(8); assert(_lastStatus:find("Incident saved",1,true))
         advance(8); assert(calls==2 and _jobHistory[1].status=="proposal_ready")
         ''')
 
@@ -36,7 +36,7 @@ class WhiteAITrackingTests(unittest.TestCase):
         payloads={{status="retry_exhausted",attempts=3}}
         task.spawn(function() watch("https://example.test/reports","","aaaaaaaaaaaaaaaaaaaa",1) end)
         advance(100); assert(calls==1 and _jobHistory[1].status=="retry_exhausted")
-        assert(_lastStatus:find("Incidente salvo",1,true))
+        assert(_lastStatus:find("Incident saved",1,true))
         ''')
 
     def test_duplicate_watchers_do_not_duplicate_requests(self):

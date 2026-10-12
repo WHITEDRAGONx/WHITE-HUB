@@ -246,8 +246,8 @@ local function watchJobLoop(endpoint, key, jobId, token)
                             recordJob(jobId, "failed", { diagnosis = _lastStatus })
                             return
                         elseif payload.status == "waiting_retry" or payload.status == "queued" then
-                            _lastStatus = "Incidente salvo; " .. (payload.status == "queued" and "aguardando análise"
-                                or "nova tentativa agendada") .. " (" .. tostring(payload.attempts or 0) .. "/3)"
+                            _lastStatus = "Incident saved; " .. (payload.status == "queued" and "analysis queued"
+                                or "retry scheduled") .. " (" .. tostring(payload.attempts or 0) .. "/3)"
                             local queueState = payload.status .. tostring(payload.attempts or 0)
                             if queueState ~= lastQueueState then
                                 recordJob(jobId, payload.status, {diagnosis = _lastStatus})
@@ -255,8 +255,8 @@ local function watchJobLoop(endpoint, key, jobId, token)
                             end
                         elseif payload.status == "retry_exhausted" or payload.status == "storage_failure" then
                             _lastStatus = payload.status == "retry_exhausted"
-                                and "Incidente salvo; limite de 3 análises atingido. Proposta não aplicada."
-                                or "Falha de armazenamento; recupere o incidente antes de reenviar."
+                                and "Incident saved; 3-analysis limit reached. No patch applied."
+                                or "Storage failed; recover the incident before resending."
                             recordJob(jobId, payload.status, {diagnosis = _lastStatus})
                             return
                         elseif type(payload.status) == "string" then
@@ -270,7 +270,7 @@ local function watchJobLoop(endpoint, key, jobId, token)
             end
         end
     end
-    _lastStatus = "Análise ainda pendente; use RECOVER SAVED INCIDENTS para acompanhar novamente."
+    _lastStatus = "Analysis pending; use RECOVER SAVED INCIDENTS to check again."
 end
 
 local function watchJob(endpoint, key, jobId, token)
@@ -435,20 +435,20 @@ local function authRequest(endpoint, path, method, headers)
 end
 
 function WhiteAI:RecoverSavedIncidents()
-    if _recovering then return false, "Recuperação já em andamento" end
+    if _recovering then return false, "Recovery already in progress" end
     if not _running or not _config or not _config:Get("WhiteAIEnabled") then
-        return false, "Ative Send to AI server primeiro"
+        return false, "Enable Send to AI server first"
     end
-    if _ownerSession == "" then return false, "Pareie o dispositivo para recuperar incidentes privados" end
+    if _ownerSession == "" then return false, "Pair this device to recover private incidents" end
     local endpoint, epoch = _config:Get("WhiteAIEndpoint"), _epoch
-    if not validEndpoint(endpoint) then return false, "Endpoint inválido" end
+    if not validEndpoint(endpoint) then return false, "Invalid endpoint" end
     _recovering = true
     task.spawn(function()
         local data = authRequest(endpoint, "/incidents", "GET", sessionHeaders(_ingestKey))
         if epoch ~= _epoch then return end
         _recovering = false
         if not data or type(data.incidents) ~= "table" then
-            _lastStatus = "Não foi possível recuperar incidentes; verifique servidor/sessão e aguarde antes de repetir."
+            _lastStatus = "Recovery failed; check server/session and retry after cooldown."
             return
         end
         local resumed = 0
@@ -460,29 +460,29 @@ function WhiteAI:RecoverSavedIncidents()
                 task.spawn(watchJob, endpoint, _ingestKey, id, epoch)
             end
         end
-        _lastStatus = "Incidentes recuperados: " .. tostring(resumed) .. "; reanálises somente para revisão."
+        _lastStatus = "Recovered incidents: " .. tostring(resumed) .. "; retries are review-only."
     end)
-    return true, "Recuperando incidentes salvos..."
+    return true, "Recovering saved incidents..."
 end
 
 function WhiteAI:RetryLastJob()
     if not _running or not _config or not _config:Get("WhiteAIEnabled") then
-        return false, "Ative Send to AI server primeiro"
+        return false, "Enable Send to AI server first"
     end
-    if _ownerSession == "" or not _lastJobId then return false, "Pareie e recupere um incidente primeiro" end
+    if _ownerSession == "" or not _lastJobId then return false, "Pair this device and recover an incident first" end
     local endpoint, epoch, id = _config:Get("WhiteAIEndpoint"), _epoch, _lastJobId
-    if not validEndpoint(endpoint) or not id:match("^[0-9a-f]+$") or #id ~= 20 then return false, "Job inválido" end
+    if not validEndpoint(endpoint) or not id:match("^[0-9a-f]+$") or #id ~= 20 then return false, "Invalid job" end
     task.spawn(function()
         local data = authRequest(endpoint, "/jobs/" .. id .. "/retry", "POST", sessionHeaders(_ingestKey))
         if epoch ~= _epoch then return end
         if data then
-            _lastStatus = "Reanálise solicitada; somente proposta para revisão."
+            _lastStatus = "Analysis retry requested; review-only proposal."
             task.spawn(watchJob, endpoint, _ingestKey, id, epoch)
         else
-            _lastStatus = "Reanálise não iniciada: aguarde cooldown ou confira limite/estado/sessão."
+            _lastStatus = "Retry not started; check cooldown, attempt limit, status and session."
         end
     end)
-    return true, "Solicitando reanálise..."
+    return true, "Requesting analysis retry..."
 end
 
 function WhiteAI:PairDevice(masterKey)

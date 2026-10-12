@@ -10,7 +10,6 @@ function StandV2UI:BuildResume(FarmPage,UI,_config,_standFarm,MakeToggle,trackCo
                 UI:ShowPopup("Executor lacks files/teleport queue support. Manual restart remains required.",6)
             end
         end)
-    UI:AddLabel(FarmPage, "Auto resume: owned destination only, 15-minute validity; ordinary reload stays OFF.")
     local hopBudgetInput=Instance.new("TextBox",FarmPage)
     hopBudgetInput.Size=UDim2.new(1,-4,0,30)
     hopBudgetInput.Font=Enum.Font.Code
@@ -29,7 +28,6 @@ function StandV2UI:BuildResume(FarmPage,UI,_config,_standFarm,MakeToggle,trackCo
     end))
 end
 function StandV2UI:BuildSkins(FarmPage,UI,_config,_standFarm,stopForTargetEdit,trackConnection,THEME)
-    UI:AddLabel(FarmPage,"Skin wishlist: exact names from detected skin logs; ALL skins stay protected.")
     local skinInput=Instance.new("TextBox",FarmPage)
     skinInput.Size=UDim2.new(1,-4,0,36)
     skinInput.Font=Enum.Font.Code
@@ -65,8 +63,8 @@ function StandV2UI:BuildStats(FarmPage,UI,_standFarm,trackConnection,styleAction
     local pityStats=UI:AddLabel(FarmPage,"")
     pityStats.TextScaled=false
     pityStats.TextWrapped=true
-    pityStats.Size=UDim2.new(1,-4,0,64)
-    pityStats.AutomaticSize=Enum.AutomaticSize.Y
+    pityStats.Size=UDim2.new(1,-4,0,50)
+    pityStats.TextSize=10
     local resetStats=Instance.new("TextButton",FarmPage)
     resetStats.Size=UDim2.new(1,-4,0,32)
     resetStats.Text="RESET STAND SESSION STATISTICS"

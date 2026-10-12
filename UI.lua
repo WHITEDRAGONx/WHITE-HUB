@@ -14,23 +14,23 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "FUTURE-GOLD-2026.09.14-R4-CONSOLE-FILTERS"
+local UI_BUILD = "SILVER-V5-20261012-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
-    BG = Color3.fromRGB(6, 7, 10),
-    BG2 = Color3.fromRGB(10, 11, 15),
-    PANEL = Color3.fromRGB(14, 15, 20),
-    PANEL2 = Color3.fromRGB(20, 21, 28),
-    PANEL3 = Color3.fromRGB(27, 28, 36),
-    WHITE = Color3.fromRGB(248, 249, 252),
+    BG = Color3.fromRGB(10, 13, 18),
+    BG2 = Color3.fromRGB(15, 19, 25),
+    PANEL = Color3.fromRGB(20, 25, 32),
+    PANEL2 = Color3.fromRGB(28, 35, 44),
+    PANEL3 = Color3.fromRGB(36, 45, 56),
+    WHITE = Color3.fromRGB(218, 226, 236),
     MUTED = Color3.fromRGB(170, 174, 184),
     MUTED2 = Color3.fromRGB(112, 116, 128),
-    GOLD = Color3.fromRGB(255, 195, 35),
-    GOLD_BRIGHT = Color3.fromRGB(255, 224, 104),
-    GOLD_WHITE = Color3.fromRGB(255, 244, 188),
-    GOLD_DARK = Color3.fromRGB(130, 88, 10),
-    GOLD_EDGE = Color3.fromRGB(190, 132, 16),
+    GOLD = Color3.fromRGB(145, 163, 184),
+    GOLD_BRIGHT = Color3.fromRGB(188, 207, 228),
+    GOLD_WHITE = Color3.fromRGB(222, 233, 245),
+    GOLD_DARK = Color3.fromRGB(66, 83, 103),
+    GOLD_EDGE = Color3.fromRGB(98, 120, 146),
     RED = Color3.fromRGB(135, 45, 52),
     RED_BRIGHT = Color3.fromRGB(215, 74, 82),
     GREEN = Color3.fromRGB(72, 170, 105),
@@ -97,6 +97,7 @@ local _combatFarm  = nil
 local _standFarm = nil
 local _standV2UI = nil
 local _prestigeRuntime = nil
+local _compactUI = nil
 local _serverHop   = nil
 local _whiteAI     = nil
 local _runtimeLog   = nil
@@ -123,6 +124,7 @@ function UI:Init(Modules)
     _standFarm   = Modules.StandFarm
     _standV2UI = Modules.StandV2UI
     _prestigeRuntime = Modules.AutoPrestigeRuntime
+    _compactUI = Modules.UICompact
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
@@ -133,7 +135,7 @@ local function stopPrestigeForSwitch(label)
     _prestigeRuntime:Stop()
     if _prestigeRuntime:IsBusy() then
         UI:SetToggleValue(label,false)
-        UI:ShowPopup("Auto Prestige ainda aguarda ação/resultado. A troca foi bloqueada; tente após confirmação.",6)
+        UI:ShowPopup("Auto Prestige result pending. Wait for confirmation before switching.",6)
         return false
     end
     return true
@@ -192,7 +194,7 @@ local function CreateCreditsPopup()
     t1.Size = UDim2.new(1, -24, 0, 26)
     t1.Position = UDim2.new(0, 17, 0, 5)
     t1.BackgroundTransparency = 1
-    t1.Text = "WHITE HUB  //  V3"
+    t1.Text = "WHITE HUB  //  V5"
     t1.TextColor3 = THEME.WHITE
     t1.TextSize = 15
     t1.Font = Enum.Font.GothamBold
@@ -202,7 +204,7 @@ local function CreateCreditsPopup()
     t2.Size = UDim2.new(1, -24, 0, 17)
     t2.Position = UDim2.new(0, 17, 0, 30)
     t2.BackgroundTransparency = 1
-    t2.Text = "FUTURE GOLD • " .. UI_BUILD
+    t2.Text = "SILVER • " .. UI_BUILD
     t2.TextColor3 = THEME.GOLD_BRIGHT
     t2.TextSize = 9
     t2.Font = Enum.Font.GothamMedium
@@ -228,7 +230,7 @@ local function AutoCanvas(scroll)
     local list = scroll:FindFirstChildOfClass("UIListLayout")
     if not list then return end
     local function update()
-        scroll.CanvasSize = UDim2.new(0,0,0, list.AbsoluteContentSize.Y + 10)
+        scroll.CanvasSize = UDim2.new(0,0,0, list.AbsoluteContentSize.Y / (_compactUI and _compactUI:ScaleFor(scroll) or 1) + 10)
     end
     update()
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(update)
@@ -236,7 +238,8 @@ end
 
 local function MakeSection(parent, text)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -4, 0, 26)
+    frame.Name = "Section"
+    frame.Size = UDim2.new(1, -4, 0, 20)
     frame.BackgroundColor3 = THEME.BG2
     frame.BorderSizePixel = 0
     frame.Parent = parent
@@ -255,7 +258,7 @@ local function MakeSection(parent, text)
     lbl.Size = UDim2.new(1, -18, 1, 0)
     lbl.Position = UDim2.new(0, 14, 0, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = text
+    lbl.Text = _compactUI and _compactUI:Caption(text) or text
     lbl.TextColor3 = THEME.GOLD_BRIGHT
     lbl.TextSize = 11
     lbl.Font = Enum.Font.GothamBold
@@ -265,7 +268,8 @@ end
 
 local function MakeToggle(parent, labelText, default, onChanged)
     local holder = Instance.new("Frame")
-    holder.Size             = UDim2.new(1,-4,0,32)
+    holder.Name             = "ToggleRow"
+    holder.Size             = UDim2.new(1,-4,0,28)
     holder.BackgroundColor3 = THEME.PANEL
     holder.BorderSizePixel  = 0
     holder.Parent           = parent
@@ -276,12 +280,14 @@ local function MakeToggle(parent, labelText, default, onChanged)
     stroke.Thickness = 1
 
     local lbl = Instance.new("TextLabel")
-    lbl.Size             = UDim2.new(0.65,0,1,0)
+    lbl.Size             = UDim2.new(1,-58,1,0)
     lbl.Position         = UDim2.new(0,8,0,0)
     lbl.BackgroundTransparency = 1
-    lbl.Text             = labelText
+    lbl.Text             = _compactUI and _compactUI:Caption(labelText) or labelText
     lbl.TextColor3       = THEME.WHITE
-    lbl.TextScaled       = true
+    lbl.TextScaled       = false
+    lbl.TextSize         = 12
+    lbl.TextTruncate     = Enum.TextTruncate.AtEnd
     lbl.Font             = Enum.Font.Gotham
     lbl.TextXAlignment   = Enum.TextXAlignment.Left
     lbl.Parent           = holder
@@ -345,7 +351,7 @@ function UI:AddLabel(parent, text)
     lbl.BackgroundTransparency = 1
     lbl.Text = text
     lbl.TextColor3 = THEME.WHITE
-    lbl.TextSize = 14
+    lbl.TextSize = 11
     lbl.Font = Enum.Font.Gotham
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = parent
@@ -366,7 +372,8 @@ end
 -- Styled dropdown with auto-close on selection (versão corrigida)
 local function MakeStyledDropdown(parent, labelText, options, callback)
     local holder = Instance.new("Frame")
-    holder.Size = UDim2.new(1,-4,0,36)
+    holder.Name = "DropdownRow"
+    holder.Size = UDim2.new(1,-4,0,30)
     holder.BackgroundColor3 = THEME.PANEL
     holder.BorderSizePixel = 0
     holder.Parent = parent
@@ -379,9 +386,11 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
     lbl.Size = UDim2.new(0.5,0,1,0)
     lbl.Position = UDim2.new(0,8,0,0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
+    lbl.Text = _compactUI and _compactUI:Caption(labelText) or labelText
     lbl.TextColor3 = THEME.WHITE
-    lbl.TextScaled = true
+    lbl.TextScaled = false
+    lbl.TextSize = 12
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
     lbl.Font = Enum.Font.Gotham
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = holder
@@ -393,7 +402,8 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
     dropdownBtn.BorderSizePixel = 0
     dropdownBtn.Text = options[1] or "None"
     dropdownBtn.TextColor3 = THEME.WHITE
-    dropdownBtn.TextSize = 14
+    dropdownBtn.TextSize = 11
+    dropdownBtn.TextTruncate = Enum.TextTruncate.AtEnd
     dropdownBtn.Font = Enum.Font.Gotham
     dropdownBtn.Parent = holder
     Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0,7)
@@ -600,7 +610,7 @@ function UI:Create()
         end))
     end
 
-    local W, H = 410, 338
+    local W, H = 380, 290
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "WhiteHubV3"
@@ -613,9 +623,11 @@ function UI:Create()
     MainFrame.Name             = "MainFrame"
     MainFrame.BackgroundColor3 = THEME.BG
     MainFrame.BorderSizePixel  = 0
-    MainFrame.Position         = UDim2.new(0.5,-W/2,0.5,-H/2)
+    MainFrame.AnchorPoint      = Vector2.new(0.5,0.5)
+    MainFrame.Position         = UDim2.new(0.5,0,0.44,0)
     MainFrame.Size             = UDim2.new(0,W,0,H)
     MainFrame.Visible          = false
+    if _compactUI then _compactUI:Responsive(MainFrame,W,H,trackConnection) end
     Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,12)
     local mfStroke = addStroke(MainFrame, THEME.GOLD_EDGE, 1.25, 0.24)
     addGradient(MainFrame, THEME.BG, THEME.BG2, 90)
@@ -625,7 +637,7 @@ function UI:Create()
     TopBar.Name             = "TopBar"
     TopBar.BackgroundColor3 = THEME.PANEL
     TopBar.BorderSizePixel  = 0
-    TopBar.Size             = UDim2.new(1,0,0,43)
+    TopBar.Size             = UDim2.new(1,0,0,35)
     Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0,12)
     addGradient(TopBar, THEME.PANEL2, THEME.PANEL, 0)
     local topFix = Instance.new("Frame", TopBar)
@@ -658,7 +670,7 @@ function UI:Create()
     versionLabel.BackgroundTransparency = 1
     versionLabel.Position = UDim2.new(0, 145, 0, 1)
     versionLabel.Size = UDim2.new(0, 94, 1, -2)
-    versionLabel.Text = "// V3 GOLD"
+    versionLabel.Text = "// V5 SILVER"
     versionLabel.TextColor3 = THEME.GOLD_BRIGHT
     versionLabel.TextSize = 11
     versionLabel.Font = Enum.Font.GothamBold
@@ -692,17 +704,17 @@ function UI:Create()
     local Sidebar = Instance.new("Frame", MainFrame)
     Sidebar.BackgroundTransparency = 1
     Sidebar.BorderSizePixel        = 0
-    Sidebar.Position               = UDim2.new(0,7,0,48)
-    Sidebar.Size                   = UDim2.new(0,104,1,-56)
+    Sidebar.Position               = UDim2.new(0,7,0,40)
+    Sidebar.Size                   = UDim2.new(0,80,1,-48)
     local sideLayout = Instance.new("UIListLayout", Sidebar)
-    sideLayout.Padding   = UDim.new(0,5)
+    sideLayout.Padding   = UDim.new(0,3)
     sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
     local PagesFrame = Instance.new("Frame", MainFrame)
     PagesFrame.BackgroundTransparency = 1
     PagesFrame.BorderSizePixel        = 0
-    PagesFrame.Position               = UDim2.new(0,118,0,48)
-    PagesFrame.Size                   = UDim2.new(1,-128,1,-56)
+    PagesFrame.Position               = UDim2.new(0,94,0,40)
+    PagesFrame.Size                   = UDim2.new(1,-104,1,-48)
 
     local function MakePage(name)
         local scroll = Instance.new("ScrollingFrame", PagesFrame)
@@ -721,10 +733,13 @@ function UI:Create()
         pad.PaddingLeft  = UDim.new(0,4)
         pad.PaddingRight = UDim.new(0,4)
         pad.PaddingTop   = UDim.new(0,4)
+        scroll.ClipsDescendants = true
+        if _compactUI then _compactUI:Observe(scroll,trackConnection) end
         return scroll
     end
 
     local FarmPage    = MakePage("FarmPage")
+    local StandPage   = MakePage("StandPage")
     local ItemsPage   = MakePage("ItemsPage")
     local QuestPage   = MakePage("QuestPage")
     local WebhookPage = MakePage("WebhookPage")
@@ -735,6 +750,7 @@ function UI:Create()
 
     local tabDefs = {
         { name="Farm",    page=FarmPage    },
+        { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
         { name="Webhook", page=WebhookPage },
@@ -775,10 +791,10 @@ function UI:Create()
         local btn = Instance.new("TextButton", Sidebar)
         btn.BackgroundColor3 = C_BG2
         btn.BorderSizePixel  = 0
-        btn.Size             = UDim2.new(1,0,0,36)
+        btn.Size             = UDim2.new(1,0,0,27)
         btn.Text             = def.name
         btn.TextColor3       = C_Text
-        btn.TextSize         = 12
+        btn.TextSize         = 11
         btn.Font             = Enum.Font.GothamBold
         btn.TextXAlignment   = Enum.TextXAlignment.Left
         btn.Text             = "   " .. def.name
@@ -913,11 +929,10 @@ function UI:Create()
 
     if _prestigeRuntime then _prestigeRuntime:BuildStatus(FarmPage,UI) end
 
+    do
+    local FarmPage = StandPage
     -- WHITE STAND FARM target list (DEV BETA): no inventory/merchant core changes.
     MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
-    UI:AddLabel(FarmPage, "Uses Rokakaka + selected Arrow/Rib consumable.")
-    UI:AddLabel(FarmPage, "Stops for skins, pity, missing items or dialogue errors.")
-    UI:AddLabel(FarmPage, "Disable other farms. Optional restock: current server, 90s limit.")
 
     local sourceDropdown = MakeStyledDropdown(FarmPage, "Stand consumable",
         {"Mysterious Arrow", "Rib Cage of The Saint's Corpse"}, function(selected)
@@ -927,7 +942,6 @@ function UI:Create()
     local savedSource = _config and _config:Get("StandFarmConsumable")
     sourceDropdown.Text = (savedSource == "Mysterious Arrow" or savedSource == "Rib Cage of The Saint's Corpse")
         and savedSource or "Mysterious Arrow"
-    UI:AddLabel(FarmPage, "Choose targets obtainable from your source. Rib: configure Worthiness manually.")
     MakeToggle(FarmPage, "Auto Restock Consumables (BETA)",
         (_config and _config:Get("StandFarmAutoRestock")) == true, function(enabled)
             if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
@@ -938,7 +952,6 @@ function UI:Create()
             if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
             if _config then _config:Set("StandFarmRestockHop", enabled) end
         end)
-    UI:AddLabel(FarmPage, "Restock hop: ONE transfer, no sales. Reload DevMain and restart beta manually after joining.")
     if _standV2UI then _standV2UI:BuildResume(FarmPage,UI,_config,_standFarm,MakeToggle,trackConnection,THEME) end
     local cancelRestockHop = Instance.new("TextButton", FarmPage)
     cancelRestockHop.Size = UDim2.new(1, -4, 0, 32)
@@ -952,7 +965,6 @@ function UI:Create()
     end))
 
     local refreshTargetList
-    UI:AddLabel(FarmPage, "Shiny mode: ANY skin stops the farm. Common targets may be replaced.")
     MakeToggle(FarmPage, "Shiny Farm Mode (BETA)", (_config and _config:Get("StandFarmMode") == "shiny") == true, function(enabled)
         if _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
@@ -990,7 +1002,7 @@ function UI:Create()
     local targetListLabel = UI:AddLabel(FarmPage, "")
     targetListLabel.TextScaled = false
     targetListLabel.TextWrapped = true
-    targetListLabel.Size = UDim2.new(1, -4, 0, 42)
+    targetListLabel.Size = UDim2.new(1, -4, 0, 28)
     targetListLabel.AutomaticSize = Enum.AutomaticSize.Y
     local targetListButton = Instance.new("TextButton", FarmPage)
     targetListButton.Size = UDim2.new(1, -4, 0, 32)
@@ -1006,7 +1018,7 @@ function UI:Create()
 
     refreshTargetList = function()
         if _config and _config:Get("StandFarmMode") == "shiny" then
-            targetListLabel.Text = "Shiny mode: stop on ANY skin. Stand target list ignored."
+            targetListLabel.Text = "ANY skin protected | saved targets inactive"
             targetListButton.Text = "EDIT SAVED STAND TARGET LIST"
             return
         end
@@ -1108,14 +1120,14 @@ function UI:Create()
     local standStatus = UI:AddLabel(FarmPage, "Stand Farm: idle")
     standStatus.TextScaled = false
     standStatus.TextWrapped = true
-    standStatus.Size = UDim2.new(1, -4, 0, 45)
+    standStatus.Size = UDim2.new(1, -4, 0, 40)
     task.spawn(function()
         while standStatus.Parent do
             task.wait(2)
             if not standStatus.Parent then break end
             if _standFarm then
                 local state = _standFarm:GetStatus()
-                standStatus.Text = ("Mode: %s | Stand: %s | Pity: %s | Rolls: %d | %s"):format(
+                standStatus.Text = ("%s | %s | Pity %s | Rolls %d\n%s"):format(
                     tostring(state.mode or "stand"), tostring(state.stand or "?"), tostring(state.pity or "?"),
                     tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
                 if not state.running then
@@ -1126,6 +1138,9 @@ function UI:Create()
     end)
 
     if _standV2UI then _standV2UI:BuildStats(FarmPage,UI,_standFarm,trackConnection,styleActionButton) end
+    AutoCanvas(FarmPage)
+
+    end
     AutoCanvas(FarmPage)
 
     -- =====================
@@ -1329,7 +1344,8 @@ function UI:Create()
     resetBtn.BorderSizePixel = 0
     resetBtn.Text = "RESET WEBHOOK FLAGS"
     resetBtn.TextColor3 = THEME.WHITE
-    resetBtn.TextScaled = true
+    resetBtn.TextScaled = false
+    resetBtn.TextSize = 12
     resetBtn.Font = Enum.Font.GothamBold
     resetBtn.Parent = WebhookPage
     Instance.new("UICorner", resetBtn).CornerRadius = UDim.new(0,7)
@@ -1581,17 +1597,6 @@ function UI:Create()
     -- =====================
     MakeSection(AIPage, "WHITE AI V1 - DIAGNOSTICS")
 
-    local aiDescription = Instance.new("TextLabel", AIPage)
-    aiDescription.BackgroundTransparency = 1
-    aiDescription.Size = UDim2.new(1, -8, 0, 55)
-    aiDescription.TextWrapped = true
-    aiDescription.TextYAlignment = Enum.TextYAlignment.Top
-    aiDescription.TextColor3 = THEME.MUTED
-    aiDescription.TextSize = 12
-    aiDescription.Font = Enum.Font.Gotham
-    aiDescription.Text = "Local error detection is always on. External AI and draft patch proposals are OFF until you configure an HTTPS backend."
-    aiDescription.LayoutOrder = 1
-
     MakeToggle(AIPage, "Send to AI server", _config and _config:Get("WhiteAIEnabled") == true, function(value)
         if _whiteAI then _whiteAI:SetEnabled(value) end
         runtimeLog("INFO", "WhiteAI external reports: " .. tostring(value))
@@ -1599,11 +1604,11 @@ function UI:Create()
 
     local aiStatus = Instance.new("TextLabel", AIPage)
     aiStatus.BackgroundTransparency = 1
-    aiStatus.Size = UDim2.new(1, -8, 0, 152)
+    aiStatus.Size = UDim2.new(1, -8, 0, 72)
     aiStatus.TextWrapped = true
     aiStatus.TextYAlignment = Enum.TextYAlignment.Top
     aiStatus.TextColor3 = THEME.GOLD_WHITE
-    aiStatus.TextSize = 12
+    aiStatus.TextSize = 10
     aiStatus.Font = Enum.Font.Code
     aiStatus.Text = "Local diagnostics initializing..."
 
@@ -1757,7 +1762,7 @@ function UI:Create()
                         .. " | External reports: " .. (status.enabled and "ON" or "OFF"),
                 }
                 local jobs = status.jobs or {}
-                for i = 1, math.min(2, #jobs) do
+                for i = 1, math.min(1, #jobs) do
                     local job = jobs[i]
                     if type(job) == "table" then
                         local confidence = type(job.confidence) == "number"
@@ -1765,7 +1770,7 @@ function UI:Create()
                         lines[#lines + 1] = ("Job %d: %s | %s%s"):format(
                             i, tostring(job.module or "-"), tostring(job.status or "?"), confidence)
                         if i == 1 and type(job.diagnosis) == "string" and job.diagnosis ~= "" then
-                            lines[#lines + 1] = "Diagnosis: " .. job.diagnosis:sub(1, 140)
+                            lines[#lines + 1] = "Diagnosis: " .. job.diagnosis:sub(1, 80)
                         end
                     end
                 end
@@ -1783,9 +1788,10 @@ function UI:Create()
     creditLabel.Size             = UDim2.new(1,-4,0,44)
     creditLabel.BackgroundColor3 = THEME.PANEL
     creditLabel.BorderSizePixel  = 0
-    creditLabel.Text             = "WHITE HUB V3  •  " .. UI_BUILD .. "  •  WHITE DRAGON"
+    creditLabel.Text             = "WHITE HUB V5  •  " .. UI_BUILD .. "  •  WHITE DRAGON"
     creditLabel.TextColor3       = THEME.WHITE
-    creditLabel.TextScaled       = true
+    creditLabel.TextScaled       = false
+    creditLabel.TextSize         = 12
     creditLabel.Font             = Enum.Font.GothamBold
     creditLabel.Parent           = CreditsPage
     Instance.new("UICorner", creditLabel).CornerRadius = UDim.new(0,7)
@@ -1797,7 +1803,8 @@ function UI:Create()
     discordBtn.BorderSizePixel  = 0
     discordBtn.Text             = "DISCORD  //  discord.gg/Qwd23ZRNxJ"
     discordBtn.TextColor3       = THEME.WHITE
-    discordBtn.TextScaled       = true
+    discordBtn.TextScaled       = false
+    discordBtn.TextSize         = 12
     discordBtn.Font             = Enum.Font.GothamBold
     discordBtn.Parent           = CreditsPage
     Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0,7)
@@ -1870,15 +1877,15 @@ function UI:Create()
         if isOpen then
             MainFrame.Visible = true
             MainFrame.Size = UDim2.new(0,0,0,0)
-            MainFrame.Position = UDim2.new(0.5,0,0.5,0)
+            MainFrame.Position = UDim2.new(0.5,0,0.44,0)
             TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                 Size = UDim2.new(0,W,0,H),
-                Position = UDim2.new(0.5,-W/2,0.5,-H/2),
+                Position = UDim2.new(0.5,0,0.44,0),
             }):Play()
         else
             local t = TweenService:Create(MainFrame, TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
                 Size = UDim2.new(0,0,0,0),
-                Position = UDim2.new(0.5,0,0.5,0),
+                Position = UDim2.new(0.5,0,0.44,0),
             })
             t:Play()
             t.Completed:Connect(function() MainFrame.Visible = false end)
@@ -1913,6 +1920,12 @@ function UI:Create()
             MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end
     end))
+
+    if _compactUI then
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,AIPage}) do
+            _compactUI:Arrange(page,trackConnection,THEME)
+        end
+    end
 
     -- Restore a persisted combat mode, resolving old configs that had both enabled.
     if _config then

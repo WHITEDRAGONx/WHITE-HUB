@@ -153,7 +153,7 @@ class ShinyModeTests(unittest.TestCase):
         onActivate=function() page("Option1","Pending") end
         assert(farm:Start()); advance(2); modeToggle(true)
         assert(not farm:IsRunning() and toggleValue==false and values.StandFarmMode=="shiny")
-        assert(labels[1].Text:find("Stand target list ignored"))
+        assert(labels[1].Text:find("saved targets inactive"))
         local n=#logs; advance(10); assert(activations==1 and #logs==n)
         modeToggle(false); assert(values.StandFarmMode=="stand")
         ''')

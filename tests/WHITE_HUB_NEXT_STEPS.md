@@ -8,7 +8,7 @@ and pity/session counters. New StandTransfer/StandV2UI helpers are dev-only; pla
 reload remains stopped. Native marker + strict one-use intent + queue/file support
 are required for auto continuation. See STAND_V2_DELTA_QA.md. Implementation is not
 YBA validation; storage and discarding skins remain excluded until validated.
-Next development milestone: incremental Smart Farm Engine ownership/scheduler.
+Smart Farm Engine was cancelled and removed by owner request.
 
 Only dev/2026-10-10-autosell-compat is authorized. Main, Inventory and XenonLock
 remain protected. Offline tests and an HTTP health check are not YBA validation.
@@ -65,8 +65,8 @@ successful job. Owner reports sales working; preserve Merchant as is.
    integration or skin destruction before functional validation.
 3. Auto Prestige compatibility and prolonged progression QA. Smart Farm Engine
    cancelled and removed at the owner's request; no queue/profile scheduler remains.
-4. UI V4: mobile scrolling/layout/dashboard after runtime stability; preserve
-   controls and saved settings.
+4. Silver V5 UI: compact mobile layout implemented at owner request; validate
+   native Delta rendering, scrolling and controls before considering it stable.
 5. WHITE AI improvements: retention/discovery beyond this low-volume GitHub queue,
    regression history and owner audit/rollback. No paid infrastructure/provider
    or widened AutoFix allowlist without authorization.
@@ -84,3 +84,12 @@ Hamon cost/requirements and full prestige progression still require actual logs.
 Unknown story origin deliberately stops instead of sweeping legacy NPC dialogues.
 Next: test AP in a fresh Delta/server session and finish evidence-based mappings;
 then continue independent V2/Quest/mobile QA. Do not recreate the Engine.
+
+## Compact Silver V5 visual beta
+
+Owner requested a smaller silver/off-white UI with English labels and grouped
+controls. Stand/Shiny/Rib controls now occupy their own tab. Presentation helpers
+retain the existing control objects, callbacks and configuration keys. See
+SILVER_V5_DELTA_QA.md; offline layout mocks do not prove native Roblox rendering.
+The Arrow stall shown in the latest recording is a separate unresolved runtime
+issue; this visual package does not alter consumable or dialogue logic.
