@@ -70,7 +70,7 @@ class StandV2Tests(unittest.TestCase):
         ''')
 
     def new_arrival_module(self, job='destination'):
-        self.run_lua('game.JobId='+json.dumps(job)+'; hop:Init({Config=config,Movement=movement,RuntimeLog=logger})')
+        self.run_lua('game.JobId='+json.dumps(job))
         source=(ROOT/'StandFarm.lua').read_text()
         source=source.replace('            continue\n','            goto next_iteration\n')
         source=source.replace('    end\n    if runToken == token then','        ::next_iteration::\n    end\n    if runToken == token then')

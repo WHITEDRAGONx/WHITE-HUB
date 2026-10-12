@@ -96,7 +96,6 @@ local _webhook     = nil
 local _combatFarm  = nil
 local _standFarm = nil
 local _standV2UI = nil
-local _engine, _engineUI = nil, nil
 local _serverHop   = nil
 local _whiteAI     = nil
 local _runtimeLog   = nil
@@ -122,7 +121,6 @@ function UI:Init(Modules)
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
     _standV2UI = Modules.StandV2UI
-    _engine, _engineUI = Modules.SmartFarmEngine, Modules.SmartFarmUI
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
@@ -800,13 +798,9 @@ function UI:Create()
     -- =====================
     -- FARM PAGE
     -- =====================
-    if _engineUI and _engine then
-        _engineUI:Build(FarmPage, UI, _engine, _config, trackConnection, styleActionButton, THEME)
-    end
     MakeSection(FarmPage, "FARM SETTINGS")
     
     MakeToggle(FarmPage, "Enable Farm", _config and _config:Get("FarmEnabled"), function(v)
-        if _engine then _engine:RequestMode("item", v); return end
         if v and _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
@@ -824,11 +818,9 @@ function UI:Create()
     end)
     
     MakeToggle(FarmPage, "Auto Sell", _config and _config:Get("AutoSell"), function(v)
-        if _engine then _engine:SetItemPreference("AutoSell",v); return end
         if _config then _config:Set("AutoSell", v) end
     end)
     MakeToggle(FarmPage, "Auto Buy Lucky", _config and _config:Get("BuyLucky"), function(v)
-        if _engine then _engine:SetItemPreference("BuyLucky",v); return end
         if _config then _config:Set("BuyLucky", v) end
     end)
 
@@ -849,7 +841,6 @@ function UI:Create()
     manualHopButton.Parent = FarmPage
     styleActionButton(manualHopButton, false)
     trackConnection(manualHopButton.MouseButton1Click:Connect(function()
-        if _engine then _engine:RequestMode("hop", true); return end
         if manualHopBusy then return end
         manualHopBusy = true
         manualHopButton.Text = "HOPPING..."
@@ -870,7 +861,6 @@ function UI:Create()
 
     MakeSection(FarmPage, "PRESTIGE")
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
-        if _engine then _engine:RequestMode("prestige", v); return end
         if _config then
             if v then
                 _config:SetMany({ AutoPrestige = true, QuestFarmEnabled = false, NPCFarmEnabled = false })
@@ -1070,7 +1060,6 @@ function UI:Create()
     end))
 
     MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
-        if _engine then _engine:RequestMode("stand", enabled); return end
         if not _standFarm then
             UI:SetToggleValue("Stand Farm (BETA)", false)
             return
@@ -1155,7 +1144,6 @@ function UI:Create()
     
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
-        if _engine then _engine:RequestMode("quest", v); return end
         if _config then
             if v then
                 _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, AutoPrestige = false })
@@ -1195,7 +1183,6 @@ function UI:Create()
     end
     
     MakeToggle(QuestPage, "NPC Farm", _config and _config:Get("NPCFarmEnabled"), function(v)
-        if _engine then _engine:RequestMode("npc", v); return end
         if _config then
             if v then
                 _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, AutoPrestige = false })
@@ -1896,8 +1883,8 @@ function UI:Create()
         end
     end))
 
-    -- The experimental engine restores a single owner after worker initialization.
-    if _config and not _engine then
+    -- Restore a persisted combat mode, resolving old configs that had both enabled.
+    if _config then
         if _config:Get("QuestFarmEnabled") then
             _config:Set("NPCFarmEnabled", false)
             UI:SetToggleValue("NPC Farm", false)
@@ -1905,13 +1892,6 @@ function UI:Create()
         elseif _config:Get("NPCFarmEnabled") then
             if _combatFarm then _combatFarm:StartNPC() end
         end
-    end
-end
-
-function UI:RefreshEngineMode(mode)
-    for label, name in pairs({["Enable Farm"]="item", ["Quest Farm"]="quest",
-        ["NPC Farm"]="npc", ["Stand Farm (BETA)"]="stand", ["Auto Prestige"]="prestige"}) do
-        self:SetToggleValue(label, mode == name)
     end
 end
 

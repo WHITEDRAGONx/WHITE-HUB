@@ -16,7 +16,6 @@ local _movement = nil
 local _config = nil
 local _kickConnection = nil
 local hopBusy = false
-local transferRequested, transferFailureConnection = false, nil
 
 local AllIDs = {}
 local foundAnything = ""
@@ -113,13 +112,6 @@ function ServerHop:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _movement = Modules.Movement
     _config = Modules.Config
-    if transferFailureConnection then transferFailureConnection:Disconnect() end
-    transferRequested=false
-    if TeleportService.TeleportInitFailed then
-        transferFailureConnection=TeleportService.TeleportInitFailed:Connect(function(failedPlayer)
-            if failedPlayer==Player then transferRequested=false end
-        end)
-    end
 
     if _kickConnection then
         pcall(function() _kickConnection:Disconnect() end)
@@ -143,12 +135,10 @@ function ServerHop:Init(Modules)
     end)
 end
 
-function ServerHop:IsBusy() return hopBusy or transferRequested end
-
 function ServerHop:Hop(canContinue, onDestination)
     if canContinue ~= nil and type(canContinue) ~= "function" then return false end
     if onDestination ~= nil and type(onDestination) ~= "function" then return false end
-    if hopBusy or transferRequested then return false end
+    if hopBusy then return false end
     if _config and _config:Get("StayInPrivateServer") then
         moduleLog("INFO", "[ServerHop] StayInPrivateServer is ON — skipping hop.")
         return false
@@ -163,7 +153,6 @@ function ServerHop:Hop(canContinue, onDestination)
         return false
     end)
     hopBusy = false
-    if ok and result == true then transferRequested=true end
 
     if _movement and not canContinue then
         task.delay(3, function() _movement:FixCamera() end)
@@ -183,7 +172,6 @@ function ServerHop:Rejoin()
 end
 
 function ServerHop:Destroy()
-    if transferFailureConnection then transferFailureConnection:Disconnect(); transferFailureConnection=nil end
     if _kickConnection then
         pcall(function() _kickConnection:Disconnect() end)
         _kickConnection = nil
