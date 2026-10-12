@@ -20,6 +20,19 @@ local Defaults = {
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
+    -- Stand Farm V1 is opt-in and never auto-starts after reload.
+    StandFarmEnabled = false,
+    StandFarmTarget = "",
+    StandFarmTargets = {}, -- Empty list keeps the existing single-target mode.
+    StandFarmMode = "stand", -- Opt-in "shiny" ignores common Stand targets.
+    StandFarmConsumable = "Mysterious Arrow",
+    StandFarmAutoRestock = false, -- Local collection; optional transfer configured separately.
+    StandFarmRestockHop = false, -- One guarded transfer, then manual beta restart.
+    StandFarmResumeAfterHop = false, -- Explicit opt-in exception for owned transfer only.
+    StandFarmMaxHops = 3,
+    StandFarmSkinTargets = {}, -- Exact wishlist; every skin is still protected.
+    StandFarmRestockPendingItem = "", -- Non-secret restart notice, never a resume command.
+    StandFarmPityLimit = 20,
 
     NPCFarmEnabled = false,
     QuestFarmEnabled = false,

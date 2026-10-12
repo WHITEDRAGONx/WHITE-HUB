@@ -7,29 +7,30 @@ local Players          = game:GetService("Players")
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local TextService      = game:GetService("TextService")
+local HttpService      = game:GetService("HttpService")
 
 local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "FUTURE-GOLD-2026.09.14-R4-CONSOLE-FILTERS"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261012-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
-    BG = Color3.fromRGB(6, 7, 10),
-    BG2 = Color3.fromRGB(10, 11, 15),
-    PANEL = Color3.fromRGB(14, 15, 20),
-    PANEL2 = Color3.fromRGB(20, 21, 28),
-    PANEL3 = Color3.fromRGB(27, 28, 36),
-    WHITE = Color3.fromRGB(248, 249, 252),
+    BG = Color3.fromRGB(10, 13, 18),
+    BG2 = Color3.fromRGB(15, 19, 25),
+    PANEL = Color3.fromRGB(20, 25, 32),
+    PANEL2 = Color3.fromRGB(28, 35, 44),
+    PANEL3 = Color3.fromRGB(36, 45, 56),
+    WHITE = Color3.fromRGB(218, 226, 236),
     MUTED = Color3.fromRGB(170, 174, 184),
     MUTED2 = Color3.fromRGB(112, 116, 128),
-    GOLD = Color3.fromRGB(255, 195, 35),
-    GOLD_BRIGHT = Color3.fromRGB(255, 224, 104),
-    GOLD_WHITE = Color3.fromRGB(255, 244, 188),
-    GOLD_DARK = Color3.fromRGB(130, 88, 10),
-    GOLD_EDGE = Color3.fromRGB(190, 132, 16),
+    GOLD = Color3.fromRGB(145, 163, 184),
+    GOLD_BRIGHT = Color3.fromRGB(188, 207, 228),
+    GOLD_WHITE = Color3.fromRGB(222, 233, 245),
+    GOLD_DARK = Color3.fromRGB(66, 83, 103),
+    GOLD_EDGE = Color3.fromRGB(98, 120, 146),
     RED = Color3.fromRGB(135, 45, 52),
     RED_BRIGHT = Color3.fromRGB(215, 74, 82),
     GREEN = Color3.fromRGB(72, 170, 105),
@@ -93,6 +94,11 @@ end
 local _config      = nil
 local _webhook     = nil
 local _combatFarm  = nil
+local _standFarm = nil
+local _standV2UI = nil
+local _prestigeRuntime = nil
+local _compactUI = nil
+local _serverHop   = nil
 local _runtimeLog   = nil
 
 local toggleObjects = {}
@@ -114,7 +120,23 @@ function UI:Init(Modules)
     _config      = Modules.Config
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
+    _standFarm   = Modules.StandFarm
+    _standV2UI = Modules.StandV2UI
+    _prestigeRuntime = Modules.AutoPrestigeRuntime
+    _compactUI = Modules.UICompact
+    _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
+end
+
+local function stopPrestigeForSwitch(label)
+    if not _prestigeRuntime then return true end
+    _prestigeRuntime:Stop()
+    if _prestigeRuntime:IsBusy() then
+        UI:SetToggleValue(label,false)
+        UI:ShowPopup("Auto Prestige result pending. Wait for confirmation before switching.",6)
+        return false
+    end
+    return true
 end
 
 local function runtimeLog(level, message)
@@ -170,7 +192,7 @@ local function CreateCreditsPopup()
     t1.Size = UDim2.new(1, -24, 0, 26)
     t1.Position = UDim2.new(0, 17, 0, 5)
     t1.BackgroundTransparency = 1
-    t1.Text = "WHITE HUB  //  V3"
+    t1.Text = "WHITE HUB  //  V5"
     t1.TextColor3 = THEME.WHITE
     t1.TextSize = 15
     t1.Font = Enum.Font.GothamBold
@@ -180,7 +202,7 @@ local function CreateCreditsPopup()
     t2.Size = UDim2.new(1, -24, 0, 17)
     t2.Position = UDim2.new(0, 17, 0, 30)
     t2.BackgroundTransparency = 1
-    t2.Text = "FUTURE GOLD • " .. UI_BUILD
+    t2.Text = "SILVER • " .. UI_BUILD
     t2.TextColor3 = THEME.GOLD_BRIGHT
     t2.TextSize = 9
     t2.Font = Enum.Font.GothamMedium
@@ -206,7 +228,7 @@ local function AutoCanvas(scroll)
     local list = scroll:FindFirstChildOfClass("UIListLayout")
     if not list then return end
     local function update()
-        scroll.CanvasSize = UDim2.new(0,0,0, list.AbsoluteContentSize.Y + 10)
+        scroll.CanvasSize = UDim2.new(0,0,0, list.AbsoluteContentSize.Y / (_compactUI and _compactUI:ScaleFor(scroll) or 1) + 10)
     end
     update()
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(update)
@@ -214,7 +236,8 @@ end
 
 local function MakeSection(parent, text)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -4, 0, 26)
+    frame.Name = "Section"
+    frame.Size = UDim2.new(1, -4, 0, 20)
     frame.BackgroundColor3 = THEME.BG2
     frame.BorderSizePixel = 0
     frame.Parent = parent
@@ -233,7 +256,7 @@ local function MakeSection(parent, text)
     lbl.Size = UDim2.new(1, -18, 1, 0)
     lbl.Position = UDim2.new(0, 14, 0, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = text
+    lbl.Text = _compactUI and _compactUI:Caption(text) or text
     lbl.TextColor3 = THEME.GOLD_BRIGHT
     lbl.TextSize = 11
     lbl.Font = Enum.Font.GothamBold
@@ -243,7 +266,8 @@ end
 
 local function MakeToggle(parent, labelText, default, onChanged)
     local holder = Instance.new("Frame")
-    holder.Size             = UDim2.new(1,-4,0,32)
+    holder.Name             = "ToggleRow"
+    holder.Size             = UDim2.new(1,-4,0,28)
     holder.BackgroundColor3 = THEME.PANEL
     holder.BorderSizePixel  = 0
     holder.Parent           = parent
@@ -254,12 +278,14 @@ local function MakeToggle(parent, labelText, default, onChanged)
     stroke.Thickness = 1
 
     local lbl = Instance.new("TextLabel")
-    lbl.Size             = UDim2.new(0.65,0,1,0)
+    lbl.Size             = UDim2.new(1,-58,1,0)
     lbl.Position         = UDim2.new(0,8,0,0)
     lbl.BackgroundTransparency = 1
-    lbl.Text             = labelText
+    lbl.Text             = _compactUI and _compactUI:Caption(labelText) or labelText
     lbl.TextColor3       = THEME.WHITE
-    lbl.TextScaled       = true
+    lbl.TextScaled       = false
+    lbl.TextSize         = 12
+    lbl.TextTruncate     = Enum.TextTruncate.AtEnd
     lbl.Font             = Enum.Font.Gotham
     lbl.TextXAlignment   = Enum.TextXAlignment.Left
     lbl.Parent           = holder
@@ -323,7 +349,7 @@ function UI:AddLabel(parent, text)
     lbl.BackgroundTransparency = 1
     lbl.Text = text
     lbl.TextColor3 = THEME.WHITE
-    lbl.TextSize = 14
+    lbl.TextSize = 11
     lbl.Font = Enum.Font.Gotham
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = parent
@@ -344,7 +370,8 @@ end
 -- Styled dropdown with auto-close on selection (versão corrigida)
 local function MakeStyledDropdown(parent, labelText, options, callback)
     local holder = Instance.new("Frame")
-    holder.Size = UDim2.new(1,-4,0,36)
+    holder.Name = "DropdownRow"
+    holder.Size = UDim2.new(1,-4,0,30)
     holder.BackgroundColor3 = THEME.PANEL
     holder.BorderSizePixel = 0
     holder.Parent = parent
@@ -357,9 +384,11 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
     lbl.Size = UDim2.new(0.5,0,1,0)
     lbl.Position = UDim2.new(0,8,0,0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
+    lbl.Text = _compactUI and _compactUI:Caption(labelText) or labelText
     lbl.TextColor3 = THEME.WHITE
-    lbl.TextScaled = true
+    lbl.TextScaled = false
+    lbl.TextSize = 12
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
     lbl.Font = Enum.Font.Gotham
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = holder
@@ -371,7 +400,8 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
     dropdownBtn.BorderSizePixel = 0
     dropdownBtn.Text = options[1] or "None"
     dropdownBtn.TextColor3 = THEME.WHITE
-    dropdownBtn.TextSize = 14
+    dropdownBtn.TextSize = 11
+    dropdownBtn.TextTruncate = Enum.TextTruncate.AtEnd
     dropdownBtn.Font = Enum.Font.Gotham
     dropdownBtn.Parent = holder
     Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0,7)
@@ -578,7 +608,7 @@ function UI:Create()
         end))
     end
 
-    local W, H = 410, 338
+    local W, H = 380, 290
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "WhiteHubV3"
@@ -591,9 +621,11 @@ function UI:Create()
     MainFrame.Name             = "MainFrame"
     MainFrame.BackgroundColor3 = THEME.BG
     MainFrame.BorderSizePixel  = 0
-    MainFrame.Position         = UDim2.new(0.5,-W/2,0.5,-H/2)
+    MainFrame.AnchorPoint      = Vector2.new(0.5,0.5)
+    MainFrame.Position         = UDim2.new(0.5,0,0.44,0)
     MainFrame.Size             = UDim2.new(0,W,0,H)
     MainFrame.Visible          = false
+    if _compactUI then _compactUI:Responsive(MainFrame,W,H,trackConnection) end
     Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0,12)
     local mfStroke = addStroke(MainFrame, THEME.GOLD_EDGE, 1.25, 0.24)
     addGradient(MainFrame, THEME.BG, THEME.BG2, 90)
@@ -603,7 +635,7 @@ function UI:Create()
     TopBar.Name             = "TopBar"
     TopBar.BackgroundColor3 = THEME.PANEL
     TopBar.BorderSizePixel  = 0
-    TopBar.Size             = UDim2.new(1,0,0,43)
+    TopBar.Size             = UDim2.new(1,0,0,35)
     Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0,12)
     addGradient(TopBar, THEME.PANEL2, THEME.PANEL, 0)
     local topFix = Instance.new("Frame", TopBar)
@@ -636,7 +668,7 @@ function UI:Create()
     versionLabel.BackgroundTransparency = 1
     versionLabel.Position = UDim2.new(0, 145, 0, 1)
     versionLabel.Size = UDim2.new(0, 94, 1, -2)
-    versionLabel.Text = "// V3 GOLD"
+    versionLabel.Text = "// V5 SILVER"
     versionLabel.TextColor3 = THEME.GOLD_BRIGHT
     versionLabel.TextSize = 11
     versionLabel.Font = Enum.Font.GothamBold
@@ -670,17 +702,17 @@ function UI:Create()
     local Sidebar = Instance.new("Frame", MainFrame)
     Sidebar.BackgroundTransparency = 1
     Sidebar.BorderSizePixel        = 0
-    Sidebar.Position               = UDim2.new(0,7,0,48)
-    Sidebar.Size                   = UDim2.new(0,104,1,-56)
+    Sidebar.Position               = UDim2.new(0,7,0,40)
+    Sidebar.Size                   = UDim2.new(0,80,1,-48)
     local sideLayout = Instance.new("UIListLayout", Sidebar)
-    sideLayout.Padding   = UDim.new(0,5)
+    sideLayout.Padding   = UDim.new(0,3)
     sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
     local PagesFrame = Instance.new("Frame", MainFrame)
     PagesFrame.BackgroundTransparency = 1
     PagesFrame.BorderSizePixel        = 0
-    PagesFrame.Position               = UDim2.new(0,118,0,48)
-    PagesFrame.Size                   = UDim2.new(1,-128,1,-56)
+    PagesFrame.Position               = UDim2.new(0,94,0,40)
+    PagesFrame.Size                   = UDim2.new(1,-104,1,-48)
 
     local function MakePage(name)
         local scroll = Instance.new("ScrollingFrame", PagesFrame)
@@ -699,10 +731,13 @@ function UI:Create()
         pad.PaddingLeft  = UDim.new(0,4)
         pad.PaddingRight = UDim.new(0,4)
         pad.PaddingTop   = UDim.new(0,4)
+        scroll.ClipsDescendants = true
+        if _compactUI then _compactUI:Observe(scroll,trackConnection) end
         return scroll
     end
 
     local FarmPage    = MakePage("FarmPage")
+    local StandPage   = MakePage("StandPage")
     local ItemsPage   = MakePage("ItemsPage")
     local QuestPage   = MakePage("QuestPage")
     local WebhookPage = MakePage("WebhookPage")
@@ -712,6 +747,7 @@ function UI:Create()
 
     local tabDefs = {
         { name="Farm",    page=FarmPage    },
+        { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
         { name="Webhook", page=WebhookPage },
@@ -751,10 +787,10 @@ function UI:Create()
         local btn = Instance.new("TextButton", Sidebar)
         btn.BackgroundColor3 = C_BG2
         btn.BorderSizePixel  = 0
-        btn.Size             = UDim2.new(1,0,0,36)
+        btn.Size             = UDim2.new(1,0,0,27)
         btn.Text             = def.name
         btn.TextColor3       = C_Text
-        btn.TextSize         = 12
+        btn.TextSize         = 11
         btn.Font             = Enum.Font.GothamBold
         btn.TextXAlignment   = Enum.TextXAlignment.Left
         btn.Text             = "   " .. def.name
@@ -790,6 +826,11 @@ function UI:Create()
     MakeSection(FarmPage, "FARM SETTINGS")
     
     MakeToggle(FarmPage, "Enable Farm", _config and _config:Get("FarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("Enable Farm") then return end
+        if v and _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
         if _config then _config:Set("FarmEnabled", v) end
         if not v then
             print("[UI] Farm disabled by user.")
@@ -815,8 +856,49 @@ function UI:Create()
         runtimeLog("INFO", "Stay in Private Server = " .. tostring(v))
     end)
 
+    -- Manual Server Hop uses the existing ServerHop.lua logic. No automatic
+    -- hop timers or Merchant code are changed.
+    local manualHopBusy = false
+    local manualHopButton = Instance.new("TextButton")
+    manualHopButton.Size = UDim2.new(1, -4, 0, 34)
+    manualHopButton.Font = Enum.Font.GothamBold
+    manualHopButton.TextSize = 13
+    manualHopButton.Text = "SERVER HOP NOW"
+    manualHopButton.Parent = FarmPage
+    styleActionButton(manualHopButton, false)
+    trackConnection(manualHopButton.MouseButton1Click:Connect(function()
+        if not stopPrestigeForSwitch("Auto Prestige") then return end
+        if manualHopBusy then return end
+        manualHopBusy = true
+        manualHopButton.Text = "HOPPING..."
+        task.spawn(function()
+            local ok, result = pcall(function()
+                return _serverHop and _serverHop:Hop() or false
+            end)
+            if not ok or result ~= true then
+                runtimeLog("WARN", "Manual Server Hop did not start: " .. tostring(result))
+            end
+            task.wait(1.2)
+            if manualHopButton.Parent then
+                manualHopButton.Text = "SERVER HOP NOW"
+            end
+            manualHopBusy = false
+        end)
+    end))
+
     MakeSection(FarmPage, "PRESTIGE")
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
+        if _prestigeRuntime then
+            if not v then _prestigeRuntime:Stop(); return end
+            _config:SetMany({FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
+            if _standFarm then _standFarm:Stop() end
+            if _combatFarm then _combatFarm:Stop() end
+            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
+            UI:SetToggleValue("Quest Farm",false); UI:SetToggleValue("NPC Farm",false)
+            local ok,reason=_prestigeRuntime:Start()
+            if not ok then UI:SetToggleValue("Auto Prestige",false); UI:ShowPopup(tostring(reason),6) end
+            return
+        end
         if _config then
             if v then
                 _config:SetMany({ AutoPrestige = true, QuestFarmEnabled = false, NPCFarmEnabled = false })
@@ -826,6 +908,10 @@ function UI:Create()
         end
         getgenv().AutoPrestigeEnabled = v
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("NPC Farm", false)
             if _combatFarm then _combatFarm:Stop() end
@@ -837,6 +923,220 @@ function UI:Create()
         end
     end)
 
+    if _prestigeRuntime then _prestigeRuntime:BuildStatus(FarmPage,UI) end
+
+    do
+    local FarmPage = StandPage
+    -- WHITE STAND FARM target list (DEV BETA): no inventory/merchant core changes.
+    MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
+
+    local sourceDropdown = MakeStyledDropdown(FarmPage, "Stand consumable",
+        {"Mysterious Arrow", "Rib Cage of The Saint's Corpse"}, function(selected)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmConsumable", selected) end
+        end)
+    local savedSource = _config and _config:Get("StandFarmConsumable")
+    sourceDropdown.Text = (savedSource == "Mysterious Arrow" or savedSource == "Rib Cage of The Saint's Corpse")
+        and savedSource or "Mysterious Arrow"
+    MakeToggle(FarmPage, "Auto Restock Consumables (BETA)",
+        (_config and _config:Get("StandFarmAutoRestock")) == true, function(enabled)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmAutoRestock", enabled) end
+        end)
+    MakeToggle(FarmPage, "Hop After Restock Limit (BETA)",
+        (_config and _config:Get("StandFarmRestockHop")) == true, function(enabled)
+            if _standFarm then _standFarm:Stop(); UI:SetToggleValue("Stand Farm (BETA)", false) end
+            if _config then _config:Set("StandFarmRestockHop", enabled) end
+        end)
+    if _standV2UI then _standV2UI:BuildResume(FarmPage,UI,_config,_standFarm,MakeToggle,trackConnection,THEME) end
+    local cancelRestockHop = Instance.new("TextButton", FarmPage)
+    cancelRestockHop.Size = UDim2.new(1, -4, 0, 32)
+    cancelRestockHop.Text = "CANCEL RESTOCK TRANSFER / STOP"
+    cancelRestockHop.Font = Enum.Font.GothamBold
+    cancelRestockHop.TextSize = 11
+    styleActionButton(cancelRestockHop, false)
+    trackConnection(cancelRestockHop.MouseButton1Click:Connect(function()
+        if _standFarm then _standFarm:Stop() end
+        UI:SetToggleValue("Stand Farm (BETA)", false)
+    end))
+
+    local refreshTargetList
+    MakeToggle(FarmPage, "Shiny Farm Mode (BETA)", (_config and _config:Get("StandFarmMode") == "shiny") == true, function(enabled)
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+        if _config then _config:Set("StandFarmMode", enabled and "shiny" or "stand") end
+        if refreshTargetList then refreshTargetList() end
+        runtimeLog("INFO", enabled and "Shiny mode selected: common Stand targets ignored; every skin protected"
+            or "Stand target mode selected")
+    end)
+
+    local availableStands = {
+        "Star Platinum", "The World", "Crazy Diamond", "Killer Queen",
+        "Gold Experience", "King Crimson", "Silver Chariot", "Whitesnake",
+        "Stone Free", "The Hand", "Hierophant Green", "Magician's Red",
+        "Purple Haze", "White Album", "Aerosmith", "Six Pistols", "Cream",
+        "Mr. President", "Scary Monsters", "The World Alternate Universe",
+        "D4C", "Tusk ACT 1", "Soft & Wet", "Sticky Fingers", "Anubis",
+    }
+    local standDropdown = MakeStyledDropdown(FarmPage, "Target Stand", availableStands, function(selected)
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+        if _config then _config:Set("StandFarmTarget", selected) end
+        if refreshTargetList then refreshTargetList() end
+    end)
+    local savedTarget = _config and _config:Get("StandFarmTarget")
+    if type(savedTarget) == "string" and table.find(availableStands, savedTarget) then
+        standDropdown.Text = savedTarget
+    else
+        standDropdown.Text = "Select Stand"
+    end
+
+    local targetListLabel = UI:AddLabel(FarmPage, "")
+    targetListLabel.TextScaled = false
+    targetListLabel.TextWrapped = true
+    targetListLabel.Size = UDim2.new(1, -4, 0, 28)
+    targetListLabel.AutomaticSize = Enum.AutomaticSize.Y
+    local targetListButton = Instance.new("TextButton", FarmPage)
+    targetListButton.Size = UDim2.new(1, -4, 0, 32)
+    targetListButton.Font = Enum.Font.GothamBold
+    targetListButton.TextSize = 11
+    styleActionButton(targetListButton, false)
+    local clearTargetsButton = Instance.new("TextButton", FarmPage)
+    clearTargetsButton.Size = UDim2.new(1, -4, 0, 32)
+    clearTargetsButton.Font = Enum.Font.GothamBold
+    clearTargetsButton.TextSize = 11
+    clearTargetsButton.Text = "CLEAR LIST / USE SINGLE TARGET"
+    styleActionButton(clearTargetsButton, false)
+
+    refreshTargetList = function()
+        if _config and _config:Get("StandFarmMode") == "shiny" then
+            targetListLabel.Text = "ANY skin protected | saved targets inactive"
+            targetListButton.Text = "EDIT SAVED STAND TARGET LIST"
+            return
+        end
+        local list = _config and _config:Get("StandFarmTargets")
+        if list ~= nil and type(list) ~= "table" then
+            targetListLabel.Text = "Invalid saved list. Clear it before starting."
+            targetListButton.Text = "CLEAR INVALID LIST FIRST"
+            return
+        end
+        list = list or {}
+        local names = {}
+        for _, name in ipairs(list) do
+            if type(name) ~= "string" then
+                targetListLabel.Text = "Invalid saved list. Clear it before starting."
+                targetListButton.Text = "CLEAR INVALID LIST FIRST"
+                return
+            end
+            names[#names + 1] = name
+        end
+        targetListLabel.Text = #names > 0 and ("Stop on ANY: " .. table.concat(names, ", "))
+            or "Single target mode. Add selected Stands to stop on any in a list."
+        targetListButton.Text = table.find(list, _config and _config:Get("StandFarmTarget"))
+            and "REMOVE SELECTED STAND FROM LIST" or "ADD SELECTED STAND TO LIST"
+    end
+    local function stopForTargetEdit()
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+        end
+    end
+    trackConnection(targetListButton.MouseButton1Click:Connect(function()
+        if not _config then return end
+        local selected, list = _config:Get("StandFarmTarget"), _config:Get("StandFarmTargets")
+        if not table.find(availableStands, selected) then UI:ShowPopup("Select a Stand first", 4); return end
+        if list ~= nil and type(list) ~= "table" then UI:ShowPopup("Clear invalid list first", 4); return end
+        local copy = {}
+        for _, name in ipairs(list or {}) do
+            if type(name) ~= "string" then UI:ShowPopup("Clear invalid list first", 4); return end
+            copy[#copy + 1] = name
+        end
+        local index = table.find(copy, selected)
+        if index then table.remove(copy, index)
+        elseif #copy < 25 then copy[#copy + 1] = selected
+        else UI:ShowPopup("Target list limit: 25", 4); return end
+        stopForTargetEdit()
+        _config:Set("StandFarmTargets", copy)
+        refreshTargetList()
+    end))
+    trackConnection(clearTargetsButton.MouseButton1Click:Connect(function()
+        if not _config then return end
+        stopForTargetEdit()
+        _config:Set("StandFarmTargets", {})
+        refreshTargetList()
+    end))
+    refreshTargetList()
+
+    if _standV2UI then _standV2UI:BuildSkins(FarmPage,UI,_config,_standFarm,stopForTargetEdit,trackConnection,THEME) end
+
+    local pityInput = Instance.new("TextBox", FarmPage)
+    pityInput.Size = UDim2.new(1, -4, 0, 30)
+    pityInput.BackgroundColor3 = THEME.PANEL2
+    pityInput.BorderSizePixel = 0
+    pityInput.Font = Enum.Font.Code
+    pityInput.TextColor3 = THEME.WHITE
+    pityInput.TextSize = 12
+    pityInput.ClearTextOnFocus = false
+    pityInput.PlaceholderText = "Stop at pity (0 disables limit)"
+    pityInput.Text = "Stop at pity: " .. tostring(_config and _config:Get("StandFarmPityLimit") or 20)
+    Instance.new("UICorner", pityInput).CornerRadius = UDim.new(0, 6)
+    trackConnection(pityInput.FocusLost:Connect(function()
+        local raw = pityInput.Text:match("(%d+)")
+        local num = raw and tonumber(raw)
+        if num == nil or num < 0 or num > 125 then
+            num = _config and _config:Get("StandFarmPityLimit") or 20
+        elseif _config then
+            _config:Set("StandFarmPityLimit", num)
+        end
+        pityInput.Text = "Stop at pity: " .. tostring(num)
+    end))
+
+    MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+        if enabled and not stopPrestigeForSwitch("Stand Farm (BETA)") then return end
+        if not _standFarm then
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+            return
+        end
+        if enabled then
+            local ok, reason = _standFarm:Start()
+            if not ok then
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+                runtimeLog("WARN", "Stand Farm not started: " .. tostring(reason))
+                UI:ShowPopup(tostring(reason), 5)
+            end
+        else
+            _standFarm:Stop()
+        end
+    end)
+
+    local standStatus = UI:AddLabel(FarmPage, "Stand Farm: idle")
+    standStatus.TextScaled = false
+    standStatus.TextWrapped = true
+    standStatus.Size = UDim2.new(1, -4, 0, 40)
+    task.spawn(function()
+        while standStatus.Parent do
+            task.wait(2)
+            if not standStatus.Parent then break end
+            if _standFarm then
+                local state = _standFarm:GetStatus()
+                standStatus.Text = ("%s | %s | Pity %s | Rolls %d\n%s"):format(
+                    tostring(state.mode or "stand"), tostring(state.stand or "?"), tostring(state.pity or "?"),
+                    tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
+                if not state.running then
+                    UI:SetToggleValue("Stand Farm (BETA)", false)
+                end
+            end
+        end
+    end)
+
+    if _standV2UI then _standV2UI:BuildStats(FarmPage,UI,_standFarm,trackConnection,styleActionButton) end
+    AutoCanvas(FarmPage)
+
+    end
     AutoCanvas(FarmPage)
 
     -- =====================
@@ -867,6 +1167,7 @@ function UI:Create()
     local questList = {
         "Officer Sam [Lvl. 1+]",
         "Deputy Bertrude [Lvl. 10+]",
+        "Abbacchio's Partner [Lvl 15+]",
         "Homeless Man Jill [Lvl. 15+]",
         "Dracula [Lvl. 20+]",
         "William Zeppeli [Lvl. 25+]",
@@ -883,6 +1184,7 @@ function UI:Create()
     
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("Quest Farm") then return end
         if _config then
             if v then
                 _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, AutoPrestige = false })
@@ -891,6 +1193,10 @@ function UI:Create()
             end
         end
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("NPC Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
@@ -918,6 +1224,7 @@ function UI:Create()
     end
     
     MakeToggle(QuestPage, "NPC Farm", _config and _config:Get("NPCFarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("NPC Farm") then return end
         if _config then
             if v then
                 _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, AutoPrestige = false })
@@ -926,6 +1233,10 @@ function UI:Create()
             end
         end
         if v then
+            if _standFarm and _standFarm:IsRunning() then
+                _standFarm:Stop()
+                UI:SetToggleValue("Stand Farm (BETA)", false)
+            end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
@@ -1029,7 +1340,8 @@ function UI:Create()
     resetBtn.BorderSizePixel = 0
     resetBtn.Text = "RESET WEBHOOK FLAGS"
     resetBtn.TextColor3 = THEME.WHITE
-    resetBtn.TextScaled = true
+    resetBtn.TextScaled = false
+    resetBtn.TextSize = 12
     resetBtn.Font = Enum.Font.GothamBold
     resetBtn.Parent = WebhookPage
     Instance.new("UICorner", resetBtn).CornerRadius = UDim.new(0,7)
@@ -1284,9 +1596,10 @@ function UI:Create()
     creditLabel.Size             = UDim2.new(1,-4,0,44)
     creditLabel.BackgroundColor3 = THEME.PANEL
     creditLabel.BorderSizePixel  = 0
-    creditLabel.Text             = "WHITE HUB V3  •  " .. UI_BUILD .. "  •  WHITE DRAGON"
+    creditLabel.Text             = "WHITE HUB V5  •  " .. UI_BUILD .. "  •  WHITE DRAGON"
     creditLabel.TextColor3       = THEME.WHITE
-    creditLabel.TextScaled       = true
+    creditLabel.TextScaled       = false
+    creditLabel.TextSize         = 12
     creditLabel.Font             = Enum.Font.GothamBold
     creditLabel.Parent           = CreditsPage
     Instance.new("UICorner", creditLabel).CornerRadius = UDim.new(0,7)
@@ -1298,7 +1611,8 @@ function UI:Create()
     discordBtn.BorderSizePixel  = 0
     discordBtn.Text             = "DISCORD  //  discord.gg/Qwd23ZRNxJ"
     discordBtn.TextColor3       = THEME.WHITE
-    discordBtn.TextScaled       = true
+    discordBtn.TextScaled       = false
+    discordBtn.TextSize         = 12
     discordBtn.Font             = Enum.Font.GothamBold
     discordBtn.Parent           = CreditsPage
     Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0,7)
@@ -1371,15 +1685,15 @@ function UI:Create()
         if isOpen then
             MainFrame.Visible = true
             MainFrame.Size = UDim2.new(0,0,0,0)
-            MainFrame.Position = UDim2.new(0.5,0,0.5,0)
+            MainFrame.Position = UDim2.new(0.5,0,0.44,0)
             TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                 Size = UDim2.new(0,W,0,H),
-                Position = UDim2.new(0.5,-W/2,0.5,-H/2),
+                Position = UDim2.new(0.5,0,0.44,0),
             }):Play()
         else
             local t = TweenService:Create(MainFrame, TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
                 Size = UDim2.new(0,0,0,0),
-                Position = UDim2.new(0.5,0,0.5,0),
+                Position = UDim2.new(0.5,0,0.44,0),
             })
             t:Play()
             t.Completed:Connect(function() MainFrame.Visible = false end)
@@ -1414,6 +1728,12 @@ function UI:Create()
             MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end
     end))
+
+    if _compactUI then
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage}) do
+            _compactUI:Arrange(page,trackConnection,THEME)
+        end
+    end
 
     -- Restore a persisted combat mode, resolving old configs that had both enabled.
     if _config then

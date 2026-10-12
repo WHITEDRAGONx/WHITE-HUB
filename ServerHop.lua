@@ -15,6 +15,7 @@ local ServerHop = {}
 local _movement = nil
 local _config = nil
 local _kickConnection = nil
+local hopBusy = false
 
 local AllIDs = {}
 local foundAnything = ""
@@ -52,7 +53,8 @@ local function resetHourlyCacheIfNeeded()
     end
 end
 
-local function TPReturner()
+local function TPReturner(canContinue, onDestination)
+    if canContinue and not canContinue() then return false end
     resetHourlyCacheIfNeeded()
 
     local url = "https://games.roblox.com/v1/games/" .. PlaceID .. "/servers/Public?sortOrder=Asc&limit=100"
@@ -61,6 +63,8 @@ local function TPReturner()
     end
 
     local Site = HttpService:JSONDecode(game:HttpGet(url))
+    -- HttpGet can yield: a Stop during the request must prevent the teleport.
+    if canContinue and not canContinue() then return false end
     if Site.nextPageCursor and Site.nextPageCursor ~= "null" then
         foundAnything = Site.nextPageCursor
     end
@@ -76,9 +80,13 @@ local function TPReturner()
                 end
             end
 
-            if not seen then
+            if not seen and (not canContinue or id ~= tostring(game.JobId)) then
+                if canContinue and not canContinue() then return false end
                 table.insert(AllIDs, id)
                 saveIds()
+                if canContinue and not canContinue() then return false end
+                if onDestination and not onDestination(id) then return false end
+                if canContinue and not canContinue() then return false end
                 TeleportService:TeleportToPlaceInstance(PlaceID, id, Player)
                 return true
             end
@@ -127,20 +135,26 @@ function ServerHop:Init(Modules)
     end)
 end
 
-function ServerHop:Hop()
+function ServerHop:Hop(canContinue, onDestination)
+    if canContinue ~= nil and type(canContinue) ~= "function" then return false end
+    if onDestination ~= nil and type(onDestination) ~= "function" then return false end
+    if hopBusy then return false end
     if _config and _config:Get("StayInPrivateServer") then
         moduleLog("INFO", "[ServerHop] StayInPrivateServer is ON — skipping hop.")
         return false
     end
 
     moduleLog("INFO", "[ServerHop] Hopping to a new server...")
+    hopBusy = true
     local ok, result = pcall(function()
-        if TPReturner() then return true end
-        if foundAnything ~= "" then return TPReturner() end
+        if TPReturner(canContinue,onDestination) then return true end
+        if canContinue and not canContinue() then return false end
+        if foundAnything ~= "" then return TPReturner(canContinue,onDestination) end
         return false
     end)
+    hopBusy = false
 
-    if _movement then
+    if _movement and not canContinue then
         task.delay(3, function() _movement:FixCamera() end)
     end
 

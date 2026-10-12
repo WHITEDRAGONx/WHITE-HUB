@@ -1,0 +1,34 @@
+# Changelog
+
+## V5 Public Beta — 2026-10-12
+
+- Compact Silver UI with English labels, grouped switches/fields/actions and a
+  dedicated Stand tab. Viewport-aware sizing and fixed-size text.
+- Stand V2 beta: multiple targets, Shiny mode, Arrow/Rib sources, skin safeguards,
+  pity/statistics, bounded restock and optional owned-hop resume.
+- Quest/NPC compatibility improvements while retaining the combat core.
+- Auto Prestige compatibility beta: modern multipage dialogue, tracked pending
+  actions, cancellation, respawn recovery, existing Item Farm restock and
+  delegation to the unchanged public Merchant.
+- Public loader updated to include every new public dependency. Owned-hop
+  continuation loads the public entry point.
+
+Auto Prestige is included at the owner's request for beta testing. Complete live
+progression remains unvalidated. The owner reports completion of other available
+checks; those reports do not establish compatibility with all executors or game
+updates. No storage integration or deliberate skin destruction is included.
+
+Offline validation: 246 checks (56 backend/static plus 190 Lua/release simulations),
+including 8 dedicated public-package checks. Boot is simulated with mock modules;
+these checks do not reproduce Roblox, Delta, server responses or native rendering.
+
+### Publication audit and rollback
+
+Previous public commit: 718018dac21d9a51e1955f68b4a042f28a534ee1.
+Experimental source: 02b391bc16b3e25b750fa92559d5efc0429bb993.
+Public tree is selected by file whitelist on the existing main history. Merchant
+Inventory.lua remains byte-identical to the previous public commit. Private
+administration, backend and development records are excluded. No backend deploy.
+
+If rollback is necessary, revert this release commit on main to restore the
+previous public tree. Keep shared history; do not force-reset the branch.
