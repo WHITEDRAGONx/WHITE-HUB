@@ -626,7 +626,8 @@ local FINAL_SMALL_CONSTANT_MAX = 2.0
 -- full getgc scans and deep patch work every rendered frame.
 local FINAL_FORCE_INTERVAL = 0.02
 local FINAL_GC_RESCAN_INTERVAL = 0.035
-local FINAL_GC_MISS_RETRY_INTERVAL = 1.5 -- Only after a full discovery misses
+local FINAL_GC_MISS_RETRY_INTERVAL = 6.0 -- Back off after a full miss; stalled stages can still use compatibility fallbacks.
+local FINAL_DEEP_SCAN_AFTER = 0.24 -- Prefer normal dialogue signals before an expensive GC search.
 
 local function getIndexedUpvalue(fn, index)
     if type(_rawGetUpvalue) ~= "function" or type(fn) ~= "function" then
@@ -1051,21 +1052,24 @@ local function patchAndInvoke1982(state)
     return true
 end
 
-local function forceDialogueAdvance(dialogueGui, state)
+local function forceDialogueAdvance(dialogueGui, state, deepScanAllowed)
     if not dialogueGui then return end
     suppressDialogueRendering()
 
     local clickContinue = state.clickContinue
-    if not clickContinue or not clickContinue.Parent then
+    if not clickContinue or not clickContinue.Parent or not clickContinue:IsDescendantOf(dialogueGui) then
         clickContinue = findClickContinue(dialogueGui)
         state.clickContinue = clickContinue
     end
     if clickContinue then fireButtonSignal(clickContinue, state) end
-    patchAndInvoke1982(state)
+    -- In the observed Delta sessions the signals complete sales, while
+    -- line-1982 cannot be found. Search the GC only when the stage stalls.
+    if deepScanAllowed then patchAndInvoke1982(state) end
 end
 
 local function waitForFinalStage(previousSignature, timeout, state)
-    local deadline = tick() + (timeout or 1.35)
+    local startedAt = tick()
+    local deadline = startedAt + (timeout or 1.35)
     local loops = 0
 
     while tick() < deadline do
@@ -1077,7 +1081,7 @@ local function waitForFinalStage(previousSignature, timeout, state)
             if sig ~= "" and sig ~= previousSignature then
                 return gui, sig, loops
             end
-            forceDialogueAdvance(gui, state)
+            forceDialogueAdvance(gui, state, tick() - startedAt >= FINAL_DEEP_SCAN_AFTER)
         end
         task.wait(FINAL_FORCE_INTERVAL)
     end
@@ -1131,13 +1135,16 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
     if tool.Parent ~= char then
         return false, 0, "item was not held by character"
     end
-    task.wait(0.08)
+    -- equipSellTool already waits for the tool to appear in Character.
+    -- Keep a small replication window; avoid paying a second 80 ms delay.
+    task.wait(0.02)
 
     closeDialogueIfOpen()
     restoreDialogueRendering()
 
     local state = newFinalState()
     local startedAt = tick()
+    local stageWaitMs = {}
     installFastDialogueWait(state)
 
     local okRun, soldAmount, reason = xpcall(function()
@@ -1152,7 +1159,9 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
         local previousSignature = nil
 
         for stage, optionName in ipairs(desired) do
+            local stageStartedAt = tick()
             local _, signature, loops = waitForFinalStage(previousSignature, 1.35, state)
+            stageWaitMs[#stageWaitMs + 1] = math.floor((tick() - stageStartedAt) * 1000 + 0.5)
             if not signature then
                 return 0, "stage " .. tostring(stage) .. " timed out"
             end
@@ -1194,9 +1203,10 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     if soldAmount and soldAmount > 0 then
         moduleLog("INFO", string.format(
-            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d gcMissSkips=%d",
+            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d gcMissSkips=%d stageWaitMs=%s",
             soldAmount, itemName, tick() - startedAt, state.signalFires, state.direct1982Calls,
-            state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcMissSkips or 0
+            state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcMissSkips or 0,
+            table.concat(stageWaitMs, ",")
         ))
         return true, soldAmount
     end
