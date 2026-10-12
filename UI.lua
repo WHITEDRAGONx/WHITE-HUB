@@ -92,6 +92,7 @@ local function styleActionButton(button, primary)
 end
 
 local _config      = nil
+local _farm        = nil
 local _webhook     = nil
 local _combatFarm  = nil
 local _standFarm = nil
@@ -119,6 +120,7 @@ local npcDropdownRefresh = nil
 
 function UI:Init(Modules)
     _config      = Modules.Config
+    _farm        = Modules.Farm
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
@@ -1090,6 +1092,46 @@ function UI:Create()
     -- ITEMS PAGE
     -- =====================
     MakeSection(ItemsPage, "SELL ITEMS")
+
+    -- Manual one-shot Merchant sale: independent of the Auto Sell toggle and
+    -- the Server Hop timer. The same saved item selection is respected.
+    local sellNowButton = Instance.new("TextButton")
+    sellNowButton.Name = "SellNow"
+    sellNowButton.Size = UDim2.new(1, -4, 0, 36)
+    sellNowButton.Text = "SELL NOW"
+    sellNowButton.Font = Enum.Font.GothamBold
+    sellNowButton.TextSize = 13
+    sellNowButton.Parent = ItemsPage
+    styleActionButton(sellNowButton, true)
+
+    local manualSaleUiBusy = false
+    trackConnection(sellNowButton.MouseButton1Click:Connect(function()
+        if manualSaleUiBusy then return end
+        if not _farm or type(_farm.SellNow) ~= "function" then
+            UI:ShowPopup("Manual Merchant sale is unavailable.", 4)
+            return
+        end
+        manualSaleUiBusy = true
+        sellNowButton.Text = "SELLING..."
+        task.spawn(function()
+            local ok, sold, description = pcall(function()
+                return _farm:SellNow()
+            end)
+            if ok and sold then
+                runtimeLog("INFO", "SELL NOW: " .. tostring(description))
+                UI:ShowPopup(tostring(description), 4)
+            else
+                local reason = ok and tostring(description) or "Unexpected sale error; see Console"
+                runtimeLog("WARN", "SELL NOW: " .. reason)
+                UI:ShowPopup(reason, 5)
+            end
+            if sellNowButton and sellNowButton.Parent then
+                sellNowButton.Text = "SELL NOW"
+            end
+            manualSaleUiBusy = false
+        end)
+    end))
+
     local itemOrder = { "Gold Coin","Diamond","Rokakaka","Pure Rokakaka","Mysterious Arrow","Lucky Arrow","Lucky Stone Mask","Ancient Scroll","Caesar's Headband","Stone Mask","Rib Cage of The Saint's Corpse","Quinton's Glove","Zeppeli's Hat","Clackers","Steel Ball","Dio's Diary", }
     for _, name in ipairs(itemOrder) do
         local default = _config and _config:GetSellItem(name)
