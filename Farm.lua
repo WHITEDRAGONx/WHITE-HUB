@@ -29,6 +29,8 @@ local runtimeSetup = false
 local runtimeConnections = {}
 local restockBusy, cycleBusy, startupBusy = false, false, false
 local prestigeSaleBusy=false
+-- One manual sale at a time; park normal collection while a sale runs.
+local manualSellBusy, sellBusy, collectBusy = false, false, false
 local restockFreeze, restockEpoch = nil, 0
 
 local function prestigePending()
@@ -51,10 +53,17 @@ end
 -- DEV-ONLY diagnostics: observe sale frame times without changing Inventory.lua.
 -- This is intentionally read-only. One Heartbeat connection exists only during SellAll.
 local sellPerfSerial = 0
-local function SellAllWithDiagnostics(source)
-    -- Preserve the original path when Auto Sell is off or Farm is disabled.
-    if not (_config and _config:Get("FarmEnabled") and _config:Get("AutoSell")) then
-        return _inventory:SellAll()
+local function SellAllWithDiagnostics(source, manualRequest)
+    if sellBusy then return false, 0, 0, "Another Merchant sale is already running" end
+    sellBusy = true
+
+    -- Preserve the original automatic behavior if its toggles are disabled.
+    -- Explicit manual sales still receive the standard SellPerf measurements.
+    if not manualRequest and not (_config and _config:Get("FarmEnabled") and _config:Get("AutoSell")) then
+        local ok, sold, types, failed, reason = pcall(function() return _inventory:SellAll(false) end)
+        sellBusy = false
+        if not ok then error(sold, 0) end
+        return sold, types, failed, reason
     end
 
     sellPerfSerial = sellPerfSerial + 1
@@ -78,7 +87,9 @@ local function SellAllWithDiagnostics(source)
 
     moduleLog("INFO", ("[Farm][SellPerf] BEGIN id=%d source=%s"):format(id, tostring(source)))
     local startedAt = tick()
-    local ok, result = pcall(function() return _inventory:SellAll() end)
+    local ok, sold, types, failed, reason = pcall(function()
+        return _inventory:SellAll(manualRequest == true)
+    end)
     local elapsedSeconds = math.max(0, tick() - startedAt)
 
     listening = false
@@ -93,8 +104,9 @@ local function SellAllWithDiagnostics(source)
     )
     -- Slow frames are correlation evidence, not proof that SellAll caused them.
     moduleLog((not ok or over100ms > 0) and "WARN" or "INFO", message)
-    if not ok then error(result, 0) end
-    return result
+    sellBusy = false
+    if not ok then error(sold, 0) end
+    return sold, types, failed, reason
 end
 
 function Farm:Init(Modules)
@@ -328,6 +340,16 @@ local function CollectItem(itemInfo, index, restockGuard)
     return false
 end
 
+-- Avoid racing a manual Merchant sale against an in-flight pickup.
+-- The collection operation may yield while moving or waiting for a prompt.
+local function CollectItemFromCycle(itemInfo, index)
+    collectBusy = true
+    local ok, result = pcall(CollectItem, itemInfo, index)
+    collectBusy = false
+    if not ok then error(result, 0) end
+    return result
+end
+
 -- Helper to check if we should skip hopping (based solely on UI toggle)
 local function shouldSkipHop()
     local stay = _config:Get("StayInPrivateServer")
@@ -339,7 +361,7 @@ local function shouldSkipHop()
 end
 
 local function DoHop()
-    if not _config:Get("FarmEnabled") then return end
+    if not _config:Get("FarmEnabled") or manualSellBusy then return end
 
     if shouldSkipHop() then
         moduleLog("INFO", "[Farm] DoHop aborted – skipping hop.")
@@ -348,7 +370,9 @@ local function DoHop()
 
     moduleLog("INFO", "[Farm] Server dry — selling, buying, then hopping...")
     SellAllWithDiagnostics("server-hop")
+    if manualSellBusy then return end
     _inventory:BuyLucky()
+    if manualSellBusy then return end
     _serverHop:Hop()
     lastItemTime = tick()
 end
@@ -398,7 +422,7 @@ local function Startup()
 end
 
 local function shouldPauseCycle()
-    return stopRequested or restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+    return stopRequested or restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
 end
 
 -- Synchronous handoff from StandFarm. It never enables the normal phases,
@@ -411,7 +435,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     required=prestige and math.min(tonumber(required) or 1,_inventory:GetMax(name) or 1) or 1
     if required<1 or required>50 or required%1~=0 then return false,"Invalid restock amount" end
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
-    if restockBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
@@ -478,7 +502,7 @@ local function runCycle()
 
         for _, entry in ipairs(snapshot) do
             if shouldPauseCycle() or _inventory:ShouldStopPhase1() then break end
-            CollectItem(entry.ItemInfo, entry.Index)
+            CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
 
         if shouldPauseCycle() then return end
@@ -524,7 +548,7 @@ local function runCycle()
 
             for _, entry in ipairs(snapshot) do
                 if shouldPauseCycle() or _inventory:AllKeepItemsFull() then break end
-                CollectItem(entry.ItemInfo, entry.Index)
+                CollectItemFromCycle(entry.ItemInfo, entry.Index)
             end
 
             if shouldPauseCycle() then return end
@@ -585,7 +609,7 @@ local function runCycle()
         end
         for _, entry in ipairs(snapshot) do
             if shouldPauseCycle() then return end
-            CollectItem(entry.ItemInfo, entry.Index)
+            CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
         task.wait(1)
     end
@@ -616,7 +640,7 @@ function Farm:Start()
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and (restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled")) do
+        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled")) do
             task.wait(0.5)
         end
         while not stopRequested and _config:Get("AutoPrestige") do
@@ -645,9 +669,57 @@ function Farm:Stop()
     moduleLog("INFO", "[Farm] Stop requested.")
 end
 
+-- Manual sale from the Items tab. Never hops, buys, or permanently changes
+-- FarmEnabled/AutoSell. Preserve item filter selection and use the same Merchant.
+function Farm:SellNow()
+    if not (_config and _inventory) then return false, "Farm modules not initialized" end
+    if manualSellBusy or sellBusy then return false, "A Merchant sale is already running" end
+    if stopRequested or restockBusy or startupBusy or prestigeSaleBusy or prestigePending()
+        or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+        or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then
+        return false, "Another farm or prestige operation is active; stop it first"
+    end
+
+    -- Set the flag before yielding, so the regular worker stops starting new
+    -- pickups. Wait for an already-started pickup to release its movement.
+    manualSellBusy = true
+    moduleLog("INFO", "[Farm][SellNow] Manual sale requested from Items tab.")
+    local deadline = tick() + 8
+    while collectBusy and tick() < deadline do task.wait(0.05) end
+    if collectBusy then
+        manualSellBusy = false
+        moduleLog("WARN", "[Farm][SellNow] Pickup still active; sale safely skipped.")
+        return false, "Wait for item collection to finish and try again"
+    end
+
+    -- Other modes can change while waiting for collection.
+    if restockBusy or prestigeSaleBusy or prestigePending()
+        or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+        or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then
+        manualSellBusy = false
+        return false, "Another operation started; manual sale cancelled"
+    end
+
+    local ok, sold, soldTypes, failedTypes, reason = pcall(SellAllWithDiagnostics, "manual", true)
+    lastItemTime = tick() -- A completed manual sale should not immediately trigger a server hop.
+    manualSellBusy = false
+
+    if not ok then
+        moduleLog("WARN", "[Farm][SellNow] Merchant failed: " .. tostring(sold))
+        return false, "Merchant error; inspect Console"
+    end
+    if sold then
+        moduleLog("INFO", ("[Farm][SellNow] Completed: %d type(s) sold, %d failed."):format(soldTypes or 0, failedTypes or 0))
+        return true, ("Sold %d item type(s)%s. No server hop."):format(
+            soldTypes or 0, (failedTypes or 0) > 0 and (", " .. tostring(failedTypes) .. " failed") or "")
+    end
+    moduleLog("INFO", "[Farm][SellNow] No sale confirmed: " .. tostring(reason or "nothing to sell"))
+    return false, reason or "No sale confirmed"
+end
+
 -- Exclusive delegation to existing Merchant; normal Item Farm remains paused.
 function Farm:PrestigeSell(ownerActive,sell)
-    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or stopRequested
+    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy or stopRequested
         or type(ownerActive)~="function" or not ownerActive() or type(sell)~="function"
         or not _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
         or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then return false,"Sale ownership unavailable" end
@@ -659,7 +731,7 @@ function Farm:PrestigeSell(ownerActive,sell)
     prestigeSaleBusy=false
     return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
 end
-function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy end
+function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy end
 
 function Farm:IsRunning()
     return isRunning
