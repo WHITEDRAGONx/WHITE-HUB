@@ -96,6 +96,7 @@ local _webhook     = nil
 local _combatFarm  = nil
 local _standFarm = nil
 local _standV2UI = nil
+local _prestigeRuntime = nil
 local _serverHop   = nil
 local _whiteAI     = nil
 local _runtimeLog   = nil
@@ -121,9 +122,21 @@ function UI:Init(Modules)
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
     _standV2UI = Modules.StandV2UI
+    _prestigeRuntime = Modules.AutoPrestigeRuntime
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
+end
+
+local function stopPrestigeForSwitch(label)
+    if not _prestigeRuntime then return true end
+    _prestigeRuntime:Stop()
+    if _prestigeRuntime:IsBusy() then
+        UI:SetToggleValue(label,false)
+        UI:ShowPopup("Auto Prestige ainda aguarda ação/resultado. A troca foi bloqueada; tente após confirmação.",6)
+        return false
+    end
+    return true
 end
 
 local function runtimeLog(level, message)
@@ -801,6 +814,7 @@ function UI:Create()
     MakeSection(FarmPage, "FARM SETTINGS")
     
     MakeToggle(FarmPage, "Enable Farm", _config and _config:Get("FarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("Enable Farm") then return end
         if v and _standFarm and _standFarm:IsRunning() then
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
@@ -841,6 +855,7 @@ function UI:Create()
     manualHopButton.Parent = FarmPage
     styleActionButton(manualHopButton, false)
     trackConnection(manualHopButton.MouseButton1Click:Connect(function()
+        if not stopPrestigeForSwitch("Auto Prestige") then return end
         if manualHopBusy then return end
         manualHopBusy = true
         manualHopButton.Text = "HOPPING..."
@@ -861,6 +876,17 @@ function UI:Create()
 
     MakeSection(FarmPage, "PRESTIGE")
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
+        if _prestigeRuntime then
+            if not v then _prestigeRuntime:Stop(); return end
+            _config:SetMany({FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
+            if _standFarm then _standFarm:Stop() end
+            if _combatFarm then _combatFarm:Stop() end
+            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
+            UI:SetToggleValue("Quest Farm",false); UI:SetToggleValue("NPC Farm",false)
+            local ok,reason=_prestigeRuntime:Start()
+            if not ok then UI:SetToggleValue("Auto Prestige",false); UI:ShowPopup(tostring(reason),6) end
+            return
+        end
         if _config then
             if v then
                 _config:SetMany({ AutoPrestige = true, QuestFarmEnabled = false, NPCFarmEnabled = false })
@@ -884,6 +910,8 @@ function UI:Create()
             runtimeLog("INFO", "Auto Prestige disabled.")
         end
     end)
+
+    if _prestigeRuntime then _prestigeRuntime:BuildStatus(FarmPage,UI) end
 
     -- WHITE STAND FARM target list (DEV BETA): no inventory/merchant core changes.
     MakeSection(FarmPage, "STAND FARM - EXPERIMENTAL")
@@ -1060,6 +1088,7 @@ function UI:Create()
     end))
 
     MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+        if enabled and not stopPrestigeForSwitch("Stand Farm (BETA)") then return end
         if not _standFarm then
             UI:SetToggleValue("Stand Farm (BETA)", false)
             return
@@ -1144,6 +1173,7 @@ function UI:Create()
     
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("Quest Farm") then return end
         if _config then
             if v then
                 _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, AutoPrestige = false })
@@ -1183,6 +1213,7 @@ function UI:Create()
     end
     
     MakeToggle(QuestPage, "NPC Farm", _config and _config:Get("NPCFarmEnabled"), function(v)
+        if v and not stopPrestigeForSwitch("NPC Farm") then return end
         if _config then
             if v then
                 _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, AutoPrestige = false })

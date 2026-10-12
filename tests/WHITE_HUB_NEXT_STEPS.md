@@ -72,3 +72,15 @@ successful job. Owner reports sales working; preserve Merchant as is.
    or widened AutoFix allowlist without authorization.
 6. Closed beta, changelog/versioning and public release only after QA and explicit
    approval to update main.
+
+## Auto Prestige compatibility R1 (Engine cancelled)
+
+Engine E1 removed at owner's request; no scheduler/profiles remain. AP now has
+its own cancellable scope and modern dialogue driver, with existing Item Farm
+restock and unmodified Merchant delegation. See AUTOPRESTIGE_DELTA_QA.md.
+
+Offline validation is not YBA proof. Story source metadata/old NPC identifiers,
+Hamon cost/requirements and full prestige progression still require actual logs.
+Unknown story origin deliberately stops instead of sweeping legacy NPC dialogues.
+Next: test AP in a fresh Delta/server session and finish evidence-based mappings;
+then continue independent V2/Quest/mobile QA. Do not recreate the Engine.

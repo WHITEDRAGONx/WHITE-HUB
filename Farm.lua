@@ -27,8 +27,13 @@ local stopRequested = false
 local runtimeSetup = false
 local runtimeConnections = {}
 local restockBusy, cycleBusy, startupBusy = false, false, false
+local prestigeSaleBusy=false
 local restockFreeze, restockEpoch = nil, 0
 
+local function prestigePending()
+    local m=_G.WhiteHubModules
+    return m and m.AutoPrestigeRuntime and m.AutoPrestigeRuntime:IsBusy()
+end
 local _runtimeLog = nil
 local _rawPrint, _rawWarn = print, warn
 local function moduleLog(level, ...)
@@ -337,30 +342,35 @@ local function Startup()
 end
 
 local function shouldPauseCycle()
-    return stopRequested or restockBusy or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+    return stopRequested or restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
 end
 
 -- Synchronous handoff from StandFarm. It never enables the normal phases,
 -- sells/buys, changes persistent item filters, or hops with a result in flight.
-function Farm:Restock(name, ownerActive)
+function Farm:Restock(name, ownerActive, ownerKind, required)
     local allowedNames = { ["Rokakaka"]=true, ["Mysterious Arrow"]=true,
         ["Rib Cage of The Saint's Corpse"]=true }
+    local prestige=ownerKind=="prestige"
+    if prestige then allowedNames[name]=(_inventory:GetMax(name) or 0)>0 and name~="Lucky Arrow" and name~="Lucky Stone Mask" end
+    required=prestige and math.min(tonumber(required) or 1,_inventory:GetMax(name) or 1) or 1
+    if required<1 or required>50 or required%1~=0 then return false,"Invalid restock amount" end
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
-    if restockBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    if restockBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
         local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
         return epoch == restockEpoch and not stopRequested and ownerActive()
             and humanoid and humanoid.Health > 0
-            and Player.Character == char and _config:Get("StandFarmEnabled") == true and not _config:Get("FarmEnabled")
-            and not _config:Get("AutoSell") and not _config:Get("AutoPrestige")
+            and Player.Character == char and not _config:Get("FarmEnabled")
+            and ((prestige and _config:Get("AutoPrestige")==true and not _config:Get("StandFarmEnabled"))
+                or (not prestige and _config:Get("StandFarmEnabled")==true and not _config:Get("AutoSell") and not _config:Get("AutoPrestige")))
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
     end
     local ok, success, reason = pcall(function()
         local deadline, attempts, nextScan = tick() + 90, 0, 0
         while permitted() and tick() < deadline and attempts < 8 do
-            if _inventory:Count(name) >= 1 then return true, "Stock confirmed" end
+            if _inventory:Count(name) >= required then return true, "Stock confirmed" end
             if not cycleBusy and not startupBusy then
                 -- Refresh from the existing detection source: phase filters may
                 -- have removed previously cached items which are still alive.
@@ -382,7 +392,7 @@ function Farm:Restock(name, ownerActive)
                     movementUsed = true
                     CollectItem(candidate, index, permitted)
                     -- A despawn is not proof of inventory acquisition.
-                    if permitted() and _inventory:Count(name) >= 1 then return true, "Stock confirmed" end
+                    if permitted() and _inventory:Count(name) >= required then return true, "Stock confirmed" end
                 end
             end
             task.wait(0.2)
@@ -550,7 +560,7 @@ function Farm:Start()
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and (restockBusy or not _config:Get("FarmEnabled")) do
+        while not stopRequested and (restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled")) do
             task.wait(0.5)
         end
         while not stopRequested and _config:Get("AutoPrestige") do
@@ -578,6 +588,22 @@ function Farm:Stop()
     _movement:SetNoclip(false)
     moduleLog("INFO", "[Farm] Stop requested.")
 end
+
+-- Exclusive delegation to existing Merchant; normal Item Farm remains paused.
+function Farm:PrestigeSell(ownerActive,sell)
+    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or stopRequested
+        or type(ownerActive)~="function" or not ownerActive() or type(sell)~="function"
+        or not _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+        or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then return false,"Sale ownership unavailable" end
+    prestigeSaleBusy=true
+    local before=_config:Get("FarmEnabled")
+    _config:Set("FarmEnabled",true,true)
+    local ok,result=pcall(sell)
+    _config:Set("FarmEnabled",before,true)
+    prestigeSaleBusy=false
+    return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
+end
+function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy end
 
 function Farm:IsRunning()
     return isRunning

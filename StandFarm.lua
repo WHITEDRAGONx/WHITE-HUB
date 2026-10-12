@@ -955,6 +955,8 @@ function StandFarm:Init(modules)
 end
 
 function StandFarm:Start(resumeRecord)
+    local m=_G.WhiteHubModules
+    if m and m.AutoPrestigeRuntime and m.AutoPrestigeRuntime:IsBusy() then return false,"Auto Prestige work/result pending" end
     if resumeRecord~=nil and resumeRecord~=claimedResume then return false,"Unclaimed resume request" end
     if awaitingTransfer then return false,"Teleport already requested; wait for arrival or verify failure before reloading" end
     clearConfirmedPending()
@@ -1117,6 +1119,13 @@ end
 
 function StandFarm:IsRunning()
     return running
+end
+
+function StandFarm:HasPendingWork()
+    clearConfirmedPending()
+    return running or pending~=nil or interactionBusy or callbackInFlight>0 or skillInFlight>0
+        or restockInFlight>0 or hopInFlight>0 or recovering or awaitingTransfer
+        or (respawnFrom~=nil and player.Character==respawnFrom)
 end
 
 function StandFarm:GetStatus()
