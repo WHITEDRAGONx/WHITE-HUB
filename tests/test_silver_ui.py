@@ -64,7 +64,7 @@ class SilverWiringTests(unittest.TestCase):
   for name in ['UI.lua','UICompact.lua','StandV2UI.lua','WhiteAI.lua','DevMain.lua']:
    self.assertTrue(check_luau((ROOT/name).read_text()),name)
   loader=(ROOT/'DevMain.lua').read_text(); self.assertIn('{ key = "UICompact", file = "UICompact.lua" }',loader)
-  self.assertIn('"UICompact", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"',loader)
+  self.assertIn('"UICompact", "CatalogRefresh", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"',loader)
  def test_stand_is_separate_and_keys_callbacks_preserved(self):
   src=(ROOT/'UI.lua').read_text()
   self.assertIn('local StandPage   = MakePage("StandPage")',src)

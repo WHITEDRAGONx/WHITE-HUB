@@ -1,5 +1,16 @@
 # Changelog
 
+## V5 beta automatic catalog update — 2026-10-12 (Silver R3)
+
+- Quests prioritize names detected in the game; NPC discovery stays live.
+- Broader bounded read-only skin container discovery and confirmed-result names.
+- Automatic names-only Trello refresh/cache every six hours. Offline fallback
+  combines 461 distinct names/aliases, including the supplied Xenon skin list.
+- No third-party code imported; no game modules executed to guess skin data.
+- 290 offline checks passed. Actual YBA skin-container exposure and exact aliases
+  remain unverified; offline availability or complete automatic discovery is not
+  guaranteed. Every skin remains protected regardless of the wishlist.
+
 ## V5 beta UI/catalog update — 2026-10-12 (Silver R2)
 
 - Replaced target edit/clear buttons with searchable multi-selection.

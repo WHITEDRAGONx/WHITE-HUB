@@ -96,7 +96,7 @@ class PublicReleaseTests(unittest.TestCase):
             module.ResetStatistics=function() end
             module.Issue=function() end; module.Claim=function() end; module.Invalidate=function() end
             module.BuildResume=function() end; module.BuildSkins=function() end; module.BuildStats=function() end
-            module.Names=function() return {} end; module.GetSkins=function() return {} end; module.GetQuests=function() return {} end; module.IsInfo=function() return false end
+            module.Names=function() return {} end; module.GetSkins=function() return {} end; module.GetNames=function() return {} end; module.GetState=function() end; module.Refresh=function() end; module.GetQuests=function() return {} end; module.IsInfo=function() return false end
             module.Build=function() end; module.Toggle=function() end; module.Filter=function() end; module.Close=function() end; module.Destroy=function() end
             module.Caption=function() end; module.Arrange=function() end; module.Observe=function() end
             module.Responsive=function() end; module.ScaleFor=function() return 1 end

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_PREVIOUS = '718018dac21d9a51e1955f68b4a042f28a534ee1'
 FILES = ('Webhook.lua', 'Movement.lua', 'ServerHop.lua', 'CombatFarm.lua',
          'StandFarm.lua', 'StandTransfer.lua', 'StandV2UI.lua', 'UICompact.lua',
-         'GameCatalog.lua', 'ChoiceUI.lua',
+         'GameCatalog.lua', 'ChoiceUI.lua', 'CatalogRefresh.lua',
          'PrestigeDialogue.lua', 'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
 
 
@@ -22,7 +22,7 @@ def build():
     main = re.sub(r'    -- Retire the removed E1 scheduler.*?    end\n', '', main, count=1, flags=re.S)
     main = re.sub(r'^    \{ key = "WhiteAI",.*\n', '', main, flags=re.M)
     main = main.replace('"WhiteAI", ', '')
-    main = main.replace('for _, name in ipairs({"AutoPrestigeRuntime", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do\n        local module = previous[name]', 'for _, module in pairs(previous) do')
+    main = re.sub(r'for _, name in ipairs\(\{[^\n]+\}\) do\n\s+local module = previous\[name\]', 'for _, module in pairs(previous) do', main, count=1)
     main = main.replace('WHITE HUB V3 running.', 'WHITE HUB V5 PUBLIC BETA running.')
     main = '-- WHITE HUB V5 PUBLIC BETA — owner-authorized release; Auto Prestige is experimental.\n' + main
     result['Main.lua'] = main
@@ -35,7 +35,7 @@ def build():
     end = ui.index('    -- =====================\n    -- CREDITS PAGE', start)
     ui = ui[:start] + ui[end:]
     ui = ui.replace('QuestPage,AIPage}', 'QuestPage}')
-    ui = ui.replace('SILVER-V5-20261012-R2', 'SILVER-V5-PUBLIC-BETA-20261012-R2')
+    ui = ui.replace('SILVER-V5-20261012-R3', 'SILVER-V5-PUBLIC-BETA-20261012-R3')
     result['UI.lua'] = ui
     config = (ROOT / 'Config.lua').read_text()
     config = re.sub(r'^    WhiteAI(?:Enabled|Endpoint) = .*\n', '', config, flags=re.M)

@@ -10,14 +10,16 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HU
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
-`SILVER-V5-PUBLIC-BETA-20261012-R2`. Open the WHITE HUB launcher to configure modes.
+`SILVER-V5-PUBLIC-BETA-20261012-R3`. Open the WHITE HUB launcher to configure modes.
 Settings persist in WhiteHubConfig.json when filesystem APIs are available.
 
 Tap Stands or Skins, search and check/uncheck names to edit your selection.
-The skin catalog contains 236 Trello names plus recognized saved/client names;
+The skin catalog reads recognized client containers and confirmed farm results,
+refreshes public Trello skin titles automatically and keeps a six-hour data cache.
+A fixed fallback combines 461 distinct Trello/Xenon names and aliases;
 entries do not guarantee current obtainability or Arrow/Rib eligibility. Every
-skin is protected, even when unselected. The Quest selector also lists discovered
-and documented quests as INFO when their objectives are not mapped; these entries
+skin is protected, even when unselected. The Quest selector prioritizes names detected in the game, using documented
+extras when client dialogue objects are unavailable. Unmapped quests appear as INFO when their objectives are not mapped; these entries
 cannot replace your current automated quest.
 
 ## Features

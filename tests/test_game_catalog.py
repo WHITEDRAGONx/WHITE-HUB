@@ -30,13 +30,13 @@ class CatalogTests(unittest.TestCase):
   self.lua.execute('choice:Init({GameCatalog=catalog})')
  def run_lua(self,s):self.lua.execute(s)
  def test_facts_snapshot_is_unique_and_only_stand_skins(self):
-  self.run_lua("local names=catalog:GetSkins(); assert(#names==236 and table.find(names,'Action-Figure Platinum')); assert(not table.find(names,'Road Sign')); for i=2,#names do assert(names[i-1]<names[i]) end")
+  self.run_lua("local names=catalog:GetSkins(); assert(#names==461 and table.find(names,'Action-Figure Platinum')); assert(not table.find(names,'Road Sign')); for i=2,#names do assert(names[i-1]<names[i]) end")
  def test_saved_unknown_names_preserved_without_invented_aliases(self):
-  self.run_lua("local names=catalog:GetSkins({'Exact live name','Aero OH','Aero OH'}); assert(#names==238 and table.find(names,'Aero OH') and table.find(names,'Exact live name')); assert(not table.find(names,'None'))")
+  self.run_lua("local names=catalog:GetSkins({'Exact live name','Aero OH','Aero OH'}); assert(#names==462 and table.find(names,'Aero OH') and table.find(names,'Exact live name')); assert(not table.find(names,'None'))")
  def test_invalid_values_control_characters_and_duplicates_filtered(self):
   self.run_lua("local names=catalog:Names({'None','',false,'Valid','Valid','bad\\nname',string.rep('x',101)}); assert(#names==1 and names[1]=='Valid')")
  def test_skin_container_scan_is_bounded(self):
-  self.run_lua("local a,b={},{}; for i=1,600 do a[i]=tree('RuntimeA'..i,'Model'); b[i]=tree('RuntimeB'..i,'Model') end; rs.children={tree('StandSkins','Folder',a),tree('Skins','Folder',b)}; local names=catalog:GetSkins(); assert(#names==236+256 and table.find(names,'RuntimeA128') and not table.find(names,'RuntimeA129') and not table.find(names,'RuntimeB129'))")
+  self.run_lua("local a,b={},{}; for i=1,600 do a[i]=tree('RuntimeA'..i,'Model'); b[i]=tree('RuntimeB'..i,'Model') end; rs.children={tree('StandSkins','Folder',a),tree('Skins','Folder',b)}; local names=catalog:GetSkins(); assert(#names==461+256 and table.find(names,'RuntimeA128') and not table.find(names,'RuntimeA129') and not table.find(names,'RuntimeB129'))")
  def test_nested_skin_names_are_read_without_requiring_module_scripts(self):
   self.run_lua("rs.children={tree('Objects','Folder',{tree('StandSkins','Folder',{tree('Family','Folder',{tree('Live Skin','Model')})})})}; local names=catalog:GetSkins(); assert(table.find(names,'Live Skin') and not table.find(names,'Family'))")
  def test_quest_catalog_keeps_supported_ids_and_marks_unknown_as_info(self):
@@ -44,7 +44,7 @@ class CatalogTests(unittest.TestCase):
  def test_live_dialogue_names_discovered_with_a_fixed_bound(self):
   self.run_lua("local d={}; for i=1,600 do d[i]=tree('New quest '..i..' [Lvl. 50+]') end; workspace.children={tree('Dialogues','Folder',d)}; rs.children={tree('NewDialogue','Folder',{tree('Storyline#19'),tree('Merchant')})}; local names=catalog:GetQuests({}); assert(table.find(names,'INFO | New quest 128 [Lvl. 50+]') and not table.find(names,'INFO | New quest 129 [Lvl. 50+]')); assert(table.find(names,'INFO | Storyline#19') and not table.find(names,'INFO | Merchant'))")
  def test_missing_game_containers_do_not_break_snapshot(self):
-  self.run_lua("game.GetService=function() error('not loaded') end; workspace=nil; assert(#catalog:GetSkins()==236 and #catalog:GetQuests({})==34)")
+  self.run_lua("game.GetService=function() error('not loaded') end; workspace=nil; assert(#catalog:GetSkins()==461 and #catalog:GetQuests({})==34)")
  def test_toggle_copies_list_and_preserves_exact_selected_names(self):
   self.run_lua("local old={'Saved unknown','Cream'}; local value=choice:Toggle(old,'Aerosmith'); assert(#old==2 and #value==3 and table.find(value,'Saved unknown')); value=choice:Toggle(value,'Cream'); assert(#value==2 and not table.find(value,'Cream'))")
  def test_selection_limit_blocks_add_but_allows_removal(self):
