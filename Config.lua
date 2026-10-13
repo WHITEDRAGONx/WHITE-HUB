@@ -21,6 +21,9 @@ local Defaults = {
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
+    SettingsCapFPS30 = false,
+    SettingsLowGraphics = false,
+    SettingsBlackScreen = false,
     -- Stand Farm V1 is opt-in and never auto-starts after reload.
     StandFarmEnabled = false,
     StandFarmTarget = "",
