@@ -47,6 +47,8 @@ at a time; Auto Sell can remain ON while Stand Farm runs with Item Farm OFF.
 - Bounded consumable restock and optional owned-hop continuation.
 - Auto Prestige beta: updated dialogue and character lifecycle handling.
 - Webhook notifications, manual server hop and runtime diagnostics.
+- Stand/Shiny/Rib terminal webhook: target found, any detected skin preserved,
+  or automatic stop, with source, pity, confirmed rolls and reason.
 - Settings: saved 30 FPS cap, low graphics and black screen options.
 
 Stand features and Auto Prestige are experimental. Auto Prestige has passed
@@ -77,6 +79,13 @@ These options passed offline checks; executor support and actual YBA behavior
 still require Delta testing. See the current build in Console before testing.
 
 ## Beta testing
+
+Configure your own Discord URL in **Webhook** and save it. Stand/Shiny/Rib uses
+that same URL automatically. It sends one asynchronous notification per completed
+run, not per roll. Manual Stop, reload and an active restock transfer do not send
+terminal notifications. An unknown skin is reported as unknown, never as a shiny.
+Delivery failures do not change the result or retry; check Console for a sanitized
+HTTP status. Actual Discord delivery through Delta still needs a live test.
 
 Choose one farm at a time. Auto Sell may stay ON during Stand/Shiny/Rib Farm
 when Item Farm is OFF. Restock collects consumables without selling. A finishing

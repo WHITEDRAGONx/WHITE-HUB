@@ -1,5 +1,17 @@
 # Changelog
 
+## Stand/Shiny/Rib webhook — 2026-10-13 (Stand R11)
+
+- Reuses the configured Webhook URL for one terminal notification: desired Stand,
+  any confirmed skin (including wishlist matches), or automatic stop/protection.
+- Includes player, mode, consumable, Stand/skin, pity, confirmed rolls, elapsed
+  time and stop reason. Unknown skin checks are never announced as shiny results.
+- Asynchronous delivery; no per-roll spam, automatic retries, or messages for
+  manual Stop/reload/ongoing restock transfers. Stale queued tasks are cancelled.
+- HTTP errors are logged without the private URL or provider response body.
+- Stand build: SF-WEBHOOK-20261013-R11. Offline validation only; actual Delta and
+  Discord delivery require a live test. Merchant, combat and restock are unchanged.
+
 ## Black screen compatibility hotfix — 2026-10-13 (Settings R2)
 
 - Removed native 3D renderer control after a tester reported delay/crash when
