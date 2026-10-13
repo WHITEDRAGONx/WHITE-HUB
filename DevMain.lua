@@ -543,7 +543,7 @@ if previous then
     if previous.SmartFarmEngine and previous.SmartFarmEngine.Destroy then
         pcall(function() previous.SmartFarmEngine:Destroy() end)
     end
-    for _, name in ipairs({"AutoPrestigeRuntime", "CatalogRefresh", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
+    for _, name in ipairs({"AutoPrestigeRuntime", "Settings", "CatalogRefresh", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
         local module = previous[name]
         if module and module.Destroy then
             pcall(function() module:Destroy() end)
@@ -567,7 +567,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"AutoPrestigeRuntime", "CatalogRefresh", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"AutoPrestigeRuntime", "Settings", "CatalogRefresh", "UI", "WhiteAI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -671,6 +671,7 @@ local moduleRequirements = {
     GameCatalog = {"Init", "Names", "GetSkins", "GetQuests", "IsInfo"},
     ChoiceUI = {"Init", "Build", "Toggle", "Filter", "Close", "Destroy"},
     UICompact = {"Init", "Caption", "Arrange", "Observe", "Responsive", "ScaleFor"},
+    Settings = {"Init", "SetOption", "GetStatus", "Build", "Destroy"},
     AutoPrestigeRuntime = {"Init", "Start", "Stop", "IsBusy", "Register", "Watch", "GetStatus", "BuildStatus"},
     PrestigeDialogue = {"Init", "Run", "Drive", "Restore"},
     Farm       = {"Init", "Start"},
@@ -756,6 +757,7 @@ local moduleFiles = {
     { key = "GameCatalog", file = "GameCatalog.lua" },
     { key = "ChoiceUI", file = "ChoiceUI.lua" },
     { key = "UICompact", file = "UICompact.lua" },
+    { key = "Settings", file = "Settings.lua" },
     { key = "PrestigeDialogue", file = "PrestigeDialogue.lua" },
     { key = "AutoPrestigeRuntime", file = "AutoPrestigeRuntime.lua" },
     { key = "Farm",       file = "Farm.lua" },
@@ -805,7 +807,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "UICompact", "CatalogRefresh", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "Settings", "UICompact", "CatalogRefresh", "GameCatalog", "ChoiceUI", "WhiteAI", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()

@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-20261012-R3"
+local UI_BUILD = "SILVER-V5-20261013-R4"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -98,6 +98,7 @@ local _standFarm = nil
 local _standV2UI = nil
 local _prestigeRuntime = nil
 local _compactUI = nil
+local _settings = nil
 local _catalog, _choices = nil, nil
 local _serverHop   = nil
 local _whiteAI     = nil
@@ -126,6 +127,7 @@ function UI:Init(Modules)
     _standV2UI = Modules.StandV2UI
     _prestigeRuntime = Modules.AutoPrestigeRuntime
     _compactUI = Modules.UICompact
+    _settings = Modules.Settings
     _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
     _serverHop   = Modules.ServerHop
     _whiteAI    = Modules.WhiteAI
@@ -171,6 +173,7 @@ end
 local function CreateCreditsPopup()
     local gui = Instance.new("ScreenGui")
     gui.Name = "WhiteHubCreditsPopup"
+    gui.DisplayOrder = 30
     gui.Parent = PlayerGui
     gui.ResetOnSpawn = false
 
@@ -364,6 +367,7 @@ local function ensureDropdownContainer()
     if not dropdownContainer or not dropdownContainer.Parent then
         dropdownContainer = Instance.new("ScreenGui")
         dropdownContainer.Name = "DropdownContainer"
+        dropdownContainer.DisplayOrder = 31
         dropdownContainer.ResetOnSpawn = false
         dropdownContainer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         dropdownContainer.Parent = PlayerGui
@@ -504,6 +508,7 @@ function UI:ShowPopup(message, duration)
     if not screenGui then
         screenGui = Instance.new("ScreenGui")
         screenGui.Name = "WhiteHubPopup"
+        screenGui.DisplayOrder = 31
         screenGui.ResetOnSpawn = false
         screenGui.Parent = PlayerGui
     end
@@ -616,6 +621,7 @@ function UI:Create()
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "WhiteHubV3"
+    ScreenGui.DisplayOrder = 30
     mainScreenGui = ScreenGui
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.ResetOnSpawn   = false
@@ -703,7 +709,12 @@ function UI:Create()
         TweenService:Create(CloseButton, TweenInfo.new(0.12), {BackgroundColor3 = THEME.RED}):Play()
     end)
 
-    local Sidebar = Instance.new("Frame", MainFrame)
+    local Sidebar = Instance.new("ScrollingFrame", MainFrame)
+    Sidebar.Active = true
+    Sidebar.ScrollBarThickness = 2
+    Sidebar.ScrollBarImageColor3 = THEME.GOLD
+    Sidebar.CanvasSize = UDim2.new(0,0,0,0)
+    Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Sidebar.BackgroundTransparency = 1
     Sidebar.BorderSizePixel        = 0
     Sidebar.Position               = UDim2.new(0,7,0,40)
@@ -746,6 +757,7 @@ function UI:Create()
     local QuestPage   = MakePage("QuestPage")
     local WebhookPage = MakePage("WebhookPage")
     local ConsolePage = MakePage("ConsolePage")
+    local SettingsPage = MakePage("SettingsPage")
     local AIPage      = MakePage("AIPage")
     local CreditsPage = MakePage("CreditsPage")
     FarmPage.Visible = true
@@ -757,6 +769,7 @@ function UI:Create()
         { name="Combat", page=QuestPage },
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
+        { name="Settings", page=SettingsPage },
         { name="AI DEBUG", page=AIPage },
         { name="Credits", page=CreditsPage },
     }
@@ -826,6 +839,13 @@ function UI:Create()
         if tabIndicators["Farm"] then tabIndicators["Farm"].Visible = true end
         if s then s.Color = C_StrokeAct; s.Transparency = 0.05 end
     end
+
+    -- =====================
+    -- SETTINGS PAGE
+    -- =====================
+    MakeSection(SettingsPage, "PERFORMANCE")
+    if _settings then _settings:Build(SettingsPage,UI,MakeToggle,THEME) end
+    AutoCanvas(SettingsPage)
 
     -- =====================
     -- FARM PAGE
@@ -1874,7 +1894,7 @@ function UI:Create()
     end))
 
     if _compactUI then
-        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,AIPage}) do
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,SettingsPage,AIPage}) do
             _compactUI:Arrange(page,trackConnection,THEME)
         end
     end

@@ -1,5 +1,19 @@
 # Changelog
 
+## Settings performance options — 2026-10-13 (Silver R4)
+
+- New Settings tab: opt-in 30 FPS cap, low graphics and black screen; saved choices
+  apply on load. Scrollable navigation keeps every tab accessible on mobile.
+- Black screen has a SHOW GAME recovery button and reports a visual-only fallback
+  when 3D rendering control is unavailable. Hub controls remain above its overlay.
+- FPS and graphics restore the prior values on OFF/reload where supported.
+  A missing FPS getter uses an explicit 60 FPS restore. Low mode reduces visual
+  effects without deleting geometry or changing dialogue/consumable logic.
+- 24 offline Settings simulations plus public-loader, syntax and UI checks.
+  Actual Delta behavior, RAM usage and device temperature remain unverified.
+- Existing Merchant, combat and farms preserved. The dev-only sale/ClientFX
+  diagnostics are not included in this public update.
+
 ## Permanent WHITE HUB loader — 2026-10-12
 
 Public installation now uses WHITE-HUB/main/Main.lua, the canonical public modular entry point. The owner renamed the current

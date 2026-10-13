@@ -11,7 +11,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HU
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
-`SILVER-V5-PUBLIC-BETA-20261012-R3`. Open the WHITE HUB launcher to configure modes.
+`SILVER-V5-PUBLIC-BETA-20261013-R4`. Open the WHITE HUB launcher to configure modes.
 Settings persist in WhiteHubConfig.json when filesystem APIs are available.
 
 Tap Stands or Skins, search and check/uncheck names to edit your selection.
@@ -47,11 +47,22 @@ at a time; Auto Sell can remain ON while Stand Farm runs with Item Farm OFF.
 - Bounded consumable restock and optional owned-hop continuation.
 - Auto Prestige beta: updated dialogue and character lifecycle handling.
 - Webhook notifications, manual server hop and runtime diagnostics.
+- Settings: saved 30 FPS cap, low graphics and black screen options.
 
 Stand features and Auto Prestige are experimental. Auto Prestige has passed
 offline tests but its complete progression has not been validated in YBA. An
 unknown quest origin or unresolved result may stop the routine. Executor support
 and game updates can affect behavior. A syntax test is not proof of live behavior.
+
+## Settings
+
+Open **Settings** to enable **Cap FPS at 30**, **Low graphics** or **Black screen**.
+They start OFF and saved choices apply on the next load where supported.
+The FPS cap restores its prior value (or an explicit 60 FPS fallback when unreadable).
+Low mode reduces quality, shadows and local visual effects without deleting models.
+The black screen keeps hub controls and **SHOW GAME** accessible and reports when
+3D rendering control is unavailable. Disabling/reloading restores the values owned
+by Settings. RAM/temperature savings and actual Delta compatibility are unverified.
 
 ## Beta testing
 

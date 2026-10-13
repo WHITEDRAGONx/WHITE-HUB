@@ -84,6 +84,7 @@ class PublicReleaseTests(unittest.TestCase):
             module.Init=init; module.Load=function() return true end
             module.Get=function(self,key) return false end
             module.Set=function() end; module.SetMany=function() end
+            module.SetOption=function() return true end
             module.Create=function(self)
                 assert(initialized.AutoPrestigeRuntime and initialized.PrestigeDialogue and initialized.UICompact)
                 uiCreated=true
