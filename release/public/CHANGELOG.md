@@ -1,5 +1,16 @@
 # Changelog
 
+## Black screen compatibility hotfix — 2026-10-13 (Settings R2)
+
+- Removed native 3D renderer control after a tester reported delay/crash when
+  enabling Black screen. The cause remains unconfirmed without a runtime trace.
+- Black screen is now only a visual cover; SHOW GAME and hub controls remain
+  accessible. It starts OFF each load, including previously saved ON values.
+- FPS cap and low graphics remain separate saved options. No changes to Merchant,
+  Auto Sell, restock, combat or consumable guards.
+- Settings build: SETTINGS-BLACK-20261013-R2. Offline tests verify zero renderer
+  calls, recovery, cleanup and saved-state handling; live Delta retest is pending.
+
 ## Settings performance options — 2026-10-13 (Silver R4)
 
 - New Settings tab: opt-in 30 FPS cap, low graphics and black screen; saved choices

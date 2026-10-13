@@ -1,14 +1,14 @@
 -- Client presentation settings only; no farm, dialogue or inventory ownership.
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
 local Settings = {}
+local BUILD = "SETTINGS-BLACK-20261013-R2"
 local config, logger, ui, statusLabel
 local alive, capOn, lowOn, blackOn = false, false, false, false
 local lowEpoch, lowConnections = 0, {}
 local originals = setmetatable({}, {__mode="k"})
 local fpsSetter, fpsPrevious, fpsAssumed
-local overlay, recoveryConnection, renderChanged, renderPrevious, renderPaused
+local overlay, recoveryConnection
 local qualityApplied, effectsChanged = false, 0
 local messages = {cap="Off", low="Off", black="Off"}
 local labels = {
@@ -155,7 +155,7 @@ end
 
 local function makeOverlay()
     local player=Players.LocalPlayer
-    local parent=player and (player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui",10))
+    local parent=player and player:FindFirstChild("PlayerGui")
     if not parent then return false end
     overlay=Instance.new("ScreenGui")
     overlay.Name="WhiteHubBlackScreen"
@@ -180,7 +180,6 @@ local function makeOverlay()
     button.TextColor3=Color3.fromRGB(10,13,18); button.BorderSizePixel=0
     Instance.new("UICorner",button).CornerRadius=UDim.new(0,8)
     recoveryConnection=button.Activated:Connect(function()
-        -- Recovery also remains available after a failed Destroy-time resume.
         Settings:RestoreView()
     end)
     return true
@@ -194,25 +193,14 @@ local function setBlack(enabled)
             if overlay then pcall(function() overlay:Destroy() end); overlay=nil end
             return false,"Could not create the black screen controls."
         end
-        renderPrevious=true
-        pcall(function()
-            local value=RunService:Is3dRenderingEnabled()
-            if type(value)=="boolean" then renderPrevious=value end
-        end)
-        local ok,result=pcall(function() return RunService:Set3dRenderingEnabled(false) end)
-        local paused=ok and result~=false
-        renderPaused=paused
-        renderChanged=paused and renderPrevious
+        -- A native renderer pause can affect the game/executor's frame-driven
+        -- code. This mode only draws a UI cover; the engine keeps running.
         blackOn=true
-        messages.black=paused and "Black screen; 3D rendering paused" or "View hidden; 3D rendering still on"
+        messages.black="Black screen: visual only"
     else
-        if renderChanged then
-            local ok,result=pcall(function() return RunService:Set3dRenderingEnabled(renderPrevious) end)
-            if not ok or result==false then return false,"Could not resume 3D rendering. Try SHOW GAME again." end
-        end
         if recoveryConnection then recoveryConnection:Disconnect(); recoveryConnection=nil end
         if overlay then overlay:Destroy(); overlay=nil end
-        renderChanged=nil; renderPrevious=nil; renderPaused=nil; blackOn=false; messages.black="Off"
+        blackOn=false; messages.black="Off"
     end
     return true
 end
@@ -227,7 +215,7 @@ function Settings:SetOption(key,enabled)
     return ok,reason
 end
 function Settings:GetStatus()
-    return {cap30=capOn,low=lowOn,black=blackOn,rendering_paused=renderPaused==true,
+    return {build=BUILD,cap30=capOn,low=lowOn,black=blackOn,rendering_paused=false,
         message="FPS: "..messages.cap.." | Graphics: "..messages.low.." | Screen: "..messages.black}
 end
 function Settings:RestoreView()
@@ -249,7 +237,7 @@ function Settings:Build(page,owner,makeToggle,theme)
     statusLabel=owner:AddLabel(page,"")
     statusLabel.Size=UDim2.new(1,-4,0,66); statusLabel.TextWrapped=true; statusLabel.TextSize=10
     statusLabel.TextColor3=theme.MUTED
-    local note=owner:AddLabel(page,"Saved options apply on the next load.\nSHOW GAME restores the view.")
+    local note=owner:AddLabel(page,"FPS/graphics settings are saved.\nEnable Black screen manually each load.")
     note.Size=UDim2.new(1,-4,0,38); note.TextWrapped=true; note.TextSize=10
     ui=owner; refresh()
 end
@@ -257,13 +245,17 @@ function Settings:Init(modules)
     self:Destroy()
     config,logger=modules.Config,modules.RuntimeLog
     alive=true
-    for _,key in ipairs({"SettingsCapFPS30","SettingsLowGraphics","SettingsBlackScreen"}) do
+    if config:Get("SettingsBlackScreen")==true then
+        config:Set("SettingsBlackScreen",false)
+        log("INFO","Saved Black screen reset to OFF; enable the visual mode manually.")
+    end
+    for _,key in ipairs({"SettingsCapFPS30","SettingsLowGraphics"}) do
         if config:Get(key)==true then
             local ok,reason=actions[key](true)
             if not ok then log("WARN",tostring(reason)) end
         end
     end
-    log("INFO","Settings ready; saved performance options applied where supported.")
+    log("INFO","Build "..BUILD.."; Black screen is visual only and starts OFF.")
 end
 function Settings:Destroy()
     alive=false; ui=nil; statusLabel=nil

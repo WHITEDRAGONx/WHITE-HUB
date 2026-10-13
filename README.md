@@ -57,11 +57,11 @@ and game updates can affect behavior. A syntax test is not proof of live behavio
 ## Settings
 
 Open **Settings** to enable **Cap FPS at 30**, **Low graphics** or **Black screen**.
-They start OFF and saved choices apply on the next load where supported.
+They start OFF; saved FPS/graphics choices apply on the next load where supported.
 The FPS cap restores its prior value (or an explicit 60 FPS fallback when unreadable).
 Low mode reduces quality, shadows and local visual effects without deleting models.
-The black screen keeps hub controls and **SHOW GAME** accessible and reports when
-3D rendering control is unavailable. Disabling/reloading restores the values owned
+Black screen now uses only a visual cover and must be enabled manually each load.
+Hub controls and **SHOW GAME** stay accessible. Disabling/reloading restores the values owned
 by Settings. RAM/temperature savings and actual Delta compatibility are unverified.
 
 ## Beta testing

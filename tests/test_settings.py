@@ -150,11 +150,11 @@ class SettingsTests(unittest.TestCase):
     def test_denied_quality_property_uses_effect_only_mode(self):
         self.run_lua("quality.failReads.SavedQualityLevel=true;values.SettingsLowGraphics=true;settings:Init(all);assert(settings:GetStatus().low and settings:GetStatus().message:find('Effects only',1,true));settings:Destroy()")
 
-    def test_black_screen_pauses_3d_and_touch_recovery_restores_view(self):
-        self.run_lua("settings:Init(all);settings:SetOption('SettingsBlackScreen',true);local gui=playerGui:FindFirstChild('WhiteHubBlackScreen');assert(gui and gui.ResetOnSpawn==false and not run.rendering and settings:GetStatus().rendering_paused);gui:FindFirstChild('BlackBackground'):FindFirstChild('ShowGame').Activated:Fire();assert(run.rendering and not settings:GetStatus().black and values.SettingsBlackScreen==false and not playerGui:FindFirstChild('WhiteHubBlackScreen'))")
+    def test_black_screen_only_covers_view_and_touch_recovery_removes_cover(self):
+        self.run_lua("settings:Init(all);settings:SetOption('SettingsBlackScreen',true);local gui=playerGui:FindFirstChild('WhiteHubBlackScreen');assert(gui and gui.ResetOnSpawn==false and run.rendering and not settings:GetStatus().rendering_paused and #run.requests==0);gui:FindFirstChild('BlackBackground'):FindFirstChild('ShowGame').Activated:Fire();assert(run.rendering and not settings:GetStatus().black and values.SettingsBlackScreen==false and not playerGui:FindFirstChild('WhiteHubBlackScreen'))")
 
-    def test_unsupported_3d_api_uses_truthful_visual_only_mode(self):
-        self.run_lua("run.Set3dRenderingEnabled=nil;settings:Init(all);assert(settings:SetOption('SettingsBlackScreen',true));assert(run.rendering and not settings:GetStatus().rendering_paused and settings:GetStatus().message:find('still on',1,true));assert(settings:RestoreView())")
+    def test_unavailable_3d_api_is_not_needed_or_probed(self):
+        self.run_lua("run.Set3dRenderingEnabled=nil;run.Is3dRenderingEnabled=function() error('must not probe renderer') end;settings:Init(all);assert(settings:SetOption('SettingsBlackScreen',true));assert(run.rendering and not settings:GetStatus().rendering_paused and settings:GetStatus().message:find('visual only',1,true));assert(settings:RestoreView())")
 
     def test_missing_playergui_does_not_disable_3d(self):
         self.run_lua("playerGui.Parent=nil;settings:Init(all);assert(not settings:SetOption('SettingsBlackScreen',true));assert(run.rendering and #run.requests==0)")
@@ -162,11 +162,14 @@ class SettingsTests(unittest.TestCase):
     def test_prior_disabled_rendering_is_preserved(self):
         self.run_lua("run.rendering=false;settings:Init(all);settings:SetOption('SettingsBlackScreen',true);settings:RestoreView();assert(run.rendering==false)")
 
-    def test_failed_destroy_resume_keeps_recovery_button_usable(self):
-        self.run_lua("settings:Init(all);settings:SetOption('SettingsBlackScreen',true);local button=playerGui:FindFirstChild('WhiteHubBlackScreen'):FindFirstChild('BlackBackground'):FindFirstChild('ShowGame');resumeFail=true;settings:Destroy();assert(settings:GetStatus().black);resumeFail=false;button.Activated:Fire();assert(run.rendering and not settings:GetStatus().black)")
+    def test_destroy_removes_cover_without_renderer_resume_or_late_callbacks(self):
+        self.run_lua("renderFail=true;resumeFail=true;settings:Init(all);settings:SetOption('SettingsBlackScreen',true);local button=playerGui:FindFirstChild('WhiteHubBlackScreen'):FindFirstChild('BlackBackground'):FindFirstChild('ShowGame');settings:Destroy();local before=saves;button.Activated:Fire();assert(run.rendering and not settings:GetStatus().black and not playerGui:FindFirstChild('WhiteHubBlackScreen') and #run.requests==0 and saves==before)")
 
-    def test_destroy_restores_without_erasing_saved_choices_and_reinit_applies_them(self):
-        self.run_lua("values.SettingsCapFPS30=true;values.SettingsLowGraphics=true;values.SettingsBlackScreen=true;settings:Init(all);assert(fps==30 and quality.SavedQualityLevel==1 and not run.rendering);settings:Destroy();assert(fps==90 and quality.SavedQualityLevel==3 and run.rendering and values.SettingsBlackScreen and values.SettingsLowGraphics and values.SettingsCapFPS30);settings:Init(all);assert(fps==30 and quality.SavedQualityLevel==1 and not run.rendering)")
+    def test_saved_black_is_cleared_but_fps_and_quality_choices_reapply(self):
+        self.run_lua("values.SettingsCapFPS30=true;values.SettingsLowGraphics=true;values.SettingsBlackScreen=true;settings:Init(all);assert(fps==30 and quality.SavedQualityLevel==1 and run.rendering and not values.SettingsBlackScreen and not settings:GetStatus().black);settings:SetOption('SettingsBlackScreen',true);settings:Destroy();assert(fps==90 and quality.SavedQualityLevel==3 and run.rendering and values.SettingsBlackScreen and values.SettingsLowGraphics and values.SettingsCapFPS30);settings:Init(all);assert(fps==30 and quality.SavedQualityLevel==1 and run.rendering and not settings:GetStatus().black and not values.SettingsBlackScreen)")
+
+    def test_repeated_black_toggles_create_no_workers_or_renderer_calls(self):
+        self.run_lua("settings:Init(all);for i=1,20 do settings:SetOption('SettingsBlackScreen',true);settings:SetOption('SettingsBlackScreen',true);settings:SetOption('SettingsBlackScreen',false) end;assert(#jobs==0 and #run.requests==0 and not playerGui:FindFirstChild('WhiteHubBlackScreen'))")
 
     def test_ui_toggles_stay_in_sync_with_recovery(self):
         self.run_lua("settings:Init(all);local page=node('SettingsPage','Frame');local callbacks={};local states={};local ui={SetToggleValue=function(_,label,value) states[label]=value end,AddLabel=function(_,p,text) local label=node('Label','TextLabel',p);label.Text=text;return label end,ShowPopup=function() end};settings:Build(page,ui,function(_,label,default,fn) callbacks[label]=fn end,{MUTED={}});callbacks['Black screen'](true);assert(states['Black screen']);settings:RestoreView();assert(states['Black screen']==false)")
@@ -179,6 +182,7 @@ class SettingsTests(unittest.TestCase):
             self.assertTrue(check_luau((ROOT/name).read_text()),name)
         source=(ROOT/'Settings.lua').read_text()
         self.assertNotRegex(source,r'Inventory|CombatFarm|FireServer|InvokeServer|Destroy\(.*workspace|setfflag|hookfunction')
+        self.assertNotRegex(source,r'Set3dRenderingEnabled|Is3dRenderingEnabled|RunService')
         config=(ROOT/'Config.lua').read_text()
         for key in ('SettingsCapFPS30','SettingsLowGraphics','SettingsBlackScreen'):
             self.assertIn(key+' = false',config)
