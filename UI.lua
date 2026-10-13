@@ -1772,7 +1772,7 @@ function UI:Create()
     discordBtn.Size             = UDim2.new(1,-4,0,36)
     discordBtn.BackgroundColor3 = THEME.GOLD_DARK
     discordBtn.BorderSizePixel  = 0
-    discordBtn.Text             = "DISCORD  //  discord.gg/Qwd23ZRNxJ"
+    discordBtn.Text             = "DISCORD  //  discord.gg/j3C4Xa6DzN"
     discordBtn.TextColor3       = THEME.WHITE
     discordBtn.TextScaled       = false
     discordBtn.TextSize         = 12
@@ -1787,7 +1787,7 @@ function UI:Create()
         TweenService:Create(discordBtn, TweenInfo.new(0.15), {BackgroundColor3=THEME.GOLD}):Play()
     end)
     discordBtn.MouseButton1Click:Connect(function()
-        pcall(function() setclipboard("https://discord.gg/Qwd23ZRNxJ") end)
+        pcall(function() setclipboard("https://discord.gg/j3C4Xa6DzN") end)
         local orig = discordBtn.Text
         discordBtn.Text = "✅ Copied!"
         TweenService:Create(discordBtn, TweenInfo.new(0.15), {BackgroundColor3=THEME.GREEN}):Play()

@@ -77,4 +77,4 @@ URLs or device session files. Do not repeatedly re-enable a pending consumable.
 
 See [CHANGELOG.md](CHANGELOG.md) for changes and current limitations.
 
-Discord: https://discord.gg/Qwd23ZRNxJ
+Discord: https://discord.gg/j3C4Xa6DzN
