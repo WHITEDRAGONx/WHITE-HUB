@@ -34,7 +34,8 @@ cleanup has begun. No repeated scan or frame polling is used by Settings.
 ## Protected scope
 
 Pre-change dev: c33ea596c8ec87d64d7809f87abc0cab57f1b76f.
-Pre-change public: e25ea522deec85758c1c641d55654e37414ec04d.
+Reconciled pre-change public: 652db568857e2c58c9fa3978ac0925db782e429d.
 Checkpoint: 08e2ba0014dd18030b961e6676dad0d99f17a52c.
 Inventory, CombatFarm, StandFarm, Farm and AutoPrestige sources are unchanged by
-this update. Public promotion excludes the dev-only SellPerf/ClientFX changes.
+this update. Public promotion preserves the existing public SELL NOW, Console
+Follow/Copy SALE and newer Merchant/Farm changes byte-for-byte where untouched.

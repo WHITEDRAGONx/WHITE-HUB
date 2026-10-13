@@ -11,8 +11,8 @@
   effects without deleting geometry or changing dialogue/consumable logic.
 - 24 offline Settings simulations plus public-loader, syntax and UI checks.
   Actual Delta behavior, RAM usage and device temperature remain unverified.
-- Existing Merchant, combat and farms preserved. The dev-only sale/ClientFX
-  diagnostics are not included in this public update.
+- Existing Merchant, combat and farms preserved, including the latest public
+  SELL NOW, Console Follow/Copy SALE and Merchant timing changes.
 
 ## Permanent WHITE HUB loader — 2026-10-12
 

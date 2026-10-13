@@ -27,3 +27,15 @@ Rollback: restore Settings-related source/loader/UI/Config files from the source
 HEAD above on dev; restore public Settings-related files from the public HEAD.
 Remove Settings.lua only together with its loader/UI references. Preserve later
 unrelated commits. Never reset or force-update either branch.
+
+## Reconciled public remote before promotion
+
+The local main tracking ref was stale at the initial check. An explicit remote
+read/fetch found public HEAD 652db568857e2c58c9fa3978ac0925db782e429d, which already
+contains Console Follow/Copy SALE, faster Merchant stages and SELL NOW. This is
+the actual public rollback baseline for Settings. Preserve all of these changes;
+do not use e25ea52 as a rollback across the newer public features.
+
+The public package reads Inventory/Farm byte-for-byte from 652db56 and merges only
+the dev UI/Config delta over that baseline. Public promotion writes Settings,
+Main, UI, Config and documentation only. It does not rewrite Inventory or Farm.

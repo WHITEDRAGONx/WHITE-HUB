@@ -37,10 +37,20 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual(original, self.files['Inventory.lua'].encode())
 
     def test_farm_and_progression_code_preserved(self):
-        for name in ('Farm.lua', 'CombatFarm.lua', 'AutoPrestige.lua', 'AutoPrestigeRuntime.lua', 'PrestigeDialogue.lua'):
+        self.assertEqual(self.files['Farm.lua'].encode(), subprocess.check_output(
+            ['git','show',PUBLIC_PREVIOUS+':Farm.lua'],cwd=ROOT))
+        for name in ('CombatFarm.lua', 'AutoPrestige.lua', 'AutoPrestigeRuntime.lua', 'PrestigeDialogue.lua'):
             self.assertEqual(self.files[name], (ROOT / name).read_text())
         before = (ROOT / 'StandFarm.lua').read_text()
         self.assertEqual(self.files['StandFarm.lua'], before.replace('reload DevMain', 'reload Main'))
+
+    def test_later_public_sale_and_console_features_are_preserved(self):
+        self.assertIn('_farm:SellNow()', self.files['UI.lua'])
+        self.assertIn('buildSaleRuntimeLog', self.files['UI.lua'])
+        self.assertIn('_config:Set("ConsoleFollow", followConsole)', self.files['UI.lua'])
+        self.assertIn('ConsoleFollow = true', self.files['Config.lua'])
+        self.assertIn('function Farm:SellNow()', self.files['Farm.lua'])
+        self.assertIn('SettingsPage', self.files['UI.lua'])
 
     def test_public_owned_hop_returns_only_to_public_loader(self):
         transfer = self.files['StandTransfer.lua']

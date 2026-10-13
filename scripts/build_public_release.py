@@ -2,20 +2,39 @@
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_PREVIOUS = '718018dac21d9a51e1955f68b4a042f28a534ee1'
+PUBLIC_PREVIOUS = '652db568857e2c58c9fa3978ac0925db782e429d'
+PUBLIC_DEV_BASE = 'e25ea522deec85758c1c641d55654e37414ec04d'
 FILES = ('Webhook.lua', 'Movement.lua', 'ServerHop.lua', 'CombatFarm.lua',
          'StandFarm.lua', 'StandTransfer.lua', 'StandV2UI.lua', 'UICompact.lua',
          'GameCatalog.lua', 'ChoiceUI.lua', 'CatalogRefresh.lua', 'Settings.lua',
          'PrestigeDialogue.lua', 'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
 
 
+def existing_public(path):
+    return subprocess.check_output(['git', 'show', PUBLIC_PREVIOUS + ':' + path], cwd=ROOT).decode()
+
+
+def preserve_public_additions(path, generated):
+    """Apply the dev delta without losing later public UI/config additions."""
+    base = subprocess.check_output(['git', 'show', PUBLIC_DEV_BASE + ':' + path], cwd=ROOT).decode()
+    with tempfile.TemporaryDirectory(prefix='white-public-merge-') as directory:
+        paths = [Path(directory) / name for name in ('current', 'base', 'generated')]
+        for target, text in zip(paths, (existing_public(path), base, generated)):
+            target.write_text(text)
+        merged = subprocess.run(['git', 'merge-file', '-p', *map(str, paths)], capture_output=True, text=True)
+        if merged.returncode != 0:
+            raise RuntimeError('Public merge requires review: ' + path)
+        return merged.stdout
+
+
 def build():
     result = {name: (ROOT / name).read_text() for name in FILES}
     # Merchant is protected: retain the existing public version, not the dev variant.
-    result['Inventory.lua'] = subprocess.check_output(
-        ['git', 'show', PUBLIC_PREVIOUS + ':Inventory.lua'], cwd=ROOT).decode()
+    result['Inventory.lua'] = existing_public('Inventory.lua')
+    result['Farm.lua'] = existing_public('Farm.lua')
     main = (ROOT / 'DevMain.lua').read_text()
     main = main[main.index('-- ====================='):]
     main = main.replace('dev/2026-10-10-autosell-compat/', 'main/')
@@ -36,10 +55,10 @@ def build():
     ui = ui[:start] + ui[end:]
     ui = ui.replace('QuestPage,SettingsPage,AIPage}', 'QuestPage,SettingsPage}')
     ui = ui.replace('SILVER-V5-20261013-R4', 'SILVER-V5-PUBLIC-BETA-20261013-R4')
-    result['UI.lua'] = ui
+    result['UI.lua'] = preserve_public_additions('UI.lua', ui)
     config = (ROOT / 'Config.lua').read_text()
     config = re.sub(r'^    WhiteAI(?:Enabled|Endpoint) = .*\n', '', config, flags=re.M)
-    result['Config.lua'] = config
+    result['Config.lua'] = preserve_public_additions('Config.lua', config)
     result['UICompact.lua'] = result['UICompact.lua'].replace(
         "local captions={", "local captions={\n ['Auto Prestige']='Auto prestige (BETA)',")
     for caption in (" ['COPY LATEST PROPOSAL LINK']='COPY PROPOSAL',", " ['SAVE HTTPS ENDPOINT']='SAVE ENDPOINT',", " ['WHITE AI V1 - DIAGNOSTICS']='AI DIAGNOSTICS',"):
