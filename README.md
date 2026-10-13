@@ -57,8 +57,8 @@ and game updates can affect behavior. A syntax test is not proof of live behavio
 ## Settings
 
 Open **Settings** to enable **Cap FPS at 30**, **Low graphics** or **Black screen**.
-They start OFF and saved choices apply on the next load when the executor supports
-them. They do not enable or stop a farm.
+They start OFF. Saved FPS/graphics choices apply on the next load where supported.
+Black screen requires manual enable each load. They do not enable or stop a farm.
 
 The FPS setting uses the executor's cap API and restores the prior cap on OFF.
 If the prior cap cannot be read, OFF returns to 60 FPS; the status says so.
@@ -66,11 +66,12 @@ Low graphics requests quality level 1, disables shadows and reduces local
 particles, trails, beams and post effects. Disabling it restores the values
 changed by the hub, preserving values subsequently changed elsewhere.
 
-Black screen hides the view and attempts to pause 3D rendering. WHITE HUB controls
-and **SHOW GAME** stay accessible; that button restores the view and turns the
-saved black-screen preference OFF. If 3D control is unavailable, the status says
-that only the view is hidden. Rendering controls/effects may reduce graphics load;
-RAM or temperature improvements are not guaranteed. Game instances stay loaded.
+Black screen draws a visual cover and keeps 3D rendering running. Native renderer
+control was removed after a tester reported delay/crash; the cause is not confirmed
+by a crash trace. WHITE HUB controls and **SHOW GAME** stay accessible. A saved
+black-screen preference is cleared on load, so this mode requires manual enable.
+The cover does not release game memory or promise lower graphics load. FPS/low
+graphics are the separate performance options. Delta retesting is still required.
 
 These options passed offline checks; executor support and actual YBA behavior
 still require Delta testing. See the current build in Console before testing.
