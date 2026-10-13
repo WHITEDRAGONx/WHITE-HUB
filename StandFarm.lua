@@ -1,12 +1,13 @@
 -- WHITE HUB V3 - StandFarm.lua - EXPERIMENTAL, DEV ONLY
--- Original implementation; no Xenon source, webhooks, raw Pastebin, or Inventory edits.
+-- Original implementation; no Xenon source, third-party webhooks, or Inventory edits.
 -- Never discard a stand when its skin cannot be safely determined.
 local Players = game:GetService("Players")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local player = Players.LocalPlayer
 local StandFarm = {}
 
-local config, inventory, logger, movement, itemFarm
+local config, inventory, logger, movement, itemFarm, webhook
+local notifiedToken
 local running, runToken = false, 0
 local status = "Idle"
 local rolls, stoppedOn = 0, nil
@@ -104,6 +105,35 @@ local function readPity()
     return val and tonumber(val.Value) or nil
 end
 
+-- Snapshot a terminal result once. HTTP never blocks consumption/cancellation,
+-- and an obsolete task must not send after Stop, reload or a new run.
+local function notifyCompletion(token, outcome)
+    if runToken ~= token or notifiedToken == token or awaitingTransfer then return end
+    local sender = webhook
+    if not sender or type(sender.SendStandFarmResult) ~= "function" then return end
+    local url = config and config:Get("WebhookURL")
+    if type(url) ~= "string" or url == "" then return end
+    notifiedToken = token
+    local counters = metricSnapshot()
+    local result = {
+        kind = outcome and outcome.kind or "stopped",
+        desired_skin = outcome and outcome.desired_skin or false,
+        mode = activeMode, consumable = activeConsumable,
+        stand = outcome and outcome.stand or readStand(),
+        skin = outcome and outcome.skin or nil,
+        pity = readPity(), rolls = counters.rolls or rolls,
+        elapsed = counters.elapsed, reason = stoppedOn or "Farm settings changed",
+        pending = pending ~= nil,
+    }
+    task.spawn(function()
+        if runToken ~= token then return end
+        local ok = pcall(sender.SendStandFarmResult, sender, result)
+        if not ok and runToken == token and logger and type(logger.Write) == "function" then
+            pcall(logger.Write, logger, "WARN", "StandFarm", "Stand farm webhook failed; farm result is unchanged")
+        end
+    end)
+end
+
 local function getCharacter()
     local char = player and player.Character
     if not char then return nil end
@@ -181,7 +211,7 @@ local function shouldReplace(stand, selected, char, token, mode, skins)
     if stand == nil then return false, "PlayerStats.Stand unavailable" end
     if stand == "None" then return false, nil end
     if mode ~= "shiny" and isDesiredStand(stand, selected) then
-        return false, "Desired Stand found: " .. stand
+        return false, "Desired Stand found: " .. stand, {kind="target", stand=stand}
     end
     local skin, reason = getSkin(char, token)
     if not skin then return false, reason end
@@ -192,9 +222,11 @@ local function shouldReplace(stand, selected, char, token, mode, skins)
     if skin ~= "None" and skin ~= "" then
         metrics.lastSkin=skin:sub(1,100)
         if isDesiredStand(skin,skins or activeSkins) then
-            return false,"Desired skin found: " .. skin:sub(1,100) .. "; preserved, stopping."
+            return false,"Desired skin found: " .. skin:sub(1,100) .. "; preserved, stopping.",
+                {kind="skin", stand=stand, skin=skin, desired_skin=true}
         end
-        return false, "Skin detected (" .. skin .. "); preserved, stopping."
+        return false, "Skin detected (" .. skin .. "); preserved, stopping.",
+            {kind="skin", stand=stand, skin=skin}
     end
     return true, nil
 end
@@ -798,7 +830,7 @@ local function loop(token, selected, mode, consumable)
     if consumable ~= "Mysterious Arrow" then
         log("INFO", "Rib beta uses existing Worthiness; configure required skills manually before starting")
     end
-    local unavailableSince
+    local unavailableSince, outcome
     while active(token) do
         local ready, readyReason = prepareCharacter(token)
         if not active(token) then break end
@@ -829,9 +861,10 @@ local function loop(token, selected, mode, consumable)
             break
         end
 
-        local replace, reason = shouldReplace(stand, selected, char, token, mode)
+        local replace, reason, result = shouldReplace(stand, selected, char, token, mode)
         if not active(token) then break end
         if reason then
+            outcome = result
             stoppedOn = reason
             log("INFO", reason)
             break
@@ -925,6 +958,7 @@ local function loop(token, selected, mode, consumable)
         running = false
         config:Set("StandFarmEnabled", false)
         if not stoppedOn then log("INFO", "Stand Farm stopped") end
+        notifyCompletion(token, outcome)
     end
 end
 
@@ -934,6 +968,7 @@ function StandFarm:Init(modules)
     clearTransfer() -- Cancels an old instance; new module has no transfer reference yet.
     cleanupDialogue(true)
     config, inventory, logger, movement = modules.Config, modules.Inventory, modules.RuntimeLog, modules.Movement
+    webhook, notifiedToken = modules.Webhook, nil
     itemFarm = modules.Farm
     serverHop = modules.ServerHop
     transfer=modules.StandTransfer
@@ -944,7 +979,7 @@ function StandFarm:Init(modules)
     running, rolls, stoppedOn, activeTargets = false, 0, nil, {}
     activeMode = "stand"
     activeConsumable = "Mysterious Arrow"
-    log("INFO", "Build SF-V2-20261012-R10; resume/skins/pity beta, Roblox validation pending")
+    log("INFO", "Build SF-WEBHOOK-20261013-R11; terminal notifications, Roblox validation pending")
     status = "Idle"
     -- Never resume potentially destructive item consumption after reload.
     -- The owner must re-enable the beta manually in the current session.
@@ -1040,9 +1075,12 @@ function StandFarm:Start(resumeRecord)
         local ok, err = xpcall(function() loop(token, selected, mode, consumable) end, debug.traceback)
         if not ok then cleanupDialogue(true); interactionBusy = false end
         if not ok and runToken == token then
+            freezeMetrics()
             running = false
+            stoppedOn = "Stand Farm runtime failed; check Console"
             config:Set("StandFarmEnabled", false)
             log("ERROR", "Stand Farm runtime failed: " .. tostring(err):sub(1, 240))
+            notifyCompletion(token)
         end
     end)
     return true, "Stand Farm started"
