@@ -1,5 +1,21 @@
 # Changelog
 
+## Pickup compatibility rollback / Auto Rejoin — 2026-10-14 (R2)
+
+- Withdraws the faster pickup cadence after an owner-supplied tester screenshot
+  showed a moderation kick during item teleport. Timing causality is unconfirmed.
+- Restores 350 ms before one pickup prompt, 150 ms after return, one-second new
+  spawn/normal-cycle cadence and the historical 20-second dry-server window.
+  Inventory-only confirmation, character guards and cleanup remain.
+- Auto Rejoin now waits for ErrorMessage construction and visible text, handles
+  a prompt already present on reload, deduplicates attempts and cancels stale
+  tasks on Destroy/reinit. One native request per runtime; no retry loop or
+  automatic script replay. A rejected native request is logged.
+- Auto Sell optimization, ServerHop list preparation, combat/Stand/Settings/UI
+  remain intact. Farm build: PICKUP-COMPAT-20261014-R2.
+- Offline checks only. This rollback does not establish that a game's kick
+  condition or native rejoin behavior is resolved; live retest is required.
+
 ## Sale/pickup/hop performance beta — 2026-10-14 (R1)
 
 - Retains the proven Merchant FINAL sequence, callback handling, restoration,

@@ -25,16 +25,16 @@ class PickupSpeedTests(unittest.TestCase):
             task.spawn(function() local t=now; result=items:_collectForTest(info,model); duration=now-t end)
         ''')
 
-    def test_confirmed_immediate_pickup_removes_old_half_second_wait(self):
-        self.collect(); self.run_lua('advance(1); assert(result and prompts==1 and duration<=0.06 and freezes==unfreezes and not noclip)')
+    def test_compatibility_pickup_restores_half_second_cadence(self):
+        self.collect(); self.run_lua('advance(1); assert(result and prompts==1 and duration>=0.5 and duration<=0.51 and freezes==unfreezes and not noclip)')
 
-    def test_one_later_retry_uses_old_position_settle_window(self):
+    def test_prompt_waits_historical_settle_window_without_second_request(self):
         self.collect('''
             onPrompt=function(p)
-                if prompts==2 then makeTool(p.ObjectText); p.Parent.Parent=nil end
+                assert(now>=0.35); makeTool(p.ObjectText); p.Parent.Parent=nil
             end
         ''')
-        self.run_lua('advance(2); assert(result and prompts==2 and duration>=0.35 and duration<0.4)')
+        self.run_lua('advance(2); assert(result and prompts==1 and duration>=0.5)')
 
     def test_inventory_replication_delayed_after_despawn_still_confirms(self):
         self.collect('''
@@ -57,11 +57,11 @@ class PickupSpeedTests(unittest.TestCase):
                 self.setUp(); self.collect('after(0.025,function() '+action+' end)')
                 self.run_lua('advance(2); assert(not result and prompts==0 and freezes==unfreezes and not noclip)')
 
-    def test_two_prompt_limit_on_live_unresponsive_item(self):
+    def test_single_prompt_on_live_unresponsive_item(self):
         self.collect('onPrompt=function() end')
-        self.run_lua('advance(3); assert(not result and prompts==2 and duration<1.6 and freezes==unfreezes)')
+        self.run_lua('advance(3); assert(not result and prompts==1 and duration<=2.1 and freezes==unfreezes)')
 
-    def test_readiness_detection_is_immediate_or_bounded_until_replication(self):
+    def test_new_spawn_detection_restores_one_second_delay_with_bounded_readiness(self):
         self.run_lua('''
             signals={}
             testFolder.ChildAdded={Connect=function(_,fn) signals.added=fn; return {Disconnect=function() signals.added=nil end} end}
@@ -79,13 +79,14 @@ class PickupSpeedTests(unittest.TestCase):
         self.run_lua('''
             detector:Init({Config=config,Inventory=inventory,Movement=movement,RuntimeLog=logger})
             detector:_detectForTest()
-            local ready=addSpawn("Gold Coin"); signals.added(ready); assert(detector:_queuedForTest(ready))
+            local ready=addSpawn("Gold Coin"); signals.added(ready); assert(not detector:_queuedForTest(ready))
+            advance(1.1); assert(detector:_queuedForTest(ready))
             local partial=addSpawn("Diamond"); local pp=partial.PrimaryPart; partial.PrimaryPart=nil
             signals.added(partial); assert(not detector:_queuedForTest(partial))
-            after(0.08,function() partial.PrimaryPart=pp end); advance(0.1)
+            after(0.08,function() partial.PrimaryPart=pp end); advance(1.1)
             assert(detector:_queuedForTest(partial))
             local missing=addSpawn("Rokakaka"); missing.PrimaryPart=nil; signals.added(missing)
-            advance(3); assert(not detector:_queuedForTest(missing) and #jobs==0)
+            advance(3.1); assert(not detector:_queuedForTest(missing) and #jobs==0)
         ''')
 
 
