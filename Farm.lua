@@ -19,7 +19,7 @@ local _webhook   = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 8 -- Normal Item Farm only; bounded restock keeps its own 90s limit.
+local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 90s limit.
 local detectionEpoch = 0
 local lastItemTime    = tick()
 
@@ -117,7 +117,7 @@ function Farm:Init(Modules)
     _movement  = Modules.Movement
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
-    moduleLog("INFO", "[Farm] Build PICKUP-20261014-R1; earlier bounded prompts, live timing pending")
+    moduleLog("INFO", "[Farm] Build PICKUP-COMPAT-20261014-R2; original cadence restored after kick report, live retest pending")
 end
 
 -- Config change detection
@@ -251,8 +251,9 @@ local function InitItemDetection()
     local epoch = detectionEpoch
     local function detect(model, announce)
         if not model:IsA("Model") then return end
+        if announce then task.wait(1) end -- Restore the pre-speed new-spawn settle window.
         local deadline = tick() + 2
-        -- Most spawns are ready immediately. Retry only incomplete replication.
+        -- Initial items keep their original immediate scan; new spawns settle first.
         while epoch == detectionEpoch and model.Parent == ItemSpawnFolder do
             local info = GetItemInfo(model)
             if info then
@@ -306,7 +307,7 @@ local function CollectItem(itemInfo, index, restockGuard)
         if restockGuard then restockFreeze = bv end
         _movement:SetNoclip(true)
         _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
-        task.wait(0.05)
+        task.wait(0.35)
         local function fire()
             if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
             requests = requests + 1
@@ -322,18 +323,15 @@ local function CollectItem(itemInfo, index, restockGuard)
                 -- Give a removed spawn a replication grace, but never call a
                 -- competitor's pickup our own successful acquisition.
                 if tick() - disappeared >= 0.35 then break end
-            elseif requests == 1 and tick() - started >= 0.35 then
-                -- Earlier input may precede position replication. One retry at
-                -- the old settle window retains compatibility without spam.
-                fire()
             end
-            task.wait(0.025)
+            task.wait(0.1)
         end
         return _inventory:Count(itemInfo.Name) > beforeCount
     end)
     if bv then pcall(function() _movement:Unfreeze(bv) end) end
     if restockFreeze == bv then restockFreeze = nil end
     if hrp.Parent and allowed() then pcall(function() _movement:Teleport(SAFE_SPOT) end) end
+    if allowed() then task.wait(0.15) end
     pcall(function() _movement:SetNoclip(false) end)
     if not allowed() then return false end
     if not ok then error("Item collection operation failed after cleanup", 0) end
@@ -538,7 +536,7 @@ local function runCycle()
         elseif #snapshot == 0 then
             logWait("[Farm] Waiting for items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
         end
-        task.wait(0.1)
+        task.wait(1)
     end
 
     -- A pause/prestige transition is not a completed phase.
@@ -587,7 +585,7 @@ local function runCycle()
             elseif #snapshot == 0 then
                 logWait("[Farm] Waiting for keep-items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
             end
-            task.wait(0.1)
+            task.wait(1)
         end
 
         if shouldPauseCycle() then return end
@@ -636,7 +634,7 @@ local function runCycle()
             if shouldPauseCycle() then return end
             CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
-        task.wait(0.1)
+        task.wait(1)
     end
 end
 

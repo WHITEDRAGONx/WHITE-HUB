@@ -80,15 +80,18 @@ still require Delta testing. See the current build in Console before testing.
 
 ## Beta testing
 
-Performance beta (2026-10-14): ready spawns are queued immediately; incomplete
-replication is retried for at most two seconds. Pickup starts after a 50 ms
-settle window, with at most one later retry and inventory confirmation. A
-despawn alone is not credited as collection. Normal Item Farm uses a 100 ms
-cycle and an eight-second dry-server window; restock keeps its separate limits.
+Pickup compatibility hotfix (2026-10-14): after a tester reported a moderation
+kick during item teleport, the faster pickup cadence was withdrawn. New spawns
+wait one second, pickup settles for 350 ms, fires once and waits 150 ms after
+returning. Normal cycles and dry-server timing are restored to 1s/20s. Inventory
+confirmation, cancellation and cleanup remain; a despawn alone is not collection.
 Merchant keeps the proven Option1/Option1/Option6 flow, using a live button index
 and frame-paced advancement. Server-list preparation overlaps automatic selling.
 The historical 0.70-second Delta sale is not a current timing guarantee. Check
-SALE-20261014-R1 / PICKUP-20261014-R1 in Console and copy SALE after a test.
+SALE-20261014-R1 / PICKUP-COMPAT-20261014-R2 in Console and copy SALE after a test.
+Auto Rejoin waits for a visible completed disconnect prompt and attempts one
+native rejoin per runtime. It does not restart the script, suppress moderation
+or retry indefinitely. Native rejoin and the kick rollback need a live retest.
 
 Configure your own Discord URL in **Webhook** and save it. Stand/Shiny/Rib uses
 that same URL automatically. It sends one asynchronous notification per completed

@@ -16,6 +16,8 @@ local _movement = nil
 local _config = nil
 local _kickConnection = nil
 local hopBusy = false
+local kickEpoch, rejoinBusy, autoRejoinAttempted = 0, false, false
+local seenErrorPrompts = setmetatable({}, {__mode="k"})
 local preparedSite, preparedURL, preparedAt = nil, nil, 0
 local prepareBusy, prepareEpoch = false, 0
 
@@ -153,27 +155,54 @@ function ServerHop:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _movement = Modules.Movement
     _config = Modules.Config
+    kickEpoch = kickEpoch + 1
+    autoRejoinAttempted = false
+    seenErrorPrompts = setmetatable({}, {__mode="k"})
+    local epoch = kickEpoch
 
     if _kickConnection then
         pcall(function() _kickConnection:Disconnect() end)
     end
 
-    _kickConnection = CoreGui.DescendantAdded:Connect(function(child)
-        if child.Name ~= "ErrorPrompt" then return end
+    local function readyErrorPrompt(child)
+        if not child.Parent then return false end
         local grabError = child:FindFirstChild("ErrorMessage", true)
-        if not grabError then return end
-
+        local text = ""
+        if grabError then pcall(function() text=tostring(grabError.Text or "") end) end
+        if text == "" or text == "Label" then return false end
+        local parent = child
+        while parent and parent ~= CoreGui do
+            if parent:IsA("GuiObject") and parent.Visible == false
+                or parent:IsA("ScreenGui") and parent.Enabled == false then return false end
+            parent = parent.Parent
+        end
+        return parent == CoreGui
+    end
+    local function observeErrorPrompt(child)
+        if child.Name ~= "ErrorPrompt" or seenErrorPrompts[child] or autoRejoinAttempted then return end
+        seenErrorPrompts[child] = true
         task.spawn(function()
             local deadline = tick() + 5
-            while grabError.Parent and grabError.Text == "Label" and tick() < deadline do
+            while epoch == kickEpoch and child.Parent and not autoRejoinAttempted and tick() < deadline do
+                if readyErrorPrompt(child) then
+                    task.wait(1)
+                    if epoch ~= kickEpoch or not readyErrorPrompt(child) or autoRejoinAttempted then return end
+                    autoRejoinAttempted = true
+                    moduleLog("INFO", "[ServerHop][AutoRejoin] Kick/disconnect detected; requesting ONE rejoin")
+                    ServerHop:Rejoin()
+                    return
+                end
                 task.wait(0.1)
             end
-            if not grabError.Parent then return end
-            moduleLog("INFO", "[ServerHop] Kick detected: " .. tostring(grabError.Text) .. " — Rejoining...")
-            task.wait(1)
-            ServerHop:Rejoin()
         end)
+    end
+    _kickConnection = CoreGui.DescendantAdded:Connect(observeErrorPrompt)
+    -- Reload can occur after Roblox has already built the disconnect prompt.
+    pcall(function()
+        local existing = CoreGui:FindFirstChild("ErrorPrompt", true)
+        if existing then observeErrorPrompt(existing) end
     end)
+    moduleLog("INFO", "[ServerHop] Auto Rejoin enabled; one attempt per runtime, no automatic retry loop")
 end
 
 function ServerHop:Hop(canContinue, onDestination)
@@ -208,15 +237,19 @@ function ServerHop:Hop(canContinue, onDestination)
 end
 
 function ServerHop:Rejoin()
+    if rejoinBusy then return false end
+    rejoinBusy = true
     moduleLog("INFO", "[ServerHop] Rejoining game...")
     local ok, err = pcall(function()
         TeleportService:Teleport(PlaceID, Player)
     end)
+    rejoinBusy = false
     if not ok then moduleLog("WARN", "[ServerHop] Rejoin failed: " .. tostring(err)) end
     return ok
 end
 
 function ServerHop:Destroy()
+    kickEpoch = kickEpoch + 1
     prepareEpoch = prepareEpoch + 1
     prepareBusy, preparedSite, preparedURL = false, nil, nil
     if _kickConnection then
