@@ -68,6 +68,16 @@ by Settings. RAM/temperature savings and actual Delta compatibility are unverifi
 
 ## Beta testing
 
+Performance beta (2026-10-14): ready spawns are queued immediately; incomplete
+replication is retried for at most two seconds. Pickup starts after a 50 ms
+settle window, with at most one later retry and inventory confirmation. A
+despawn alone is not credited as collection. Normal Item Farm uses a 100 ms
+cycle and an eight-second dry-server window; restock keeps its separate limits.
+Merchant keeps the proven Option1/Option1/Option6 flow, using a live button index
+and frame-paced advancement. Server-list preparation overlaps automatic selling.
+The historical 0.70-second Delta sale is not a current timing guarantee. Check
+SALE-20261014-R1 / PICKUP-20261014-R1 in Console and copy SALE after a test.
+
 Configure your own Discord URL in **Webhook** and save it. Stand/Shiny/Rib uses
 that same URL automatically. It sends one asynchronous notification per completed
 run, not per roll. Manual Stop, reload and an active restock transfer do not send

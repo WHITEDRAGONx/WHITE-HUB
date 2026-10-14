@@ -19,7 +19,8 @@ local _webhook   = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20   -- wait longer before treating the server as having no spawned items
+local NO_ITEM_TIMEOUT = 8 -- Normal Item Farm only; bounded restock keeps its own 90s limit.
+local detectionEpoch = 0
 local lastItemTime    = tick()
 
 local lastSellItemsSnapshot = nil
@@ -29,6 +30,8 @@ local runtimeSetup = false
 local runtimeConnections = {}
 local restockBusy, cycleBusy, startupBusy = false, false, false
 local prestigeSaleBusy=false
+-- One manual sale at a time; park normal collection while a sale runs.
+local manualSellBusy, sellBusy, collectBusy = false, false, false
 local restockFreeze, restockEpoch = nil, 0
 
 local function prestigePending()
@@ -51,10 +54,17 @@ end
 -- DEV-ONLY diagnostics: observe sale frame times without changing Inventory.lua.
 -- This is intentionally read-only. One Heartbeat connection exists only during SellAll.
 local sellPerfSerial = 0
-local function SellAllWithDiagnostics(source)
-    -- Preserve the original path when Auto Sell is off or Farm is disabled.
-    if not (_config and _config:Get("FarmEnabled") and _config:Get("AutoSell")) then
-        return _inventory:SellAll()
+local function SellAllWithDiagnostics(source, manualRequest)
+    if sellBusy then return false, 0, 0, "Another Merchant sale is already running" end
+    sellBusy = true
+
+    -- Preserve the original automatic behavior if its toggles are disabled.
+    -- Explicit manual sales still receive the standard SellPerf measurements.
+    if not manualRequest and not (_config and _config:Get("FarmEnabled") and _config:Get("AutoSell")) then
+        local ok, sold, types, failed, reason = pcall(function() return _inventory:SellAll(false) end)
+        sellBusy = false
+        if not ok then error(sold, 0) end
+        return sold, types, failed, reason
     end
 
     sellPerfSerial = sellPerfSerial + 1
@@ -78,7 +88,9 @@ local function SellAllWithDiagnostics(source)
 
     moduleLog("INFO", ("[Farm][SellPerf] BEGIN id=%d source=%s"):format(id, tostring(source)))
     local startedAt = tick()
-    local ok, result = pcall(function() return _inventory:SellAll() end)
+    local ok, sold, types, failed, reason = pcall(function()
+        return _inventory:SellAll(manualRequest == true)
+    end)
     local elapsedSeconds = math.max(0, tick() - startedAt)
 
     listening = false
@@ -93,8 +105,9 @@ local function SellAllWithDiagnostics(source)
     )
     -- Slow frames are correlation evidence, not proof that SellAll caused them.
     moduleLog((not ok or over100ms > 0) and "WARN" or "INFO", message)
-    if not ok then error(result, 0) end
-    return result
+    sellBusy = false
+    if not ok then error(sold, 0) end
+    return sold, types, failed, reason
 end
 
 function Farm:Init(Modules)
@@ -104,6 +117,7 @@ function Farm:Init(Modules)
     _movement  = Modules.Movement
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
+    moduleLog("INFO", "[Farm] Build PICKUP-20261014-R1; earlier bounded prompts, live timing pending")
 end
 
 -- Config change detection
@@ -233,25 +247,32 @@ local function InitItemDetection()
         return
     end
     moduleLog("INFO", "[Farm] Item_Spawns/Items folder found.")
+    detectionEpoch = detectionEpoch + 1
+    local epoch = detectionEpoch
+    local function detect(model, announce)
+        if not model:IsA("Model") then return end
+        local deadline = tick() + 2
+        -- Most spawns are ready immediately. Retry only incomplete replication.
+        while epoch == detectionEpoch and model.Parent == ItemSpawnFolder do
+            local info = GetItemInfo(model)
+            if info then
+                SpawnedItems[model] = info
+                if announce then moduleLog("INFO", "[Farm] Item detected: " .. info.Name) end
+                return
+            end
+            if tick() >= deadline then return end
+            task.wait(0.03)
+        end
+    end
     for _, model in pairs(ItemSpawnFolder:GetChildren()) do
         pcall(function()
             if model:IsA("Model") then
-                local info = GetItemInfo(model)
-                if info then SpawnedItems[model] = info end
+                task.spawn(function() pcall(detect, model, false) end)
             end
         end)
     end
     local connection = ItemSpawnFolder.ChildAdded:Connect(function(model)
-        task.wait(1)
-        pcall(function()
-            if model:IsA("Model") then
-                local info = GetItemInfo(model)
-                if info then
-                    SpawnedItems[model] = info
-                    moduleLog("INFO", "[Farm] Item detected: " .. info.Name)
-                end
-            end
-        end)
+        task.spawn(function() pcall(detect, model, true) end)
     end)
     table.insert(runtimeConnections, connection)
 end
@@ -259,14 +280,19 @@ end
 local SAFE_SPOT = CFrame.new(978, -42, -49)
 
 local function CollectItem(itemInfo, index, restockGuard)
+    local character = Player.Character
     local function allowed()
+        if Player.Character ~= character then return false end
         if restockGuard then return restockGuard() end
         return _config:Get("FarmEnabled") and not stopRequested
     end
     if not allowed() then return false end
 
     local hrp = _movement:GetCharacter("HumanoidRootPart")
-    if not hrp or not itemInfo then return false end
+    if not hrp or not itemInfo or not itemInfo.Model or not itemInfo.Model.Parent then
+        SpawnedItems[index] = nil
+        return false
+    end
     if _inventory:HasMax(itemInfo.Name) then
         SpawnedItems[index] = nil
         return false
@@ -274,46 +300,49 @@ local function CollectItem(itemInfo, index, restockGuard)
 
     local beforeCount = _inventory:Count(itemInfo.Name)
     local model = itemInfo.Model or index
-    local oldCF = hrp.CFrame
-    local bv = _movement:Freeze()
-    if restockGuard then restockFreeze = bv end
-    _movement:SetNoclip(true)
-    _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
-    task.wait(.35)
-
-    local fired = pcall(function()
-        if allowed() and itemInfo.ProximityPrompt and itemInfo.ProximityPrompt.Parent then
-            fireproximityprompt(itemInfo.ProximityPrompt)
+    local started, bv, requests = tick(), nil, 0
+    local ok, collected = pcall(function()
+        bv = _movement:Freeze()
+        if restockGuard then restockFreeze = bv end
+        _movement:SetNoclip(true)
+        _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
+        task.wait(0.05)
+        local function fire()
+            if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
+            requests = requests + 1
+            local fired, result = pcall(fireproximityprompt, itemInfo.ProximityPrompt)
+            return fired and result ~= false
         end
+        if not fire() then return false end
+        local deadline, disappeared = tick() + 1.5, nil
+        while tick() < deadline and allowed() do
+            if _inventory:Count(itemInfo.Name) > beforeCount then return true end
+            if not model.Parent then
+                disappeared = disappeared or tick()
+                -- Give a removed spawn a replication grace, but never call a
+                -- competitor's pickup our own successful acquisition.
+                if tick() - disappeared >= 0.35 then break end
+            elseif requests == 1 and tick() - started >= 0.35 then
+                -- Earlier input may precede position replication. One retry at
+                -- the old settle window retains compatibility without spam.
+                fire()
+            end
+            task.wait(0.025)
+        end
+        return _inventory:Count(itemInfo.Name) > beforeCount
     end)
+    if bv then pcall(function() _movement:Unfreeze(bv) end) end
+    if restockFreeze == bv then restockFreeze = nil end
+    if hrp.Parent and allowed() then pcall(function() _movement:Teleport(SAFE_SPOT) end) end
+    pcall(function() _movement:SetNoclip(false) end)
+    if not allowed() then return false end
+    if not ok then error("Item collection operation failed after cleanup", 0) end
 
-    local deadline = tick() + 1.5
-    local collected = false
-    while tick() < deadline and allowed() do
-        if _inventory:Count(itemInfo.Name) > beforeCount then
-            collected = true
-            break
-        end
-        if model and not model.Parent then
-            collected = true
-            break
-        end
-        task.wait(0.1)
-    end
-
-    _movement:Unfreeze(bv)
-    if oldCF and hrp.Parent and (not restockGuard or allowed()) then
-        _movement:Teleport(SAFE_SPOT)
-    end
-    task.wait(.15)
-    _movement:SetNoclip(false)
-
-    if restockGuard and not allowed() then return false end
-
-    if collected and fired then
+    if ok and collected then
         SpawnedItems[index] = nil
         lastItemTime = tick()
         moduleLog("INFO", "[Farm] Collected: " .. itemInfo.Name)
+        moduleLog("INFO", ("[Farm][PickupPerf] %s confirmed in %.3fs | prompts=%d"):format(itemInfo.Name, tick()-started, requests))
         return true
     end
 
@@ -324,8 +353,18 @@ local function CollectItem(itemInfo, index, restockGuard)
     else
         SpawnedItems[index] = nil
     end
-    moduleLog("WARN", "[Farm] Collection was not confirmed: " .. tostring(itemInfo.Name))
+    moduleLog(model and model.Parent and "WARN" or "INFO", "[Farm] Collection was not confirmed: " .. tostring(itemInfo.Name))
     return false
+end
+
+-- Avoid racing a manual Merchant sale against an in-flight pickup.
+-- The collection operation may yield while moving or waiting for a prompt.
+local function CollectItemFromCycle(itemInfo, index)
+    collectBusy = true
+    local ok, result = pcall(CollectItem, itemInfo, index)
+    collectBusy = false
+    if not ok then error(result, 0) end
+    return result
 end
 
 -- Helper to check if we should skip hopping (based solely on UI toggle)
@@ -339,7 +378,7 @@ local function shouldSkipHop()
 end
 
 local function DoHop()
-    if not _config:Get("FarmEnabled") then return end
+    if not _config:Get("FarmEnabled") or manualSellBusy then return end
 
     if shouldSkipHop() then
         moduleLog("INFO", "[Farm] DoHop aborted – skipping hop.")
@@ -347,9 +386,15 @@ local function DoHop()
     end
 
     moduleLog("INFO", "[Farm] Server dry — selling, buying, then hopping...")
+    if type(_serverHop.Prepare) == "function" then pcall(_serverHop.Prepare, _serverHop) end
     SellAllWithDiagnostics("server-hop")
+    if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _inventory:BuyLucky()
-    _serverHop:Hop()
+    if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
+    _serverHop:Hop(function()
+        return not stopRequested and not manualSellBusy and _config:Get("FarmEnabled")
+            and not _config:Get("AutoPrestige") and not _config:Get("StandFarmEnabled")
+    end)
     lastItemTime = tick()
 end
 
@@ -398,7 +443,7 @@ local function Startup()
 end
 
 local function shouldPauseCycle()
-    return stopRequested or restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+    return stopRequested or restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
 end
 
 -- Synchronous handoff from StandFarm. It never enables the normal phases,
@@ -411,7 +456,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     required=prestige and math.min(tonumber(required) or 1,_inventory:GetMax(name) or 1) or 1
     if required<1 or required>50 or required%1~=0 then return false,"Invalid restock amount" end
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
-    if restockBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
@@ -466,6 +511,10 @@ end
 local function runCycle()
     lastItemTime = tick()
     _config:SetMany({ Phase1Notified = false, Phase3Notified = false })
+    local lastWaitMessage
+    local function logWait(message)
+        if message ~= lastWaitMessage then moduleLog("INFO", message); lastWaitMessage=message end
+    end
 
     -- ===== PHASE 1 =====
     moduleLog("INFO", "[Farm] >>> Phase 1 started — farming normally.")
@@ -478,7 +527,7 @@ local function runCycle()
 
         for _, entry in ipairs(snapshot) do
             if shouldPauseCycle() or _inventory:ShouldStopPhase1() then break end
-            CollectItem(entry.ItemInfo, entry.Index)
+            CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
 
         if shouldPauseCycle() then return end
@@ -487,9 +536,9 @@ local function runCycle()
         if elapsed > NO_ITEM_TIMEOUT then
             if not _inventory:ShouldStopPhase1() then DoHop() end
         elseif #snapshot == 0 then
-            moduleLog("INFO", "[Farm] Waiting for items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
+            logWait("[Farm] Waiting for items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
         end
-        task.wait(1)
+        task.wait(0.1)
     end
 
     -- A pause/prestige transition is not a completed phase.
@@ -524,7 +573,7 @@ local function runCycle()
 
             for _, entry in ipairs(snapshot) do
                 if shouldPauseCycle() or _inventory:AllKeepItemsFull() then break end
-                CollectItem(entry.ItemInfo, entry.Index)
+                CollectItemFromCycle(entry.ItemInfo, entry.Index)
             end
 
             if shouldPauseCycle() then return end
@@ -536,9 +585,9 @@ local function runCycle()
                     DoHop()
                 end
             elseif #snapshot == 0 then
-                moduleLog("INFO", "[Farm] Waiting for keep-items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
+                logWait("[Farm] Waiting for keep-items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
             end
-            task.wait(1)
+            task.wait(0.1)
         end
 
         if shouldPauseCycle() then return end
@@ -585,9 +634,9 @@ local function runCycle()
         end
         for _, entry in ipairs(snapshot) do
             if shouldPauseCycle() then return end
-            CollectItem(entry.ItemInfo, entry.Index)
+            CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
-        task.wait(1)
+        task.wait(0.1)
     end
 end
 
@@ -616,7 +665,7 @@ function Farm:Start()
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and (restockBusy or prestigeSaleBusy or prestigePending() or not _config:Get("FarmEnabled")) do
+        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled")) do
             task.wait(0.5)
         end
         while not stopRequested and _config:Get("AutoPrestige") do
@@ -645,9 +694,57 @@ function Farm:Stop()
     moduleLog("INFO", "[Farm] Stop requested.")
 end
 
+-- Manual sale from the Items tab. Never hops, buys, or permanently changes
+-- FarmEnabled/AutoSell. Preserve item filter selection and use the same Merchant.
+function Farm:SellNow()
+    if not (_config and _inventory) then return false, "Farm modules not initialized" end
+    if manualSellBusy or sellBusy then return false, "A Merchant sale is already running" end
+    if stopRequested or restockBusy or startupBusy or prestigeSaleBusy or prestigePending()
+        or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+        or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then
+        return false, "Another farm or prestige operation is active; stop it first"
+    end
+
+    -- Set the flag before yielding, so the regular worker stops starting new
+    -- pickups. Wait for an already-started pickup to release its movement.
+    manualSellBusy = true
+    moduleLog("INFO", "[Farm][SellNow] Manual sale requested from Items tab.")
+    local deadline = tick() + 8
+    while collectBusy and tick() < deadline do task.wait(0.05) end
+    if collectBusy then
+        manualSellBusy = false
+        moduleLog("WARN", "[Farm][SellNow] Pickup still active; sale safely skipped.")
+        return false, "Wait for item collection to finish and try again"
+    end
+
+    -- Other modes can change while waiting for collection.
+    if restockBusy or prestigeSaleBusy or prestigePending()
+        or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+        or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then
+        manualSellBusy = false
+        return false, "Another operation started; manual sale cancelled"
+    end
+
+    local ok, sold, soldTypes, failedTypes, reason = pcall(SellAllWithDiagnostics, "manual", true)
+    lastItemTime = tick() -- A completed manual sale should not immediately trigger a server hop.
+    manualSellBusy = false
+
+    if not ok then
+        moduleLog("WARN", "[Farm][SellNow] Merchant failed: " .. tostring(sold))
+        return false, "Merchant error; inspect Console"
+    end
+    if sold then
+        moduleLog("INFO", ("[Farm][SellNow] Completed: %d type(s) sold, %d failed."):format(soldTypes or 0, failedTypes or 0))
+        return true, ("Sold %d item type(s)%s. No server hop."):format(
+            soldTypes or 0, (failedTypes or 0) > 0 and (", " .. tostring(failedTypes) .. " failed") or "")
+    end
+    moduleLog("INFO", "[Farm][SellNow] No sale confirmed: " .. tostring(reason or "nothing to sell"))
+    return false, reason or "No sale confirmed"
+end
+
 -- Exclusive delegation to existing Merchant; normal Item Farm remains paused.
 function Farm:PrestigeSell(ownerActive,sell)
-    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or stopRequested
+    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy or stopRequested
         or type(ownerActive)~="function" or not ownerActive() or type(sell)~="function"
         or not _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
         or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then return false,"Sale ownership unavailable" end
@@ -659,13 +756,14 @@ function Farm:PrestigeSell(ownerActive,sell)
     prestigeSaleBusy=false
     return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
 end
-function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy end
+function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy end
 
 function Farm:IsRunning()
     return isRunning
 end
 
 function Farm:Destroy()
+    detectionEpoch = detectionEpoch + 1
     self:Stop()
     for _, connection in ipairs(runtimeConnections) do
         pcall(function() connection:Disconnect() end)

@@ -61,6 +61,9 @@ class RibRestockTests(unittest.TestCase):
         function Farm:_setBusyForTest(value) cycleBusy=value end
         function Farm:_queueForTest(model) SpawnedItems[model]=GetItemInfo(model) end
         function Farm:_skipStartupForTest() runtimeSetup=true end
+        function Farm:_collectForTest(info,index,guard) return CollectItem(info,index,guard) end
+        function Farm:_detectForTest() return InitItemDetection() end
+        function Farm:_queuedForTest(model) return SpawnedItems[model]~=nil end
         return Farm''')
         self.lua.globals().items = self.lua.execute(source)
         self.run_lua('''
@@ -159,7 +162,12 @@ class RibRestockTests(unittest.TestCase):
         self.install_item_farm()
         self.run_lua('''
         removeTool("Mysterious Arrow"); addSpawn("Mysterious Arrow"); values.StandFarmAutoRestock=true
-        after(1.65,function() farm:Stop(); stoppedMoves=safeMoves; stoppedLogs=#logs end)
+        local move=movement.Teleport
+        function movement:Teleport(cf)
+            local result=move(self,cf)
+            if cf.X==20 then after(0.025,function() farm:Stop(); stoppedMoves=safeMoves; stoppedLogs=#logs end) end
+            return result
+        end
         assert(farm:Start()); advance(12)
         assert(prompts==0 and activations==0 and safeMoves==stoppedMoves and #logs==stoppedLogs)
         assert(freezes==unfreezes and noclip==false)
@@ -180,7 +188,7 @@ class RibRestockTests(unittest.TestCase):
         removeTool("Mysterious Arrow"); addSpawn("Mysterious Arrow"); values.StandFarmAutoRestock=true
         onPrompt=function() end
         assert(farm:Start()); advance(30)
-        assert(prompts==8 and activations==0 and not farm:IsRunning() and freezes==unfreezes)
+        assert(prompts==16 and activations==0 and not farm:IsRunning() and freezes==unfreezes)
         ''')
 
     def test_competing_farm_character_death_and_dialogue_cancel_collection(self):
@@ -189,7 +197,12 @@ class RibRestockTests(unittest.TestCase):
                 self.setUp(); self.install_item_farm()
                 self.run_lua('''
                 removeTool("Mysterious Arrow"); addSpawn("Mysterious Arrow"); values.StandFarmAutoRestock=true
-                after(1.65,function() ''' + action + ''' end)
+                local move=movement.Teleport
+                function movement:Teleport(cf)
+                    local result=move(self,cf)
+                    if cf.X==20 then after(0.025,function() ''' + action + ''' end) end
+                    return result
+                end
                 assert(farm:Start()); advance(10)
                 assert(prompts==0 and activations==0 and not farm:IsRunning() and freezes==unfreezes)
                 ''')
@@ -244,16 +257,17 @@ class RibRestockTests(unittest.TestCase):
         removeTool("Mysterious Arrow"); values.FarmEnabled=true
         local gold=addSpawn("Gold Coin"); items:_queueForTest(gold); items:_skipStartupForTest()
         onPrompt=function(prompt)
-            if prompt.ObjectText=="Mysterious Arrow" then assert(unfreezes==1); restockPromptAt=now end
+            if prompt.ObjectText=="Gold Coin" then collectingGold=true; task.wait(0.3); collectingGold=false end
+            if prompt.ObjectText=="Mysterious Arrow" then assert(not collectingGold and unfreezes==1); restockPromptAt=now end
             makeTool(prompt.ObjectText); prompt.Parent.Parent=nil
         end
         task.spawn(function() items:Start() end)
-        after(0.65,function()
+        after(0.1,function()
             values.FarmEnabled=false; values.StandFarmEnabled=true; addSpawn("Mysterious Arrow")
             task.spawn(function() restored=items:Restock("Mysterious Arrow",function() return true end) end)
         end)
         advance(4)
-        assert(restored and prompts==2 and restockPromptAt>1.5 and freezes==unfreezes)
+        assert(restored and prompts==2 and restockPromptAt>0.35 and freezes==unfreezes)
         items:Stop(); advance(1)
         ''')
 

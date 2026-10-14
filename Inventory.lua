@@ -65,6 +65,7 @@ function Inventory:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _config   = Modules.Config
     _movement = Modules.Movement
+    moduleLog("INFO", "[Inventory] Build SALE-20261014-R1; cached Merchant lookup, live timing pending")
 
     -- Detect 2x gamepass and double all item caps
     pcall(function()
@@ -234,19 +235,58 @@ local function getDialogueGui()
     return nil
 end
 
+local dialogueButtonIndex
+local function clearDialogueButtonIndex()
+    if not dialogueButtonIndex then return end
+    for _, connection in ipairs(dialogueButtonIndex.connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    dialogueButtonIndex = nil
+end
+
+local function dialogueCandidates(dlg)
+    if dialogueButtonIndex and dialogueButtonIndex.gui ~= dlg then clearDialogueButtonIndex() end
+    if not dialogueButtonIndex then
+        local index = {gui=dlg, dirty=true, buttons={}, connections={}}
+        -- If this client cannot observe tree changes, preserve the broad lookup.
+        local ok = pcall(function()
+            for _, signal in ipairs({dlg.DescendantAdded, dlg.DescendantRemoving}) do
+                table.insert(index.connections, signal:Connect(function(object)
+                    if object:IsA("GuiButton") then index.dirty=true end
+                end))
+            end
+        end)
+        if not ok or #index.connections ~= 2 then
+            for _, connection in ipairs(index.connections) do pcall(function() connection:Disconnect() end) end
+            return dlg:GetDescendants()
+        end
+        dialogueButtonIndex = index
+    end
+    if dialogueButtonIndex.dirty then
+        local buttons = {}
+        -- Scan the entire supported layout once, including options outside Options.
+        for _, object in ipairs(dlg:GetDescendants()) do
+            if object:IsA("GuiButton") then buttons[#buttons+1]=object end
+        end
+        dialogueButtonIndex.buttons, dialogueButtonIndex.dirty = buttons, false
+    end
+    return dialogueButtonIndex.buttons
+end
+
 local function getVisibleDialogueButtons()
     local dlg = getDialogueGui()
-    if not dlg then return {} end
+    if not dlg then clearDialogueButtonIndex(); return {} end
 
     local buttons = {}
-    for _, obj in ipairs(dlg:GetDescendants()) do
+    for _, obj in ipairs(dialogueCandidates(dlg)) do
         if obj:IsA("GuiButton") and isActuallyVisible(obj) then
             local text = getButtonText(obj)
-            if normalizeText(text) ~= "" then
+            local normalized = normalizeText(text)
+            if normalized ~= "" then
                 table.insert(buttons, {
                     Button = obj,
                     Text = text,
-                    Normalized = normalizeText(text),
+                    Normalized = normalized,
                 })
             end
         end
@@ -364,6 +404,7 @@ local function suppressDialogueRendering()
 end
 
 local function restoreDialogueRendering()
+    clearDialogueButtonIndex()
     for dlg, state in pairs(suppressedDialogueGuis) do
         if state and state.Connection then
             pcall(function() state.Connection:Disconnect() end)
@@ -617,28 +658,17 @@ if debug then
 end
 
 local _cachedDialogueType = nil
+-- Negative-cache failed GC discoveries across Merchant items. Successful
+-- closures still follow the original fast path and are never suppressed.
+local _dialogueTypeMissRetryAt = 0
+local _line1982MissRetryAt = 0
 local FINAL_SMALL_CONSTANT_MAX = 2.0
 -- Performance guardrails for Delta/mobile. The FINAL route stays fast, but avoids
 -- full getgc scans and deep patch work every rendered frame.
-local FINAL_FORCE_INTERVAL = 0.02
+-- The FINAL force loop yields one scheduler frame instead of a fixed delay.
 local FINAL_GC_RESCAN_INTERVAL = 0.035
-
--- Experimental compatibility guard for executors reporting themselves as Real Injector.
--- getgc(true) is a synchronous full heap scan and can freeze on some executors.
--- Keep Delta/other existing Zero Delay behavior unchanged until live logs confirm a fix.
-local function identifySellExecutor()
-    if type(identifyexecutor) ~= "function" then return "unknown" end
-    local ok, name, version = pcall(identifyexecutor)
-    if not ok then return "unknown" end
-    return tostring(name or "unknown") .. (version and (" " .. tostring(version)) or "")
-end
-
-local SELL_EXECUTOR_NAME = identifySellExecutor()
-local _realName = SELL_EXECUTOR_NAME:lower()
-local SKIP_HEAVY_GC = _realName == "real"
-    or _realName:match("^real[%s%-%_]") ~= nil
-    or _realName:find("real injector", 1, true) ~= nil
-    or _realName:find("realexecutor", 1, true) ~= nil
+local FINAL_GC_MISS_RETRY_INTERVAL = 6.0 -- Back off after a full miss; stalled stages can still use compatibility fallbacks.
+local FINAL_DEEP_SCAN_AFTER = 0.24 -- Prefer normal dialogue signals before an expensive GC search.
 
 local function getIndexedUpvalue(fn, index)
     if type(_rawGetUpvalue) ~= "function" or type(fn) ~= "function" then
@@ -677,10 +707,17 @@ local function findLiveDialogueType()
     if _cachedDialogueType and isClientFunctionsLine(_cachedDialogueType, 2035) then
         return _cachedDialogueType
     end
-    if type(_rawGetGC) ~= "function" then return nil end
+    -- isClientFunctionsLine relies on debug.info; without it a GC scan
+    -- cannot identify the target and only causes unnecessary client stalls.
+    if type(_rawGetGC) ~= "function"
+        or not (debug and type(debug.info) == "function") then return nil end
+    if tick() < _dialogueTypeMissRetryAt then return nil end
 
     local ok, objects = pcall(_rawGetGC, true)
-    if not ok or type(objects) ~= "table" then return nil end
+    if not ok or type(objects) ~= "table" then
+        _dialogueTypeMissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+        return nil
+    end
 
     local fallback = nil
     for _, obj in pairs(objects) do
@@ -695,6 +732,9 @@ local function findLiveDialogueType()
     end
 
     _cachedDialogueType = fallback
+    if not fallback then
+        _dialogueTypeMissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+    end
     return fallback
 end
 
@@ -703,8 +743,7 @@ local function hasInternalDialogueStateSupport()
 end
 
 local function hasFinalZeroDelaySupport()
-    return not SKIP_HEAVY_GC
-        and hasInternalDialogueStateSupport()
+    return hasInternalDialogueStateSupport()
         and type(_rawGetUpvalue) == "function"
         and type(_rawGetGC) == "function"
 end
@@ -735,9 +774,10 @@ local function getDialogueStateSignature()
     return table.concat(parts, " | "), buttons
 end
 
-local function findDialogueButtonByOptionName(wantedName)
-    for _, entry in ipairs(getVisibleDialogueButtons()) do
-        if optionNameForButton(entry.Button) == wantedName then
+local function findDialogueButtonByOptionName(wantedName, readyButtons)
+    for _, entry in ipairs(readyButtons or getVisibleDialogueButtons()) do
+        if entry.Button.Parent and isActuallyVisible(entry.Button)
+            and optionNameForButton(entry.Button) == wantedName then
             return entry.Button, entry
         end
     end
@@ -763,8 +803,8 @@ local function getMouseClickCallback(btn)
     return nil
 end
 
-local function injectDialogueOption(wantedName)
-    local btn = findDialogueButtonByOptionName(wantedName)
+local function injectDialogueOption(wantedName, readyButtons)
+    local btn = findDialogueButtonByOptionName(wantedName, readyButtons)
     if not btn then
         return false, "option " .. tostring(wantedName) .. " not found"
     end
@@ -824,6 +864,7 @@ local function newFinalState()
         richObjects = 0,
         constantsZeroed = 0,
         gcScans = 0,
+        gcMissSkips = 0,
     }
 end
 
@@ -977,7 +1018,8 @@ local function fireButtonSignal(button, state)
 end
 
 local function findFresh1982Closure(state)
-    if type(_rawGetGC) ~= "function" then return nil end
+    if type(_rawGetGC) ~= "function"
+        or not (debug and type(debug.info) == "function") then return nil end
 
     -- Reuse the current stage closure. getgc(true) is one of the most expensive
     -- executor operations here, so only scan again after the stage changes or
@@ -987,6 +1029,14 @@ local function findFresh1982Closure(state)
     end
 
     local now = tick()
+    -- On Delta, line 1982 is frequently unavailable even though the real
+    -- dialogue signals work. Do not rescan the entire GC every force tick
+    -- after a confirmed miss. Recheck after a short cooldown for compatibility
+    -- with later dialogue stages and game updates.
+    if now < _line1982MissRetryAt then
+        if state then state.gcMissSkips = (state.gcMissSkips or 0) + 1 end
+        return nil
+    end
     if state and (now - (state.lastGCScan or 0)) < FINAL_GC_RESCAN_INTERVAL then
         return nil
     end
@@ -996,7 +1046,10 @@ local function findFresh1982Closure(state)
     end
 
     local ok, objects = pcall(_rawGetGC, true)
-    if not ok or type(objects) ~= "table" then return nil end
+    if not ok or type(objects) ~= "table" then
+        _line1982MissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+        return nil
+    end
 
     local best, fallback = nil, nil
     local bestTimestamp = -math.huge
@@ -1014,6 +1067,9 @@ local function findFresh1982Closure(state)
 
     local found = best or fallback
     if state then state.active1982 = found end
+    if not found then
+        _line1982MissRetryAt = tick() + FINAL_GC_MISS_RETRY_INTERVAL
+    end
     return found
 end
 
@@ -1038,21 +1094,24 @@ local function patchAndInvoke1982(state)
     return true
 end
 
-local function forceDialogueAdvance(dialogueGui, state)
+local function forceDialogueAdvance(dialogueGui, state, deepScanAllowed)
     if not dialogueGui then return end
     suppressDialogueRendering()
 
     local clickContinue = state.clickContinue
-    if not clickContinue or not clickContinue.Parent then
+    if not clickContinue or not clickContinue.Parent or not clickContinue:IsDescendantOf(dialogueGui) then
         clickContinue = findClickContinue(dialogueGui)
         state.clickContinue = clickContinue
     end
     if clickContinue then fireButtonSignal(clickContinue, state) end
-    patchAndInvoke1982(state)
+    -- In the observed Delta sessions the signals complete sales, while
+    -- line-1982 cannot be found. Search the GC only when the stage stalls.
+    if deepScanAllowed then patchAndInvoke1982(state) end
 end
 
 local function waitForFinalStage(previousSignature, timeout, state)
-    local deadline = tick() + (timeout or 1.35)
+    local startedAt = tick()
+    local deadline = startedAt + (timeout or 1.35)
     local loops = 0
 
     while tick() < deadline do
@@ -1060,13 +1119,13 @@ local function waitForFinalStage(previousSignature, timeout, state)
         local gui = getDialogueGui()
         if gui then
             suppressDialogueRendering()
-            local sig = select(1, getDialogueStateSignature())
+            local sig, buttons = getDialogueStateSignature()
             if sig ~= "" and sig ~= previousSignature then
-                return gui, sig, loops
+                return gui, sig, loops, buttons
             end
-            forceDialogueAdvance(gui, state)
+            forceDialogueAdvance(gui, state, tick() - startedAt >= FINAL_DEEP_SCAN_AFTER)
         end
-        task.wait(FINAL_FORCE_INTERVAL)
+        task.wait()
     end
     return nil, nil, loops
 end
@@ -1118,13 +1177,16 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
     if tool.Parent ~= char then
         return false, 0, "item was not held by character"
     end
-    task.wait(0.08)
+    -- equipSellTool already waits for the tool to appear in Character.
+    -- Keep a small replication window; avoid paying a second 80 ms delay.
+    task.wait(0.02)
 
     closeDialogueIfOpen()
     restoreDialogueRendering()
 
     local state = newFinalState()
     local startedAt = tick()
+    local stageWaitMs = {}
     installFastDialogueWait(state)
 
     local okRun, soldAmount, reason = xpcall(function()
@@ -1139,12 +1201,14 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
         local previousSignature = nil
 
         for stage, optionName in ipairs(desired) do
-            local _, signature, loops = waitForFinalStage(previousSignature, 1.35, state)
+            local stageStartedAt = tick()
+            local _, signature, loops, buttons = waitForFinalStage(previousSignature, 1.35, state)
+            stageWaitMs[#stageWaitMs + 1] = math.floor((tick() - stageStartedAt) * 1000 + 0.5)
             if not signature then
                 return 0, "stage " .. tostring(stage) .. " timed out"
             end
 
-            local selected, selectReason = injectDialogueOption(optionName)
+            local selected, selectReason = injectDialogueOption(optionName, buttons)
             if not selected then
                 return 0, "stage " .. tostring(stage) .. " injection failed: " .. tostring(selectReason)
             end
@@ -1181,9 +1245,10 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     if soldAmount and soldAmount > 0 then
         moduleLog("INFO", string.format(
-            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d",
+            "[Inventory][ZeroDelay] ✅ Sold %dx %s in %.3fs | signals=%d direct1982=%d rich=%d constants=%d gcScans=%d gcMissSkips=%d stageWaitMs=%s",
             soldAmount, itemName, tick() - startedAt, state.signalFires, state.direct1982Calls,
-            state.richObjects, state.constantsZeroed, state.gcScans or 0
+            state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcMissSkips or 0,
+            table.concat(stageWaitMs, ",")
         ))
         return true, soldAmount
     end
@@ -1434,15 +1499,20 @@ end
 -- 1) Internal Merchant state injection: hidden Option1 > Option1 > Option6.
 -- 2) If unsupported/failed, use adaptive DialogueGui fallback.
 -- =====================
-function Inventory:SellAll()
-    if not _config:Get("FarmEnabled") then return end
+-- Manual invocation uses the exact same Merchant routes, but does not require
+-- the continuous Farm and Auto Sell toggles. All SellItems filters still apply.
+function Inventory:SellAll(manualRequest)
+    local isManual = manualRequest == true
+    if not isManual and not _config:Get("FarmEnabled") then
+        return false, 0, 0, "Farm disabled"
+    end
     if self:IsMoneyMaxed() then
         moduleLog("INFO", "[Inventory] Money already maxed — skipping sell.")
-        return
+        return false, 0, 0, "Money already maxed"
     end
-    if not _config:Get("AutoSell") then
+    if not isManual and not _config:Get("AutoSell") then
         moduleLog("INFO", "[Inventory] AutoSell disabled — skipping sell.")
-        return
+        return false, 0, 0, "Auto Sell disabled"
     end
 
     local sellItems = _config:GetSellItems()
@@ -1456,7 +1526,7 @@ function Inventory:SellAll()
 
     if #toSell == 0 then
         moduleLog("INFO", "[Inventory] No items to sell.")
-        return
+        return false, 0, 0, "No selected items to sell"
     end
 
     table.sort(toSell)
@@ -1468,13 +1538,6 @@ function Inventory:SellAll()
     local zeroDelaySupported = hasFinalZeroDelaySupport()
     local internalSupported = hasInternalDialogueStateSupport()
     local fallbackFastMode = hasInternalClickSupport()
-
-    moduleLog("INFO", "[Inventory][Compatibility] Executor=" .. SELL_EXECUTOR_NAME
-        .. " | ZeroDelay=" .. tostring(zeroDelaySupported)
-        .. " | Internal=" .. tostring(internalSupported))
-    if SKIP_HEAVY_GC then
-        moduleLog("WARN", "[Inventory][Compatibility] Real Injector detected: skipping getgc(true) Zero Delay scans; trying existing hidden internal route.")
-    end
 
     if zeroDelaySupported then
         moduleLog("INFO", "[Inventory][ZeroDelay] FINAL Merchant route available — target is sub-1s hidden selling.")
@@ -1548,30 +1611,7 @@ function Inventory:SellAll()
     closeDialogueIfOpen()
     restoreDialogueRendering()
     moduleLog("INFO", "[Inventory] SellAll done — Types sold: " .. soldTypes .. " | Failed: " .. failedTypes)
-end
-
--- Prevent duplicate calls (e.g. overlapping cycles or manual triggers) from
--- manipulating the same Merchant dialogue concurrently.
--- The existing, proven selling implementation above is deliberately unchanged.
-local _sellAllBusy = false
-local _sellAllOriginal = Inventory.SellAll
-function Inventory:SellAll()
-    if _sellAllBusy then
-        moduleLog("WARN", "[Inventory][SellGuard] Duplicate SellAll call skipped.")
-        return false
-    end
-
-    _sellAllBusy = true
-    local ok, result = pcall(_sellAllOriginal, self)
-    _sellAllBusy = false
-
-    if not ok then
-        moduleLog("ERROR", "[Inventory][SellGuard] SellAll raised an error: " .. tostring(result))
-        pcall(closeDialogueIfOpen)
-        pcall(restoreDialogueRendering)
-        return false
-    end
-    return true
+    return soldTypes > 0, soldTypes, failedTypes, soldTypes > 0 and nil or "No sale confirmed"
 end
 
 -- =====================

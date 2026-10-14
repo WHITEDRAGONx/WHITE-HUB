@@ -32,9 +32,9 @@ def preserve_public_additions(path, generated):
 
 def build():
     result = {name: (ROOT / name).read_text() for name in FILES}
-    # Merchant is protected: retain the existing public version, not the dev variant.
-    result['Inventory.lua'] = existing_public('Inventory.lua')
-    result['Farm.lua'] = existing_public('Farm.lua')
+    # Owner-authorized performance files retain the latest public sale guards in
+    # dev; do not silently republish the old Merchant/pickup baseline.
+    result['Inventory.lua'] = (ROOT / 'Inventory.lua').read_text()
     main = (ROOT / 'DevMain.lua').read_text()
     main = main[main.index('-- ====================='):]
     main = main.replace('dev/2026-10-10-autosell-compat/', 'main/')
