@@ -1,5 +1,24 @@
 # Changelog
 
+## Sale/pickup/hop performance beta — 2026-10-14 (R1)
+
+- Retains the proven Merchant FINAL sequence, callback handling, restoration,
+  GC backoff and inventory confirmation. Live dialogue button indexing preserves
+  broad/renamed layouts while avoiding repeated walks through animated text.
+- FINAL advancement yields one frame; the ready option lookup is reused.
+- Ready item spawns are queued immediately; partial models have bounded retries.
+  Pickup begins after 50 ms and can retry once at the old position-settle window.
+  Inventory increase is required; another player's despawn is not our collection.
+- Removes the fixed 150 ms post-pickup wait, uses 100 ms normal cycles and an
+  eight-second normal dry-server timer. Restock interaction/time limits retained;
+  each of its eight collection attempts can issue at most two prompt requests.
+- A short-lived server-list cache is prepared during automatic sales and reused
+  once by Hop, with cancellation, destination and duplicate-request guards.
+- Preserves SELL NOW/SellPerf and public Console diagnostics, synchronized into
+  dev. Builds: SALE-20261014-R1 and PICKUP-20261014-R1.
+- Offline simulations only. Actual 0.70s-or-faster sale, Velocity prompt support
+  and competitive pickup/hop performance are not established without live logs.
+
 ## Stand/Shiny/Rib webhook — 2026-10-13 (Stand R11)
 
 - Reuses the configured Webhook URL for one terminal notification: desired Stand,

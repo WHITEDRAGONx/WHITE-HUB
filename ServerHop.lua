@@ -16,6 +16,8 @@ local _movement = nil
 local _config = nil
 local _kickConnection = nil
 local hopBusy = false
+local preparedSite, preparedURL, preparedAt = nil, nil, 0
+local prepareBusy, prepareEpoch = false, 0
 
 local AllIDs = {}
 local foundAnything = ""
@@ -44,6 +46,7 @@ local function saveIds()
 end
 
 local function resetHourlyCacheIfNeeded()
+    actualHour = os.date("!*t").hour
     if tonumber(AllIDs[1]) ~= tonumber(actualHour) then
         AllIDs = { actualHour }
         pcall(function()
@@ -53,20 +56,36 @@ local function resetHourlyCacheIfNeeded()
     end
 end
 
+local function serverListURL()
+    local url = "https://games.roblox.com/v1/games/" .. PlaceID .. "/servers/Public?sortOrder=Asc&limit=100"
+    if foundAnything ~= "" then url = url .. "&cursor=" .. foundAnything end
+    return url
+end
+
 local function TPReturner(canContinue, onDestination)
     if canContinue and not canContinue() then return false end
     resetHourlyCacheIfNeeded()
 
-    local url = "https://games.roblox.com/v1/games/" .. PlaceID .. "/servers/Public?sortOrder=Asc&limit=100"
-    if foundAnything ~= "" then
-        url = url .. "&cursor=" .. foundAnything
+    local url = serverListURL()
+    local waitDeadline = tick() + 5
+    while prepareBusy and tick() < waitDeadline do
+        if canContinue and not canContinue() then return false end
+        task.wait(0.03)
     end
-
-    local Site = HttpService:JSONDecode(game:HttpGet(url))
+    if prepareBusy then return false end -- Never duplicate an in-flight API request.
+    local Site
+    if preparedSite and preparedURL == url and tick() - preparedAt <= 15 then
+        Site = preparedSite
+        preparedSite, preparedURL = nil, nil
+    else
+        Site = HttpService:JSONDecode(game:HttpGet(url))
+    end
     -- HttpGet can yield: a Stop during the request must prevent the teleport.
     if canContinue and not canContinue() then return false end
     if Site.nextPageCursor and Site.nextPageCursor ~= "null" then
         foundAnything = Site.nextPageCursor
+    else
+        foundAnything = ""
     end
 
     for _, server in ipairs(Site.data or {}) do
@@ -80,7 +99,7 @@ local function TPReturner(canContinue, onDestination)
                 end
             end
 
-            if not seen and (not canContinue or id ~= tostring(game.JobId)) then
+            if not seen and id ~= tostring(game.JobId) then
                 if canContinue and not canContinue() then return false end
                 table.insert(AllIDs, id)
                 saveIds()
@@ -106,6 +125,28 @@ local function moduleLog(level, ...)
     else
         _rawPrint(...)
     end
+end
+
+-- Fetch one read-only page while Merchant work is already running. A guarded
+-- Hop still validates state/destination before teleport; no automatic transfer.
+function ServerHop:Prepare()
+    if prepareBusy or hopBusy or (_config and _config:Get("StayInPrivateServer")) then return false end
+    resetHourlyCacheIfNeeded()
+    local url = serverListURL()
+    if preparedSite and preparedURL == url and tick()-preparedAt <= 15 then return true end
+    prepareBusy = true
+    local epoch = prepareEpoch
+    task.spawn(function()
+        local ok, site = pcall(function() return HttpService:JSONDecode(game:HttpGet(url)) end)
+        if epoch ~= prepareEpoch then return end
+        prepareBusy = false
+        if ok and type(site) == "table" and type(site.data) == "table" then
+            preparedSite, preparedURL, preparedAt = site, url, tick()
+        else
+            moduleLog("WARN", "[ServerHop] Server list preparation failed; Hop will use its normal request")
+        end
+    end)
+    return true
 end
 
 function ServerHop:Init(Modules)
@@ -146,16 +187,20 @@ function ServerHop:Hop(canContinue, onDestination)
 
     moduleLog("INFO", "[ServerHop] Hopping to a new server...")
     hopBusy = true
+    local epoch = prepareEpoch
+    local function permitted()
+        return epoch == prepareEpoch and (not canContinue or canContinue())
+    end
     local ok, result = pcall(function()
-        if TPReturner(canContinue,onDestination) then return true end
-        if canContinue and not canContinue() then return false end
-        if foundAnything ~= "" then return TPReturner(canContinue,onDestination) end
+        if TPReturner(permitted,onDestination) then return true end
+        if not permitted() then return false end
+        if foundAnything ~= "" then return TPReturner(permitted,onDestination) end
         return false
     end)
     hopBusy = false
 
-    if _movement and not canContinue then
-        task.delay(3, function() _movement:FixCamera() end)
+    if _movement and not canContinue and epoch == prepareEpoch then
+        task.delay(3, function() if epoch == prepareEpoch then _movement:FixCamera() end end)
     end
 
     if not ok then moduleLog("WARN", "[ServerHop] Hop failed: " .. tostring(result)) end
@@ -172,6 +217,8 @@ function ServerHop:Rejoin()
 end
 
 function ServerHop:Destroy()
+    prepareEpoch = prepareEpoch + 1
+    prepareBusy, preparedSite, preparedURL = false, nil, nil
     if _kickConnection then
         pcall(function() _kickConnection:Disconnect() end)
         _kickConnection = nil

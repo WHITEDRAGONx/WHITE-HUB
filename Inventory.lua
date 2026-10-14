@@ -65,6 +65,7 @@ function Inventory:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _config   = Modules.Config
     _movement = Modules.Movement
+    moduleLog("INFO", "[Inventory] Build SALE-20261014-R1; cached Merchant lookup, live timing pending")
 
     -- Detect 2x gamepass and double all item caps
     pcall(function()
@@ -234,19 +235,58 @@ local function getDialogueGui()
     return nil
 end
 
+local dialogueButtonIndex
+local function clearDialogueButtonIndex()
+    if not dialogueButtonIndex then return end
+    for _, connection in ipairs(dialogueButtonIndex.connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    dialogueButtonIndex = nil
+end
+
+local function dialogueCandidates(dlg)
+    if dialogueButtonIndex and dialogueButtonIndex.gui ~= dlg then clearDialogueButtonIndex() end
+    if not dialogueButtonIndex then
+        local index = {gui=dlg, dirty=true, buttons={}, connections={}}
+        -- If this client cannot observe tree changes, preserve the broad lookup.
+        local ok = pcall(function()
+            for _, signal in ipairs({dlg.DescendantAdded, dlg.DescendantRemoving}) do
+                table.insert(index.connections, signal:Connect(function(object)
+                    if object:IsA("GuiButton") then index.dirty=true end
+                end))
+            end
+        end)
+        if not ok or #index.connections ~= 2 then
+            for _, connection in ipairs(index.connections) do pcall(function() connection:Disconnect() end) end
+            return dlg:GetDescendants()
+        end
+        dialogueButtonIndex = index
+    end
+    if dialogueButtonIndex.dirty then
+        local buttons = {}
+        -- Scan the entire supported layout once, including options outside Options.
+        for _, object in ipairs(dlg:GetDescendants()) do
+            if object:IsA("GuiButton") then buttons[#buttons+1]=object end
+        end
+        dialogueButtonIndex.buttons, dialogueButtonIndex.dirty = buttons, false
+    end
+    return dialogueButtonIndex.buttons
+end
+
 local function getVisibleDialogueButtons()
     local dlg = getDialogueGui()
-    if not dlg then return {} end
+    if not dlg then clearDialogueButtonIndex(); return {} end
 
     local buttons = {}
-    for _, obj in ipairs(dlg:GetDescendants()) do
+    for _, obj in ipairs(dialogueCandidates(dlg)) do
         if obj:IsA("GuiButton") and isActuallyVisible(obj) then
             local text = getButtonText(obj)
-            if normalizeText(text) ~= "" then
+            local normalized = normalizeText(text)
+            if normalized ~= "" then
                 table.insert(buttons, {
                     Button = obj,
                     Text = text,
-                    Normalized = normalizeText(text),
+                    Normalized = normalized,
                 })
             end
         end
@@ -364,6 +404,7 @@ local function suppressDialogueRendering()
 end
 
 local function restoreDialogueRendering()
+    clearDialogueButtonIndex()
     for dlg, state in pairs(suppressedDialogueGuis) do
         if state and state.Connection then
             pcall(function() state.Connection:Disconnect() end)
@@ -624,7 +665,7 @@ local _line1982MissRetryAt = 0
 local FINAL_SMALL_CONSTANT_MAX = 2.0
 -- Performance guardrails for Delta/mobile. The FINAL route stays fast, but avoids
 -- full getgc scans and deep patch work every rendered frame.
-local FINAL_FORCE_INTERVAL = 0.02
+-- The FINAL force loop yields one scheduler frame instead of a fixed delay.
 local FINAL_GC_RESCAN_INTERVAL = 0.035
 local FINAL_GC_MISS_RETRY_INTERVAL = 6.0 -- Back off after a full miss; stalled stages can still use compatibility fallbacks.
 local FINAL_DEEP_SCAN_AFTER = 0.24 -- Prefer normal dialogue signals before an expensive GC search.
@@ -733,9 +774,10 @@ local function getDialogueStateSignature()
     return table.concat(parts, " | "), buttons
 end
 
-local function findDialogueButtonByOptionName(wantedName)
-    for _, entry in ipairs(getVisibleDialogueButtons()) do
-        if optionNameForButton(entry.Button) == wantedName then
+local function findDialogueButtonByOptionName(wantedName, readyButtons)
+    for _, entry in ipairs(readyButtons or getVisibleDialogueButtons()) do
+        if entry.Button.Parent and isActuallyVisible(entry.Button)
+            and optionNameForButton(entry.Button) == wantedName then
             return entry.Button, entry
         end
     end
@@ -761,8 +803,8 @@ local function getMouseClickCallback(btn)
     return nil
 end
 
-local function injectDialogueOption(wantedName)
-    local btn = findDialogueButtonByOptionName(wantedName)
+local function injectDialogueOption(wantedName, readyButtons)
+    local btn = findDialogueButtonByOptionName(wantedName, readyButtons)
     if not btn then
         return false, "option " .. tostring(wantedName) .. " not found"
     end
@@ -1077,13 +1119,13 @@ local function waitForFinalStage(previousSignature, timeout, state)
         local gui = getDialogueGui()
         if gui then
             suppressDialogueRendering()
-            local sig = select(1, getDialogueStateSignature())
+            local sig, buttons = getDialogueStateSignature()
             if sig ~= "" and sig ~= previousSignature then
-                return gui, sig, loops
+                return gui, sig, loops, buttons
             end
             forceDialogueAdvance(gui, state, tick() - startedAt >= FINAL_DEEP_SCAN_AFTER)
         end
-        task.wait(FINAL_FORCE_INTERVAL)
+        task.wait()
     end
     return nil, nil, loops
 end
@@ -1160,13 +1202,13 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
         for stage, optionName in ipairs(desired) do
             local stageStartedAt = tick()
-            local _, signature, loops = waitForFinalStage(previousSignature, 1.35, state)
+            local _, signature, loops, buttons = waitForFinalStage(previousSignature, 1.35, state)
             stageWaitMs[#stageWaitMs + 1] = math.floor((tick() - stageStartedAt) * 1000 + 0.5)
             if not signature then
                 return 0, "stage " .. tostring(stage) .. " timed out"
             end
 
-            local selected, selectReason = injectDialogueOption(optionName)
+            local selected, selectReason = injectDialogueOption(optionName, buttons)
             if not selected then
                 return 0, "stage " .. tostring(stage) .. " injection failed: " .. tostring(selectReason)
             end

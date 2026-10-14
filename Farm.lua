@@ -19,7 +19,8 @@ local _webhook   = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20   -- wait longer before treating the server as having no spawned items
+local NO_ITEM_TIMEOUT = 8 -- Normal Item Farm only; bounded restock keeps its own 90s limit.
+local detectionEpoch = 0
 local lastItemTime    = tick()
 
 local lastSellItemsSnapshot = nil
@@ -116,6 +117,7 @@ function Farm:Init(Modules)
     _movement  = Modules.Movement
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
+    moduleLog("INFO", "[Farm] Build PICKUP-20261014-R1; earlier bounded prompts, live timing pending")
 end
 
 -- Config change detection
@@ -245,25 +247,32 @@ local function InitItemDetection()
         return
     end
     moduleLog("INFO", "[Farm] Item_Spawns/Items folder found.")
+    detectionEpoch = detectionEpoch + 1
+    local epoch = detectionEpoch
+    local function detect(model, announce)
+        if not model:IsA("Model") then return end
+        local deadline = tick() + 2
+        -- Most spawns are ready immediately. Retry only incomplete replication.
+        while epoch == detectionEpoch and model.Parent == ItemSpawnFolder do
+            local info = GetItemInfo(model)
+            if info then
+                SpawnedItems[model] = info
+                if announce then moduleLog("INFO", "[Farm] Item detected: " .. info.Name) end
+                return
+            end
+            if tick() >= deadline then return end
+            task.wait(0.03)
+        end
+    end
     for _, model in pairs(ItemSpawnFolder:GetChildren()) do
         pcall(function()
             if model:IsA("Model") then
-                local info = GetItemInfo(model)
-                if info then SpawnedItems[model] = info end
+                task.spawn(function() pcall(detect, model, false) end)
             end
         end)
     end
     local connection = ItemSpawnFolder.ChildAdded:Connect(function(model)
-        task.wait(1)
-        pcall(function()
-            if model:IsA("Model") then
-                local info = GetItemInfo(model)
-                if info then
-                    SpawnedItems[model] = info
-                    moduleLog("INFO", "[Farm] Item detected: " .. info.Name)
-                end
-            end
-        end)
+        task.spawn(function() pcall(detect, model, true) end)
     end)
     table.insert(runtimeConnections, connection)
 end
@@ -271,14 +280,19 @@ end
 local SAFE_SPOT = CFrame.new(978, -42, -49)
 
 local function CollectItem(itemInfo, index, restockGuard)
+    local character = Player.Character
     local function allowed()
+        if Player.Character ~= character then return false end
         if restockGuard then return restockGuard() end
         return _config:Get("FarmEnabled") and not stopRequested
     end
     if not allowed() then return false end
 
     local hrp = _movement:GetCharacter("HumanoidRootPart")
-    if not hrp or not itemInfo then return false end
+    if not hrp or not itemInfo or not itemInfo.Model or not itemInfo.Model.Parent then
+        SpawnedItems[index] = nil
+        return false
+    end
     if _inventory:HasMax(itemInfo.Name) then
         SpawnedItems[index] = nil
         return false
@@ -286,46 +300,49 @@ local function CollectItem(itemInfo, index, restockGuard)
 
     local beforeCount = _inventory:Count(itemInfo.Name)
     local model = itemInfo.Model or index
-    local oldCF = hrp.CFrame
-    local bv = _movement:Freeze()
-    if restockGuard then restockFreeze = bv end
-    _movement:SetNoclip(true)
-    _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
-    task.wait(.35)
-
-    local fired = pcall(function()
-        if allowed() and itemInfo.ProximityPrompt and itemInfo.ProximityPrompt.Parent then
-            fireproximityprompt(itemInfo.ProximityPrompt)
+    local started, bv, requests = tick(), nil, 0
+    local ok, collected = pcall(function()
+        bv = _movement:Freeze()
+        if restockGuard then restockFreeze = bv end
+        _movement:SetNoclip(true)
+        _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
+        task.wait(0.05)
+        local function fire()
+            if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
+            requests = requests + 1
+            local fired, result = pcall(fireproximityprompt, itemInfo.ProximityPrompt)
+            return fired and result ~= false
         end
+        if not fire() then return false end
+        local deadline, disappeared = tick() + 1.5, nil
+        while tick() < deadline and allowed() do
+            if _inventory:Count(itemInfo.Name) > beforeCount then return true end
+            if not model.Parent then
+                disappeared = disappeared or tick()
+                -- Give a removed spawn a replication grace, but never call a
+                -- competitor's pickup our own successful acquisition.
+                if tick() - disappeared >= 0.35 then break end
+            elseif requests == 1 and tick() - started >= 0.35 then
+                -- Earlier input may precede position replication. One retry at
+                -- the old settle window retains compatibility without spam.
+                fire()
+            end
+            task.wait(0.025)
+        end
+        return _inventory:Count(itemInfo.Name) > beforeCount
     end)
+    if bv then pcall(function() _movement:Unfreeze(bv) end) end
+    if restockFreeze == bv then restockFreeze = nil end
+    if hrp.Parent and allowed() then pcall(function() _movement:Teleport(SAFE_SPOT) end) end
+    pcall(function() _movement:SetNoclip(false) end)
+    if not allowed() then return false end
+    if not ok then error("Item collection operation failed after cleanup", 0) end
 
-    local deadline = tick() + 1.5
-    local collected = false
-    while tick() < deadline and allowed() do
-        if _inventory:Count(itemInfo.Name) > beforeCount then
-            collected = true
-            break
-        end
-        if model and not model.Parent then
-            collected = true
-            break
-        end
-        task.wait(0.1)
-    end
-
-    _movement:Unfreeze(bv)
-    if oldCF and hrp.Parent and (not restockGuard or allowed()) then
-        _movement:Teleport(SAFE_SPOT)
-    end
-    task.wait(.15)
-    _movement:SetNoclip(false)
-
-    if restockGuard and not allowed() then return false end
-
-    if collected and fired then
+    if ok and collected then
         SpawnedItems[index] = nil
         lastItemTime = tick()
         moduleLog("INFO", "[Farm] Collected: " .. itemInfo.Name)
+        moduleLog("INFO", ("[Farm][PickupPerf] %s confirmed in %.3fs | prompts=%d"):format(itemInfo.Name, tick()-started, requests))
         return true
     end
 
@@ -336,7 +353,7 @@ local function CollectItem(itemInfo, index, restockGuard)
     else
         SpawnedItems[index] = nil
     end
-    moduleLog("WARN", "[Farm] Collection was not confirmed: " .. tostring(itemInfo.Name))
+    moduleLog(model and model.Parent and "WARN" or "INFO", "[Farm] Collection was not confirmed: " .. tostring(itemInfo.Name))
     return false
 end
 
@@ -369,11 +386,15 @@ local function DoHop()
     end
 
     moduleLog("INFO", "[Farm] Server dry — selling, buying, then hopping...")
+    if type(_serverHop.Prepare) == "function" then pcall(_serverHop.Prepare, _serverHop) end
     SellAllWithDiagnostics("server-hop")
-    if manualSellBusy then return end
+    if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _inventory:BuyLucky()
-    if manualSellBusy then return end
-    _serverHop:Hop()
+    if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
+    _serverHop:Hop(function()
+        return not stopRequested and not manualSellBusy and _config:Get("FarmEnabled")
+            and not _config:Get("AutoPrestige") and not _config:Get("StandFarmEnabled")
+    end)
     lastItemTime = tick()
 end
 
@@ -490,6 +511,10 @@ end
 local function runCycle()
     lastItemTime = tick()
     _config:SetMany({ Phase1Notified = false, Phase3Notified = false })
+    local lastWaitMessage
+    local function logWait(message)
+        if message ~= lastWaitMessage then moduleLog("INFO", message); lastWaitMessage=message end
+    end
 
     -- ===== PHASE 1 =====
     moduleLog("INFO", "[Farm] >>> Phase 1 started — farming normally.")
@@ -511,9 +536,9 @@ local function runCycle()
         if elapsed > NO_ITEM_TIMEOUT then
             if not _inventory:ShouldStopPhase1() then DoHop() end
         elseif #snapshot == 0 then
-            moduleLog("INFO", "[Farm] Waiting for items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
+            logWait("[Farm] Waiting for items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
         end
-        task.wait(1)
+        task.wait(0.1)
     end
 
     -- A pause/prestige transition is not a completed phase.
@@ -560,9 +585,9 @@ local function runCycle()
                     DoHop()
                 end
             elseif #snapshot == 0 then
-                moduleLog("INFO", "[Farm] Waiting for keep-items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
+                logWait("[Farm] Waiting for keep-items... (" .. math.max(0, math.floor(NO_ITEM_TIMEOUT - elapsed)) .. "s until hop)")
             end
-            task.wait(1)
+            task.wait(0.1)
         end
 
         if shouldPauseCycle() then return end
@@ -611,7 +636,7 @@ local function runCycle()
             if shouldPauseCycle() then return end
             CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
-        task.wait(1)
+        task.wait(0.1)
     end
 end
 
@@ -738,6 +763,7 @@ function Farm:IsRunning()
 end
 
 function Farm:Destroy()
+    detectionEpoch = detectionEpoch + 1
     self:Stop()
     for _, connection in ipairs(runtimeConnections) do
         pcall(function() connection:Disconnect() end)
