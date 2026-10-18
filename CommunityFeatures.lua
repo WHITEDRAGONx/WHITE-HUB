@@ -587,70 +587,95 @@ local function liveLandmarkPosition(landmark)
     end
     return nil
 end
-local function savedMerchantLocation()
-    local v=config and config:Get("MerchantTeleportPosition")
+-- A calibrated destination is the player's root POSITION ON THE DESIRED FLOOR,
+-- not a building's PrimaryPart/pivot. It must not be offset by +4 studs.
+local function savedFloorPosition(key)
+    local v=config and config:Get(key)
     if type(v)~="table" or type(v.x)~="number" or type(v.y)~="number" or type(v.z)~="number" then return nil end
-    if v.x~=v.x or v.y~=v.y or v.z~=v.z or math.max(math.abs(v.x),math.abs(v.y),math.abs(v.z))>100000 then return nil end
+    if v.x~=v.x or v.y~=v.y or v.z~=v.z
+        or math.max(math.abs(v.x),math.abs(v.y),math.abs(v.z))>100000 then return nil end
     return Vector3.new(v.x,v.y,v.z)
 end
-local function rememberMerchant(pos, origin)
-    if not config or typeof(pos)~="Vector3" then return end
-    local previous=savedMerchantLocation()
-    if previous and (previous-pos).Magnitude<2 then return end
-    config:Set("MerchantTeleportPosition",{x=pos.X,y=pos.Y,z=pos.Z})
-    log("INFO","[Teleport] Saved Merchant position ("..tostring(origin)..")")
+local function saveFloorPosition(key,pos,placeName)
+    if not config or typeof(pos)~="Vector3" then return false end
+    config:Set(key,{x=pos.X,y=pos.Y,z=pos.Z})
+    log("INFO","[Teleport] Saved "..placeName.." floor position ("..
+        math.floor(pos.X+0.5)..","..math.floor(pos.Y+0.5)..","..math.floor(pos.Z+0.5)..")")
+    return true
 end
-function Community:SaveMerchantTeleportHere()
+local function canCalibrateHere()
     if game.PlaceId~=2809202155 then return false,"Only supported in YBA main map" end
     local working=activeWorkers()
-    if working or pilot or self._pilotStarting then return false,"Stop farms/Pilot before calibrating Merchant" end
-    local c,h,root=charParts()
+    if working or pilot or self._pilotStarting then return false,"Stop farms/Pilot before calibrating" end
+    local char,h,root=charParts()
     if not root or not h or h.Health<=0 then return false,"Character unavailable" end
-    local pos,path=liveLandmarkPosition("merchant")
-    if pos then
-        if (pos-root.Position).Magnitude>35 then return false,"Approach Merchant to calibrate the saved point" end
-        rememberMerchant(pos,"real NPC: "..tostring(path))
-    else
-        local rayParams=RaycastParams.new()
-        rayParams.FilterType=Enum.RaycastFilterType.Exclude
-        rayParams.FilterDescendantsInstances={c}
-        local ground=workspace:Raycast(root.Position+Vector3.new(0,3,0),Vector3.new(0,-16,0),rayParams)
-        if not ground or ground.Normal.Y<0.5 or ground.Material==Enum.Material.Water then
-            return false,"Stand on safe ground in front of Merchant"
-        end
-        rememberMerchant(root.Position,"manual calibration")
+    local params=RaycastParams.new()
+    params.FilterType=Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances={char}
+    params.IgnoreWater=false
+    -- Low-level probe can only select ground at or below the standing player's root.
+    -- Do not look 18 studs up: that was landing on upper floors / Arcade roofs.
+    local hit=workspace:Raycast(root.Position+Vector3.new(0,1,0),Vector3.new(0,-9,0),params)
+    if not hit or hit.Normal.Y<0.7 or hit.Material==Enum.Material.Water
+        or (root.Position.Y-hit.Position.Y)<1 or (root.Position.Y-hit.Position.Y)>6 then
+        return false,"Stand on a solid floor at the exact destination before saving"
     end
-    return true,"Merchant position saved. Teleport will work without a streamed NPC next time."
+    return true,root.Position
 end
-function Community:TeleportToLandmark(landmark, allowEventTrade)
-    if landmark=="arcade" then
-        local live,path=liveLandmarkPosition("arcade")
-        if live then
-            log("INFO","[Teleport] Live Arcade landmark: "..tostring(path))
-            return self:TeleportTo(live+Vector3.new(4,0,0),"Arcade")
-        end
-        -- Historical Xenon position remains a fallback *only* for Arcade
-        -- and still has to pass our own live ground raycast.
-        return self:TeleportToPreset("Arcade")
+function Community:SaveMerchantTeleportHere()
+    local ok,position=canCalibrateHere()
+    if not ok then return false,position end
+    local npc,path=liveLandmarkPosition("merchant")
+    if npc and (npc-position).Magnitude>35 then
+        return false,"Approach the Merchant before saving"
     end
-    local label=landmark=="jack" and "Jack, The Cauldron Specter" or "Merchant"
-    local position,path=liveLandmarkPosition(landmark)
-    local fromCache=false
+    saveFloorPosition("MerchantTeleportPosition",position,"Merchant")
+    return true,"Merchant floor saved. Teleport now uses this exact standing position."
+end
+function Community:SaveArcadeTeleportHere()
+    local ok,position=canCalibrateHere()
+    if not ok then return false,position end
+    local landmark=liveLandmarkPosition("arcade")
+    if landmark and (Vector3.new(landmark.X,0,landmark.Z)-Vector3.new(position.X,0,position.Z)).Magnitude>85 then
+        return false,"Stand at the Arcade entrance/inside its floor before saving"
+    end
+    saveFloorPosition("ArcadeTeleportPosition",position,"Arcade")
+    return true,"Arcade floor/entrance saved. Teleport now avoids its roof."
+end
+function Community:TeleportToLandmark(landmark,allowEventTrade)
     if landmark=="merchant" then
-        if position then rememberMerchant(position,"live NPC: "..tostring(path)) end
-        if not position then
-            position=savedMerchantLocation()
-            fromCache=position~=nil
+        local saved=savedFloorPosition("MerchantTeleportPosition")
+        if saved then
+            log("INFO","[Teleport] Using calibrated Merchant floor; no +4 offset.")
+            return self:TeleportTo(saved,"Merchant",false,"floor")
         end
+        local live,path=liveLandmarkPosition("merchant")
+        if not live then
+            log("WARN","[Teleport] No saved Merchant floor; StreamingEnabled may hide the NPC.")
+            return false,"Go to Merchant once and press SAVE MERCHANT POSITION."
+        end
+        -- Live NPC center is not a verified standing position on a multi-storey map.
+        return false,"Merchant NPC detected ("..tostring(path).."); stand beside it and SAVE MERCHANT POSITION once."
     end
-    if not position then
-        log("WARN","[Teleport] "..label.." has no streamed position or calibrated destination.")
-        return false,landmark=="merchant"
-            and "Use SAVE MERCHANT POSITION once while standing at Merchant"
-            or "Jack not streamed; visit its area and try again"
+    if landmark=="arcade" then
+        local saved=savedFloorPosition("ArcadeTeleportPosition")
+        if saved then
+            log("INFO","[Teleport] Using calibrated Arcade entrance/floor, not the roof landmark.")
+            return self:TeleportTo(saved,"Arcade",false,"floor")
+        end
+        -- The observed Workspace.Locations.The Arcade marker is at roof height.
+        -- Old preset could also land within the roof; fail closed until ground is saved.
+        log("WARN","[Teleport] Arcade landmark is roof-level; a floor calibration is required.")
+        return false,"Visit the Arcade entrance/floor and press SAVE ARCADE ENTRANCE once."
     end
-    log("INFO","[Teleport] "..(fromCache and "Saved location" or "Live NPC").." for "..label..": "..tostring(path or "cached"))
-    return self:TeleportTo(position+Vector3.new(4,0,0),label,landmark=="jack" and allowEventTrade)
+    local label=landmark=="jack" and "Jack, The Cauldron Specter" or tostring(landmark)
+    local live,path=liveLandmarkPosition(landmark)
+    if not live then
+        log("WARN","[Teleport] "..label.." has no streamed position.")
+        return false,"Jack not streamed; approach its area and retry"
+    end
+    log("INFO","[Teleport] Live NPC for "..label..": "..tostring(path))
+    return self:TeleportTo(live+Vector3.new(4,0,0),label,landmark=="jack" and allowEventTrade)
 end
 -- StreamingEnabled can leave only 2-3 physical quest NPCs in Workspace.
 -- Include the known quest catalogue so the picker is not artificially tiny.
@@ -720,7 +745,7 @@ local function getNearbyNPCPosition(name, quest)
     if not part then return nil end
     return part.Position
 end
-function Community:TeleportTo(position, label, allowEventTrade)
+function Community:TeleportTo(position, label, allowEventTrade, groundMode)
     if game.PlaceId~=2809202155 then return false,"Teleport destinations are only configured for main YBA." end
     if self._pilotStarting or pilot then
         return false,"Turn off Stand Pilot first."
@@ -747,16 +772,25 @@ function Community:TeleportTo(position, label, allowEventTrade)
     params.FilterType=Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances={char}
     params.IgnoreWater=false
-    local from=position+Vector3.new(0,18,0)
-    local ray=workspace:Raycast(from,Vector3.new(0,-65,0),params)
-    if not ray or ray.Normal.Y<0.5 or ray.Material==Enum.Material.Water then
+    local floorMode=groundMode=="floor"
+    local from=position+Vector3.new(0,floorMode and 1 or 18,0)
+    local ray=workspace:Raycast(from,Vector3.new(0,floorMode and -9 or -65,0),params)
+    if not ray or ray.Normal.Y<(floorMode and 0.7 or 0.5) or ray.Material==Enum.Material.Water then
         log("WARN","[Teleport] Unsafe or unverified surface: "..tostring(label))
-        return false,"No safe ground at "..tostring(label)..". Old coordinate may have changed."
+        return false,"No safe ground at "..tostring(label)..". Destination may not be streamed."
     end
-    if math.abs(position.Y-ray.Position.Y)>28 then
+    local delta=position.Y-ray.Position.Y
+    if floorMode then
+        -- The saved point is a character root, usually ~3 studs above ground.
+        -- Roofs or floors on a different level fail verification.
+        if delta<1 or delta>6 then
+            log("WARN","[Teleport] Saved floor mismatch at "..tostring(label)..": delta="..tostring(delta))
+            return false,"Saved floor is not loaded or does not match; no teleport performed."
+        end
+    elseif math.abs(delta)>28 then
         return false,"Destination altitude changed too much; teleport skipped."
     end
-    local safe=ray.Position+Vector3.new(0,4.5,0)
+    local safe=ray.Position+Vector3.new(0,floorMode and 3.25 or 4.5,0)
     self._lastTeleportPosition=hrp.Position
     local facing=hrp.CFrame.LookVector
     local horizontal=Vector3.new(facing.X,0,facing.Z)
@@ -790,7 +824,7 @@ function Community:ReturnFromTeleport()
 end
 function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     section(page,"QUICK TRAVEL")
-    UI:AddLabel(page,"Merchant and Halloween Jack use live NPC positions; Arcade has a validated map fallback.").TextWrapped=true
+    UI:AddLabel(page,"Merchant and Arcade use saved floor points to avoid rooftops. Calibrate once at the correct floor; Jack uses its streamed NPC.").TextWrapped=true
     button(page,"TELEPORT TO MERCHANT",function()
         return self:TeleportToLandmark("merchant")
     end,UI,style,track)
@@ -799,6 +833,9 @@ function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     end,UI,style,track)
     button(page,"TELEPORT TO ARCADE",function()
         return self:TeleportToLandmark("arcade")
+    end,UI,style,track)
+    button(page,"SAVE ARCADE ENTRANCE",function()
+        return self:SaveArcadeTeleportHere()
     end,UI,style,track)
     button(page,"TELEPORT TO HALLOWEEN JACK",function()
         return self:TeleportToLandmark("jack")
