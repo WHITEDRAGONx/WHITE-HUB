@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-JACK-R2"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-PICKUP-FPS-R3"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -897,6 +897,12 @@ function UI:Create()
         end
     end)
     
+    MakeToggle(FarmPage, "Fast Pickup (BETA)",_config and _config:Get("FastPickupEnabled")==true,function(v)
+        if _config then _config:Set("FastPickupEnabled",v==true) end
+        runtimeLog("INFO","[PickupTune] "..(v and "Optional faster pickup enabled: original safeguards retained"
+            or "Fast pickup disabled: original delays restored"))
+    end)
+
     MakeToggle(FarmPage, "Auto Sell", _config and _config:Get("AutoSell"), function(v)
         if _config then _config:Set("AutoSell", v) end
     end)
@@ -1459,6 +1465,11 @@ function UI:Create()
     -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
     -- Saved reward is not permission to spend. Buy permission is per-runtime.
     MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
+    MakeToggle(EventsPage,"Invisible Jack Dialogue (BETA)",
+        _config and _config:Get("HalloweenFastDialogue")==true,function(v)
+            if _config then _config:Set("HalloweenFastDialogue",v==true) end
+            runtimeLog("INFO","[Halloween] Hidden Jack dialogue "..(v and "ON" or "OFF"))
+        end)
     MakeToggle(EventsPage, "Auto Turn-In Candy",
         _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
             if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
