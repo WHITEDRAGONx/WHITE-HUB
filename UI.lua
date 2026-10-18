@@ -1342,6 +1342,95 @@ function UI:Create()
         end
     end)
     
+
+    -- Separate item collection mode, reusing Farm.lua and original pickup guards.
+    MakeSection(EventsPage, "EVENT ITEMS FARM")
+    MakeToggle(EventsPage, "Events Items Farm",
+        _config and _config:Get("EventItemsFarmEnabled") == true, function(on)
+        if not _config then return end
+        if on then
+            local blocked = _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+                or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled")
+            if _prestigeRuntime and _prestigeRuntime:IsBusy() then blocked = true end
+            if _standFarm and _standFarm:IsRunning() then blocked = true end
+            if blocked then
+                UI:SetToggleValue("Events Items Farm",false)
+                UI:ShowPopup("Stop Prestige, Stand, Quest or NPC Farm before enabling Event Farm.",6)
+                return
+            end
+            _config:SetMany({FarmEnabled=false, EventItemsFarmEnabled=true})
+            UI:SetToggleValue("Enable Farm", false)
+            runtimeLog("INFO", "[EventFarm] Candy-only mode enabled.")
+            UI:ShowPopup("Event Farm ON: only Yellow, Blue, Green and Red Candy.",5)
+        else
+            _config:Set("EventItemsFarmEnabled", false)
+            runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
+        end
+    end)
+    local eventFarmHint=UI:AddLabel(EventsPage,
+        "Collect only 4 confirmed candy colors. Existing pickup verification and safe spot; no automatic selling/buying.")
+    eventFarmHint.TextWrapped=true
+    eventFarmHint.Size=UDim2.new(1,-4,0,43)
+
+    -- Read-only reward wishlist based on 39 captured dialogue states from Jack.
+    -- User can choose target; no purchase/candy action until server behavior is proven.
+    MakeSection(EventsPage, "HALLOWEEN REWARDS - PREVIEW")
+    local rewards={
+        ["2026 Halloween Event Items"]={
+            {"Boxing Blobs (Boxing Gloves Skin)",60},
+            {"Spectral Marrow (Pluck Skin)",70},
+            {"Jack-o-Ball (Steel Ball Skin)",45},
+            {"Sanguine Veil (Umbrella Skin)",75}
+        },
+        ["2022 Halloween Event Items"]={
+            {"Eye of The Saint's Corpse (Steel Ball Skin)",45},
+            {"Bone Gloves (Boxing Gloves Skin)",60},
+            {"Cursed Scythe (Pluck Skin)",70}
+        },
+        ["2021 Halloween Event Items"]={
+            {"Stop Sign",45},{"Boxing Claws (Boxing Gloves Skin)",60},
+            {"Scythe (Pluck Skin)",70},{"Random Halloween Cosmetic",25}
+        },
+        ["Normal Items"]={
+            {"Mysterious Arrow",2},{"Rokakaka",3},
+            {"Rib Cage of The Saint's Corpse",5},{"DIO's Diary",10},
+            {"Green Baby",15},{"Lucky Arrow",100}
+        },
+    }
+    local categoryNames={
+        "2026 Halloween Event Items", "2022 Halloween Event Items",
+        "2021 Halloween Event Items", "Normal Items"
+    }
+    local currentCategory=_config:Get("HalloweenRewardCategory")
+    if not rewards[currentCategory] then currentCategory=categoryNames[1] end
+    local function labelsFor(category)
+        local options={"Choose reward..."}
+        for _,record in ipairs(rewards[category] or {}) do
+            options[#options+1]=record[1].." - "..tostring(record[2]).." points"
+        end
+        return options
+    end
+    local refreshRewards=nil
+    local categoryBtn=MakeStyledDropdown(EventsPage,"Category",categoryNames,function(category)
+        currentCategory=category
+        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget=""})
+        if refreshRewards then refreshRewards(labelsFor(category)) end
+        UI:ShowPopup("Category saved. Auto Buy is not enabled.",4)
+    end)
+    categoryBtn.Text=currentCategory
+    local choices=labelsFor(currentCategory)
+    local rewardBtn
+    rewardBtn,refreshRewards=MakeStyledDropdown(EventsPage,"Reward",choices,function(selection)
+        _config:Set("HalloweenRewardTarget",selection=="Choose reward..." and "" or selection)
+        UI:ShowPopup("Reward saved for future Auto Buy. No purchase made.",4)
+    end)
+    local savedReward=_config:Get("HalloweenRewardTarget")
+    if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
+    local rewardHint=UI:AddLabel(EventsPage,
+        "Prices verified in Jack's dialogue. Auto Turn-In and Auto Buy remain locked until candy exchange and purchase confirmation are captured.")
+    rewardHint.TextWrapped=true
+    rewardHint.Size=UDim2.new(1,-4,0,55)
+
     -- Community features are separate opt-in tools; do not modify core workers.
     -- Reflow all affected pages after inserting buttons/sections.
     if _community then
