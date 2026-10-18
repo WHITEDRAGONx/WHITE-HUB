@@ -946,6 +946,11 @@ function UI:Create()
             if _combatFarm then _combatFarm:Stop() end
             UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Events Items Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
             UI:SetToggleValue("Quest Farm",false); UI:SetToggleValue("NPC Farm",false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("Auto Prestige", false)
+                UI:ShowPopup("Pickup is still finishing; retry Auto Prestige.", 5)
+                return
+            end
             local ok,reason=_prestigeRuntime:Start()
             if not ok then UI:SetToggleValue("Auto Prestige",false); UI:ShowPopup(tostring(reason),6) end
             return
@@ -1230,6 +1235,15 @@ function UI:Create()
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
         if v and not stopPrestigeForSwitch("Quest Farm") then return end
+        if v and _config and _config:Get("EventItemsFarmEnabled") then
+            _config:Set("EventItemsFarmEnabled", false)
+            UI:SetToggleValue("Events Items Farm", false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("Quest Farm", false)
+                UI:ShowPopup("Event pickup is still in progress. Try Quest Farm again.", 5)
+                return
+            end
+        end
         if _config then
             if v then
                 _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
@@ -1271,6 +1285,15 @@ function UI:Create()
     
     MakeToggle(QuestPage, "NPC Farm", _config and _config:Get("NPCFarmEnabled"), function(v)
         if v and not stopPrestigeForSwitch("NPC Farm") then return end
+        if v and _config and _config:Get("EventItemsFarmEnabled") then
+            _config:Set("EventItemsFarmEnabled", false)
+            UI:SetToggleValue("Events Items Farm", false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("NPC Farm", false)
+                UI:ShowPopup("Event pickup is still in progress. Try NPC Farm again.", 5)
+                return
+            end
+        end
         if _config then
             if v then
                 _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
@@ -1353,6 +1376,11 @@ function UI:Create()
                 or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled")
             if _prestigeRuntime and _prestigeRuntime:IsBusy() then blocked = true end
             if _standFarm and _standFarm:IsRunning() then blocked = true end
+            if _combatFarm then
+                local combatRunning = _combatFarm:IsRunning()
+                if combatRunning then blocked = true end
+            end
+            if _farm and _farm.CanEnableEvent and not _farm:CanEnableEvent() then blocked = true end
             if blocked then
                 UI:SetToggleValue("Events Items Farm",false)
                 UI:ShowPopup("Stop Prestige, Stand, Quest or NPC Farm before enabling Event Farm.",6)
