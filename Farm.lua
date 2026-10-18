@@ -353,7 +353,11 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     end)
     if bv then pcall(function() _movement:Unfreeze(bv) end) end
     if restockFreeze == bv then restockFreeze = nil end
-    if hrp.Parent and allowed() then pcall(function() _movement:Teleport(SAFE_SPOT) end) end
+    -- Event cancellation still restores the real character to the safe spot.
+    -- Collection ownership remains serialized by collectBusy.
+    if hrp.Parent and (allowed() or (collectionMode == "event" and Player.Character == character)) then
+        pcall(function() _movement:Teleport(SAFE_SPOT) end)
+    end
     if allowed() then task.wait(0.15) end
     pcall(function() _movement:SetNoclip(false) end)
     if not allowed() then return false end
@@ -786,6 +790,7 @@ end
 -- FarmEnabled/AutoSell. Preserve item filter selection and use the same Merchant.
 function Farm:SellNow()
     if not (_config and _inventory) then return false, "Farm modules not initialized" end
+    if eventModeEnabled() then return false, "Disable Events Items Farm before using SELL NOW" end
     if manualSellBusy or sellBusy then return false, "A Merchant sale is already running" end
     if stopRequested or restockBusy or startupBusy or prestigeSaleBusy or prestigePending()
         or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
@@ -843,6 +848,12 @@ function Farm:PrestigeSell(ownerActive,sell)
     _config:Set("FarmEnabled",before,true)
     prestigeSaleBusy=false
     return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
+end
+-- Before Quest/NPC takeover, allow a cancelled event pickup to finish cleanup.
+function Farm:WaitForCollection(maxSeconds)
+    local deadline=tick()+math.clamp(tonumber(maxSeconds) or 3,0,5)
+    while collectBusy and tick()<deadline do task.wait(0.05) end
+    return not collectBusy
 end
 function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy end
 
