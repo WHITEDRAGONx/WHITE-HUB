@@ -31,6 +31,7 @@ local Defaults = {
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
+    CleanHopBeta = false, -- opt-in Play-style Place matchmaking; NOT a full app/Delta restart.
     SettingsCapFPS30 = false,
     SettingsUncapFPS = false,
     SettingsLowGraphics = false,
@@ -105,6 +106,7 @@ local function ApplyDefaults(data)
     if type(data.MerchantPacingBeta) ~= "boolean" then data.MerchantPacingBeta=false end
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
     if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
+    if type(data.CleanHopBeta) ~= "boolean" then data.CleanHopBeta = false end
     if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
     local merchantPos=data.MerchantTeleportPosition
     if type(merchantPos)~="table" or type(merchantPos.x)~="number"
