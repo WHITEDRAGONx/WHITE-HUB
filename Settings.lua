@@ -2,7 +2,7 @@
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local Settings = {}
-local BUILD = "SETTINGS-YBA-20261018-R3"
+local BUILD = "SETTINGS-YBA-20261018-R4"
 local config, logger, ui, statusLabel
 local alive, capOn, lowOn, blackOn = false, false, false, false
 local lowEpoch, lowConnections = 0, {}
@@ -15,7 +15,11 @@ local nativeState, nativeMessage = "idle", "Not requested"
 local nativeIssued = false
 -- The owner's R4 shows that YBA removes this control after activation. Keep an
 -- issued request across Init/OFF to avoid toggling the native feature twice.
-local nativeRequests = setmetatable({}, {__mode="k"})
+local nativeRequests = rawget(_G,"WhiteHubNativeLowGFXRequests")
+if type(nativeRequests)~="table" then
+    nativeRequests=setmetatable({}, {__mode="k"})
+    rawset(_G,"WhiteHubNativeLowGFXRequests",nativeRequests)
+end
 local labels = {
     SettingsCapFPS30="Cap FPS at 30",
     SettingsLowGraphics="Low graphics",
@@ -70,16 +74,19 @@ local function nativeInput(button)
         end
     end
     if #handlers==0 then return nil,"No inspectable click handler" end
+    if #handlers==1 then
+        local handler=handlers[1]
+        -- Delta's bound connection input is already used by our dialogue code.
+        -- A present firesignal can silently do nothing; do not prefer it here.
+        if type(handler.fire)=="function" then
+            return function() return handler.fire(handler.connection) end,"connection-fire",1
+        end
+        return handler.fn,"connection-function",1
+    end
     if type(firesignal)=="function" then
-        return function() return firesignal(signal) end
+        return function() return firesignal(signal) end,"firesignal",#handlers
     end
-    -- Without signal dispatch, only one unambiguous bound handler is allowed.
-    if #handlers~=1 then return nil,"Multiple handlers need signal dispatch" end
-    local handler=handlers[1]
-    if type(handler.fire)=="function" then
-        return function() return handler.fire(handler.connection) end
-    end
-    return handler.fn
+    return nil,"Multiple handlers need signal dispatch"
 end
 
 local function requestNativeLow(epoch)
@@ -103,10 +110,11 @@ local function requestNativeLow(epoch)
         if not list then report("unavailable","Native menu unavailable; local effects only","WARN");return end
         local previous=nativeRequests[hud]
         if previous and previous.issued then
+            nativeIssued=true
             if previous.state=="control_removed" then
                 report("control_removed","Control removed after request; session change")
             else
-                report(previous.state or "requested","Request already issued; no retry")
+                report(previous.state or "requested","Prior state="..tostring(previous.state).."; route="..tostring(previous.route).."; no retry")
             end
             return
         end
@@ -116,10 +124,10 @@ local function requestNativeLow(epoch)
         if not button:IsA("TextButton") or button.Text~="TOGGLE LOW GFX" then
             report("unavailable","Unexpected native control; local effects only","WARN");return
         end
-        local dispatch,reason=nativeInput(button)
+        local dispatch,route,count=nativeInput(button)
         if not active() then return end
-        if not dispatch then report("unsupported",reason.."; local effects only","WARN");return end
-        local record={issued=false,state="pending"}
+        if not dispatch then report("unsupported",route.."; local effects only","WARN");return end
+        local record={issued=false,state="pending",route=route}
         nativeRequests[hud]=record
         local finished,callOk=false,false
         task.spawn(function()
@@ -128,6 +136,8 @@ local function requestNativeLow(epoch)
             if currentHud~=hud or currentList~=list or currentRow~=row or currentButton~=button then
                 finished=true;return
             end
+            log("INFO","[NativeLowGFX] Dispatch route="..route.."; handlers="..tostring(count).."; result pending")
+            if not active() then return end
             -- Set the guard before entering a yielding/native callback. A failure
             -- may already have side effects, so never try another input afterward.
             record.issued=true;record.state="requested"
@@ -139,7 +149,10 @@ local function requestNativeLow(epoch)
         end)
         -- A game callback may yield. Observe its UI outcome for at most 8 seconds.
         for _=1,32 do
-            if not active() then return end
+            if not active() then
+                if record.issued and record.state=="requested" then record.state="observation_cancelled" end
+                return
+            end
             local currentHud,currentList=nativeTarget()
             if record.issued and currentHud==hud and currentList==list and row.Parent~=list then
                 record.state="control_removed"
