@@ -107,6 +107,29 @@ end
 function Trade:GetPoints()
     return observedPoints()
 end
+-- Read-only gate for the user's one-time auto-buy authorization. Being armed
+-- does not authorize guessing a balance or repeating an unresolved purchase.
+function Trade:AutoBuyReadiness()
+    if boughtThisRuntime or blockedUntilReload then return false,"Previous purchase/transaction completed or unresolved" end
+    if not config then return false,"Halloween Exchange not initialized" end
+    local category=SHOP[config:Get("HalloweenRewardCategory")]
+    local selected=tostring(config:Get("HalloweenRewardTarget") or "")
+    if not category then return false,"Select a valid Halloween reward category" end
+    local price=nil
+    for name,item in pairs(category.items) do
+        if selected==name.." - "..tostring(item.price).." points" then
+            price=item.price
+            break
+        end
+    end
+    if not price then return false,"Select a listed reward before enabling Auto Buy" end
+    local points=self:GetPoints()
+    if points==nil then return false,"Waiting for verified Halloween event points" end
+    if points<price then
+        return false,("Waiting for event points: %d/%d"):format(points,price)
+    end
+    return true,("Enough verified points: %d/%d"):format(points,price)
+end
 function Trade:InspectPoints()
     local found,path=self:GetPoints()
     if found then
@@ -264,9 +287,23 @@ end
 local function safeToTrade(source)
     if blockedUntilReload then return false,"Previous Halloween result unresolved; reload to retry" end
     if not config then return false,"Halloween trade not initialized" end
-    if source=="event-farm" then
-        if config:Get("EventItemsFarmEnabled")~=true or config:Get("FarmEnabled")==true then
+    local auto=source=="event-farm" or source=="farm-checkpoint" or source=="auto-idle"
+    if auto then
+        if not (modules.Farm and modules.Farm.IsHalloweenTradeActive
+            and modules.Farm:IsHalloweenTradeActive()) then
+            return false,"Jack automation does not own movement"
+        end
+        if source=="event-farm" and
+            (config:Get("EventItemsFarmEnabled")~=true or config:Get("FarmEnabled")==true) then
             return false,"Event Farm no longer owns collection"
+        end
+        if source=="farm-checkpoint" and
+            (config:Get("FarmEnabled")~=true or config:Get("EventItemsFarmEnabled")==true) then
+            return false,"Normal Farm no longer owns safe trade checkpoint"
+        end
+        if source=="auto-idle" and
+            (config:Get("FarmEnabled")==true or config:Get("EventItemsFarmEnabled")==true) then
+            return false,"Idle automation no longer has movement ownership"
         end
     else
         if config:Get("EventItemsFarmEnabled") or config:Get("FarmEnabled") then
@@ -278,7 +315,7 @@ local function safeToTrade(source)
     end
     if modules.CommunityFeatures and modules.CommunityFeatures.IsPiloting
         and modules.CommunityFeatures:IsPiloting() then return false,"Stand Pilot active" end
-    if modules.Farm and source~="event-farm" and modules.Farm.IsBusy
+    if not auto and modules.Farm and modules.Farm.IsBusy
         and modules.Farm:IsBusy() then return false,"Wait until Farm finishes movement/sale" end
     if modules.AutoPrestigeRuntime and modules.AutoPrestigeRuntime.IsBusy
         and modules.AutoPrestigeRuntime:IsBusy() then return false,"Prestige action pending" end
@@ -378,7 +415,7 @@ local function action(source,job)
     if not allowed then return false,reason end
     busy=true
     local original,character,hrp=nil,nil,nil
-    if source=="event-farm" then
+    if source=="event-farm" or source=="farm-checkpoint" or source=="auto-idle" then
         character=Player.Character
         hrp=character and character:FindFirstChild("HumanoidRootPart")
         if not hrp then busy=false;return false,"Player root not available for Jack trip" end
@@ -386,10 +423,10 @@ local function action(source,job)
         local moved,moveReason=modules.CommunityFeatures:TeleportToLandmark("jack",true)
         if not moved then
             busy=false
-            log("WARN","[Jack] Event Farm could not reach Jack: "..tostring(moveReason))
+            log("WARN","[Jack] Automatic transaction could not reach Jack: "..tostring(moveReason))
             return false,"Unable to reach Jack for automatic trade; "..tostring(moveReason)
         end
-        log("INFO","[Jack] Event Farm visited real Jack location; returning after transaction.")
+        log("INFO","[Jack] Automatic exchange visited live Jack location; returning after transaction.")
         task.wait(0.35)
     end
     local ok,success,message=pcall(job)
