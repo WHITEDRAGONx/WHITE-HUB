@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-PICKUP-FPS-R3"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-MERCHANT-FPS-R4"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -1158,6 +1158,12 @@ function UI:Create()
     -- ITEMS PAGE
     -- =====================
     MakeSection(ItemsPage, "SELL ITEMS")
+    MakeToggle(ItemsPage, "Merchant Callback Pacing (BETA)",
+        _config and _config:Get("MerchantPacingBeta")==true, function(v)
+            if _config then _config:Set("MerchantPacingBeta",v==true) end
+            runtimeLog("INFO","[MerchantPacing] "..(v and
+                "Opt-in 75ms dialogue callback pacing enabled" or "Proven FINAL signal cadence restored"))
+        end)
 
     -- Manual one-shot Merchant sale: independent of the Auto Sell toggle and
     -- the Server Hop timer. The same saved item selection is respected.
