@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-JACK-R2"
+local UI_BUILD = "SILVER-V5-PRIVATE-DEV-20261018-WHITEAI-TAB-R3"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -786,13 +786,13 @@ function UI:Create()
     local tabDefs = {
         { name="Farm",    page=FarmPage    },
         { name="Events",  page=EventsPage  },
+        { name="AI DEBUG", page=AIPage },
         { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
         { name="Teleport", page=TeleportPage },
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
-        { name="AI DEBUG", page=AIPage },
         { name="Settings", page=SettingsPage },
         { name="Credits", page=CreditsPage },
     }
@@ -854,6 +854,8 @@ function UI:Create()
             SetActiveTab(def.page)
         end)
     end
+
+    runtimeLog("INFO", "[Dev UI] AI DEBUG tab created at sidebar position 3; WhiteAI module " .. (_whiteAI and "loaded" or "missing"))
 
     do
         local s = tabButtons["Farm"]:FindFirstChildOfClass("UIStroke")
