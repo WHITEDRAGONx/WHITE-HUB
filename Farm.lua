@@ -110,6 +110,26 @@ local function SellAllWithDiagnostics(source, manualRequest)
     return sold, types, failed, reason
 end
 
+-- Halloween item allowlist comes from observed live YBA spawn labels, never a generic "event" substring.
+local EVENT_CANDY = {
+    ["Yellow Candy"] = true, ["Blue Candy"] = true,
+    ["Green Candy"] = true, ["Red Candy"] = true,
+}
+local function eventModeEnabled()
+    return _config and _config:Get("EventItemsFarmEnabled") == true
+end
+local function eventModeReady()
+    return eventModeEnabled() and not stopRequested
+        and _config:Get("FarmEnabled") ~= true
+        and not _config:Get("AutoPrestige")
+        and not _config:Get("StandFarmEnabled")
+        and not _config:Get("QuestFarmEnabled")
+        and not _config:Get("NPCFarmEnabled")
+        and not restockBusy and not prestigeSaleBusy
+        and not manualSellBusy and not sellBusy
+        and not prestigePending()
+end
+
 function Farm:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _config    = Modules.Config
@@ -280,12 +300,15 @@ end
 
 local SAFE_SPOT = CFrame.new(978, -42, -49)
 
-local function CollectItem(itemInfo, index, restockGuard)
+local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     local character = Player.Character
     local function allowed()
         if Player.Character ~= character then return false end
         if restockGuard then return restockGuard() end
-        return _config:Get("FarmEnabled") and not stopRequested
+        if collectionMode == "event" then
+            return eventModeReady() and itemInfo and EVENT_CANDY[itemInfo.Name] == true
+        end
+        return _config:Get("FarmEnabled") and not eventModeEnabled() and not stopRequested
     end
     if not allowed() then return false end
 
@@ -376,7 +399,7 @@ local function shouldSkipHop()
 end
 
 local function DoHop()
-    if not _config:Get("FarmEnabled") or manualSellBusy then return end
+    if not _config:Get("FarmEnabled") or eventModeEnabled() or manualSellBusy then return end
 
     if shouldSkipHop() then
         moduleLog("INFO", "[Farm] DoHop aborted – skipping hop.")
@@ -441,7 +464,8 @@ local function Startup()
 end
 
 local function shouldPauseCycle()
-    return stopRequested or restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
+    return stopRequested or restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending()
+        or eventModeEnabled() or not _config:Get("FarmEnabled") or _config:Get("AutoPrestige")
 end
 
 -- Synchronous handoff from StandFarm. It never enables the normal phases,
@@ -461,7 +485,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
         local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
         return epoch == restockEpoch and not stopRequested and ownerActive()
             and humanoid and humanoid.Health > 0
-            and Player.Character == char and not _config:Get("FarmEnabled")
+            and Player.Character == char and not _config:Get("FarmEnabled") and not eventModeEnabled()
             and ((prestige and _config:Get("AutoPrestige")==true and not _config:Get("StandFarmEnabled"))
                 or (not prestige and _config:Get("StandFarmEnabled")==true and not _config:Get("AutoPrestige")))
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
@@ -504,6 +528,70 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     restockFreeze, restockBusy = nil, false
     if not ok then return false, "Restock collection failed; nothing consumed" end
     return success, reason
+end
+
+-- An independent MODE of this worker, not a second competing movement loop.
+-- Reuses the original pickup path, inventory confirmation, and SAFE_SPOT cleanup.
+-- Never calls SellAll, BuyLucky, the Merchant, or normal phase completion.
+local function runEventCycle()
+    moduleLog("INFO", "[EventFarm] Candy-only collection started: Yellow/Blue/Green/Red Candy.")
+    lastItemTime = tick()
+    local nextScan, nextAttempt = 0, {}
+    local lastWaiting = false
+    while eventModeReady() do
+        local now = tick()
+        if ItemSpawnFolder and now >= nextScan then
+            nextScan = now + 1
+            -- Normal phases can discard their cached items; rescan actual live spawns.
+            for _, model in ipairs(ItemSpawnFolder:GetChildren()) do
+                local info = GetItemInfo(model)
+                if info and EVENT_CANDY[info.Name] then
+                    SpawnedItems[model] = info
+                end
+            end
+        end
+        local snapshot = {}
+        for model, info in pairs(SpawnedItems) do
+            if EVENT_CANDY[info.Name] and info.Model and info.Model.Parent
+                and (nextAttempt[model] or 0) <= now then
+                snapshot[#snapshot + 1] = {Index=model, ItemInfo=info}
+            end
+        end
+        for _, entry in ipairs(snapshot) do
+            if not eventModeReady() then break end
+            local item = entry.ItemInfo
+            -- Unknown candy caps must never be fabricated; confirmation is inventory-only.
+            if not _inventory:HasMax(item.Name) then
+                local ok, confirmed = pcall(CollectItem, item, entry.Index, nil, "event")
+                if not ok then
+                    moduleLog("WARN", "[EventFarm] Pickup failed: "..tostring(item.Name))
+                end
+                if not ok or not confirmed then
+                    -- Prevent spamming a failing prompt or full unknown-cap inventory.
+                    nextAttempt[entry.Index] = tick() + 8
+                else
+                    nextAttempt[entry.Index] = nil
+                    lastWaiting = false
+                end
+            end
+        end
+        if not eventModeReady() then break end
+        if tick() - lastItemTime > NO_ITEM_TIMEOUT then
+            if shouldSkipHop() then
+                if not lastWaiting then
+                    moduleLog("INFO", "[EventFarm] No confirmed candy for 20s; staying in private server.")
+                    lastWaiting = true
+                end
+                lastItemTime = tick()
+            else
+                moduleLog("INFO", "[EventFarm] Server dry; hopping without selling or buying.")
+                _serverHop:Hop(function() return eventModeReady() end)
+                lastItemTime = tick()
+            end
+        end
+        task.wait(0.7)
+    end
+    moduleLog("INFO", "[EventFarm] Candy-only collection paused/stopped.")
 end
 
 local function runCycle()
@@ -663,7 +751,9 @@ function Farm:Start()
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending() or not _config:Get("FarmEnabled")) do
+        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending()
+            or (not _config:Get("FarmEnabled") and not eventModeEnabled())
+            or (eventModeEnabled() and not eventModeReady())) do
             task.wait(0.5)
         end
         while not stopRequested and _config:Get("AutoPrestige") do
@@ -672,7 +762,7 @@ function Farm:Start()
         if stopRequested then break end
 
         cycleBusy = true
-        local ok, err = pcall(runCycle)
+        local ok, err = pcall(eventModeEnabled() and runEventCycle or runCycle)
         cycleBusy = false
         if not ok then
             moduleLog("WARN", "[Farm] Cycle error: " .. tostring(err))
