@@ -666,7 +666,7 @@ local moduleRequirements = {
     Settings = {"Init", "SetOption", "GetStatus", "Build", "Destroy"},
     AutoPrestigeRuntime = {"Init", "Start", "Stop", "IsBusy", "Register", "Watch", "GetStatus", "BuildStatus"},
     PrestigeDialogue = {"Init", "Run", "Drive", "Restore"},
-    CommunityFeatures = {"Init", "Build", "ScanEvent", "ScanDioOH", "StartPilot", "StopPilot", "StartDioOH", "StopDioOH", "Destroy"},
+    CommunityFeatures = {"Init", "Build", "ScanEvent", "StartPilot", "StopPilot", "Destroy"},
     Farm       = {"Init", "Start"},
     UI         = {"Init", "Create"},
 }
