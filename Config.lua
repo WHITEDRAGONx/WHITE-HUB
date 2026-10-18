@@ -14,6 +14,7 @@ local Defaults = {
     AutoSell = true,
     ConsoleFollow = true, -- Keep Console follow preference across server hops via WhiteHubConfig.json.
     FastSellHidden = true,
+    MerchantPacingBeta = false, -- opt-in signal pacing diagnostic; stable Zero Delay unchanged by default.
     FastPickupEnabled = false, -- opt-in measured timing, no extra prompt calls.
     HalloweenFastDialogue = false, -- opt-in client-rendering suppression.
     MerchantTeleportPosition = {}, -- explicit calibration or previously seen Merchant; numeric coords only.
@@ -102,6 +103,7 @@ local function ApplyDefaults(data)
     end
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
     if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
+    if type(data.MerchantPacingBeta) ~= "boolean" then data.MerchantPacingBeta = false end
     if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
     local merchantPos=data.MerchantTeleportPosition
     if type(merchantPos)~="table" or type(merchantPos.x)~="number"
