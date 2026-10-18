@@ -4,6 +4,14 @@ Modular YBA hub by WHITE DRAGON. Compact Silver interface, English controls
 and a copyable runtime Console. The public Main.lua entry point stays the same
 across feature and UI updates. The permanent public loader is hosted in WHITE-HUB.
 
+### Halloween Jack fix (2026-10-18)
+
+Event Turn-In uses a verified live Jack ProximityPrompt and checks the real Option2
+before submitting. Auto event trades return the player to the pre-transaction
+position. Auto Buy remains locked until a trusted event-point balance is available.
+The console shows candidate point-stat labels when no trusted balance is found.
+No purchase is attempted on an unverified balance.
+
 ## Loader
 
 ```lua
