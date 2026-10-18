@@ -110,6 +110,22 @@ function Community:StopPilot()
     pilot=nil
     disconnect(state.move)
     disconnect(state.respawn)
+    -- Restore the real player to the Stand before re-enabling physics. Anchored
+    -- bodies below the map must never be released in that hidden position.
+    if state.hrp and state.hrp.Parent and Player.Character==state.char then
+        pcall(function()
+            if state.root and state.root.Parent then
+                state.hrp.CFrame=state.root.CFrame*CFrame.new(0,3,0)
+            else
+                state.hrp.CFrame=state.originalBodyCFrame
+            end
+            state.hrp.AssemblyLinearVelocity=Vector3.zero
+            state.hrp.AssemblyAngularVelocity=Vector3.zero
+            state.hrp.Anchored=state.originalBodyAnchored
+        end)
+    elseif state.hrp and state.hrp.Parent then
+        pcall(function() state.hrp.Anchored=state.originalBodyAnchored end)
+    end
     disconnect(state.unsummon)
     disconnect(state.standGone)
     for obj, old in pairs(state.constraints) do
@@ -149,7 +165,7 @@ function Community:StopPilot()
     if self._pilotUI and self._pilotUI.SetToggleValue then
         pcall(function() self._pilotUI:SetToggleValue("Stand Pilot", false) end)
     end
-    log("INFO","[Pilot] Stopped; Stand root/humanoid constraints restored; camera returned to player.")
+    log("INFO","[Pilot] Stopped; hidden body/root/humanoid constraints restored; camera returned to player.")
     return true, "Stand Pilot OFF. Camera returned to player."
 end
 
@@ -213,13 +229,30 @@ function Community:StartPilot()
         createdFocus=createdFocus,oldFocus=previousFocus,constraints=constraints,
         rootAnchored=root.Anchored,walkSpeed=h.WalkSpeed,
         jumpPower=h.JumpPower,autoRotate=h.AutoRotate,
-        originalSubject=camera.CameraSubject
+        originalSubject=camera.CameraSubject,
+        originalBodyCFrame=hrp.CFrame,
+        originalBodyAnchored=hrp.Anchored,
+        bodyHideOffset=38,
+        hiddenBodyEnabled=false
     }
     pilot=state
     -- Keep the real character safe in place; never set its CFrame below map.
     for child in pairs(constraints) do child.Enabled=false end
     root.Anchored=true
     root.AssemblyLinearVelocity=Vector3.zero
+    -- Unlike making the local body invisible, positioning it below the Stand
+    -- is spatially visible to other clients IF Roblox replicates the move.
+    -- Anchor while hidden so gravity cannot drop it into the void.
+    local minSafeY=workspace.FallenPartsDestroyHeight+80
+    if root.Position.Y-state.bodyHideOffset>minSafeY then
+        hrp.Anchored=true
+        hrp.AssemblyLinearVelocity=Vector3.zero
+        hrp.CFrame=root.CFrame*CFrame.new(0,-state.bodyHideOffset,0)
+        state.hiddenBodyEnabled=true
+        log("INFO", "[Pilot] Hidden body anchored below Stand; original body location saved.")
+    else
+        log("WARN", "[Pilot] Hidden body not available near destroy height; body stays in place.")
+    end
     h.WalkSpeed=0
     h.JumpPower=0
     h.AutoRotate=false
@@ -270,6 +303,18 @@ function Community:StartPilot()
                 root.CFrame=CFrame.lookAt(pos,pos+vector.Unit)
             end
         end
+        -- Keep the real character below the moving Stand with its root anchored.
+        -- A floor-independent Y guard prevents the old falling-into-void failure.
+        if state.hiddenBodyEnabled then
+            if root.Position.Y-state.bodyHideOffset<=workspace.FallenPartsDestroyHeight+80 then
+                log("WARN","[Pilot] Stand approached unsafe void height; Pilot stopped and body restored.")
+                self:StopPilot()
+                return
+            end
+            hrp.Anchored=true
+            hrp.AssemblyLinearVelocity=Vector3.zero
+            hrp.CFrame=root.CFrame*CFrame.new(0,-state.bodyHideOffset,0)
+        end
         -- Some native camera controllers change CameraSubject after summon.
         local cam=workspace.CurrentCamera
         if cam and cam.CameraSubject~=root then
@@ -277,8 +322,10 @@ function Community:StartPilot()
             cam.CameraSubject=root
         end
     end)
-    log("INFO","[Pilot] Running beta; Stand root stabilized, character stays safely on map.")
-    return true,"Stand Pilot ON. Desummon Stand or toggle OFF to restore the player camera."
+    log("INFO","[Pilot] Running beta; anchored body hidden="..tostring(state.hiddenBodyEnabled)..", restore on stop/respawn.")
+    return true,state.hiddenBodyEnabled
+        and "Stand Pilot ON: body anchored below Stand; OFF restores character."
+        or "Stand Pilot ON: body hiding unavailable near void; OFF restores camera."
 end
 
 function Community:SetAntiAFK(on)
@@ -323,7 +370,7 @@ end
 function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, section, style, track)
     self._pilotUI=UI
     section(questPage, "STAND PILOT - BETA")
-    self._pilotToggle=UI:AddLabel(questPage, "Camera follows Stand. Character stays on map; auto-summons when possible.")
+    self._pilotToggle=UI:AddLabel(questPage, "Camera follows Stand; real body is anchored below it when safe. Stops/restores on desummon.")
     self._pilotToggle.TextWrapped=true
     UI._buildCommunityPilotToggle(questPage, "Stand Pilot", function(on)
         if on then
