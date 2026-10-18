@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PRIVATE-DEV-20261018-UNCAP-MERCHANT-AI-R5"
+local UI_BUILD = "SILVER-V5-PRIVATE-DEV-20261018-FLOOR-AI-R6"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -687,7 +687,7 @@ function UI:Create()
     Title.BorderSizePixel = 0
     Title.Position = UDim2.new(0, 34, 0, 0)
     Title.Size = UDim2.new(0, 115, 1, 0)
-    Title.Text = "WHITE HUB"
+    Title.Text = "WHITE DEV"
     Title.TextColor3 = THEME.WHITE
     Title.TextSize = 18
     Title.Font = Enum.Font.GothamBold
@@ -697,7 +697,7 @@ function UI:Create()
     versionLabel.BackgroundTransparency = 1
     versionLabel.Position = UDim2.new(0, 145, 0, 1)
     versionLabel.Size = UDim2.new(0, 94, 1, -2)
-    versionLabel.Text = "// V5 SILVER"
+    versionLabel.Text = "// WHITE AI"
     versionLabel.TextColor3 = THEME.GOLD_BRIGHT
     versionLabel.TextSize = 11
     versionLabel.Font = Enum.Font.GothamBold
