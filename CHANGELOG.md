@@ -1,5 +1,25 @@
 # Changelog
 
+## Halloween Exchange opt-in beta — 2026-10-18 (V5 Silver R2)
+
+- User confirmed that Jack's "I want to turn in my candy." converts collected
+  event candies into event points; previous scanner output showed the dialogue
+  but did not capture pre/post point balances.
+- HalloweenExchange.lua handles a single Jack Option2 turn-in with inventory
+  before/after verification. When an event-specific points Value is exposed,
+  also requires a points increase; unresolved outcomes lock retries this runtime.
+- Events tab now has Auto Turn-In Candy (opt-in) at the next event-farm dry server
+  checkpoint, and a TURN IN CANDY NOW one-shot button when farms are disabled.
+- Explicit Auto Buy Selected Reward (once) or BUY SELECTED REWARD NOW: resolves
+  exact 2026/2022/2021/normal items and observed prices, requires a validated
+  event-specific numeric point balance, checks category/item option labels,
+  dispatches only one selected item and verifies point deduction.
+- Buy permission resets OFF on every load/server hop, a selected target is not
+  spending authorization, and ambiguous buy results block repeats. No unknown
+  purchase-confirmation pages are blindly advanced.
+- Only the existing Events Farm worker runs automatic trades; no parallel movement
+  worker and no changes to Inventory.lua or Merchant. Live Delta tests required.
+
 ## Events Items Farm and Halloween reward preview — 2026-10-18 (V5 Silver R1)
 
 - Sidebar order: Farm, Events, Stand; Events toggle is "Events Items Farm".
