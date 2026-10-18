@@ -452,7 +452,9 @@ local function DoHop()
     if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _inventory:BuyLucky()
     if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
-    if runAutoHalloween then runAutoHalloween("farm-checkpoint") end
+    -- Do not hop immediately after Jack: allow a later safe checkpoint to
+    -- observe updated candy/point state and process a separately armed reward.
+    if runAutoHalloween and runAutoHalloween("farm-checkpoint") then return end
     if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _serverHop:Hop(function()
         return not stopRequested and not manualSellBusy and _config:Get("FarmEnabled")
@@ -520,7 +522,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     required=prestige and math.min(tonumber(required) or 1,_inventory:GetMax(name) or 1) or 1
     if required<1 or required>50 or required%1~=0 then return false,"Invalid restock amount" end
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
-    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or halloweenTradeBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
@@ -672,11 +674,14 @@ local function runEventCycle()
         if tick() - lastItemTime > NO_ITEM_TIMEOUT then
             -- Event trade is serialized on this same worker, after all pickups.
             -- No Merchant sale or normal Farm phases are called here.
+            local jackTradeAttempted=false
             if _halloween and eventModeReady() then
-                runAutoHalloween("event-farm")
+                jackTradeAttempted=runAutoHalloween("event-farm")
             end
             if not eventModeReady() then break end
-            if shouldSkipHop() then
+            if jackTradeAttempted then
+                moduleLog("INFO","[EventFarm][JackAuto] Checkpoint processed; deferring server hop.")
+            elseif shouldSkipHop() then
                 if not lastWaiting then
                     moduleLog("INFO", "[EventFarm] No confirmed candy for 20s; staying in private server.")
                     lastWaiting = true
