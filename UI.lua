@@ -879,8 +879,9 @@ function UI:Create()
         end
         if _config then
             if v then
-                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false})
+                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false, HalloweenAutoBuy=false})
                 UI:SetToggleValue("Events Items Farm", false)
+                UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
             else
                 _config:Set("FarmEnabled", false)
             end
@@ -1396,7 +1397,8 @@ function UI:Create()
             runtimeLog("INFO", "[EventFarm] Candy-only mode enabled.")
             UI:ShowPopup("Event Farm ON: only Yellow, Blue, Green and Red Candy.",5)
         else
-            _config:Set("EventItemsFarmEnabled", false)
+            _config:SetMany({EventItemsFarmEnabled=false,HalloweenAutoBuy=false})
+            UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
             runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
         end
     end)
