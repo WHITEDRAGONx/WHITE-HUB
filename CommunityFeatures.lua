@@ -684,10 +684,10 @@ function Community:TeleportToLandmark(landmark,allowEventTrade)
         local live,path=liveLandmarkPosition("merchant")
         if not live then
             log("WARN","[Teleport] No saved Merchant floor; StreamingEnabled may hide the NPC.")
-            return false,"Go to Merchant once and press SAVE MERCHANT POSITION."
+            return false,"Merchant floor position is not configured on this device."
         end
         -- Live NPC center is not a verified standing position on a multi-storey map.
-        return false,"Merchant NPC detected ("..tostring(path).."); stand beside it and SAVE MERCHANT POSITION once."
+        return false,"Merchant NPC detected ("..tostring(path).."), but no calibrated floor position is configured."
     end
     if landmark=="arcade" then
         local saved=savedFloorPosition("ArcadeTeleportPosition")
@@ -698,7 +698,7 @@ function Community:TeleportToLandmark(landmark,allowEventTrade)
         -- The observed Workspace.Locations.The Arcade marker is at roof height.
         -- Old preset could also land within the roof; fail closed until ground is saved.
         log("WARN","[Teleport] Arcade landmark is roof-level; a floor calibration is required.")
-        return false,"Visit the Arcade entrance/floor and press SAVE ARCADE ENTRANCE once."
+        return false,"Arcade floor position is not configured on this device."
     end
     local label=landmark=="jack" and "Jack, The Cauldron Specter" or tostring(landmark)
     local live,path=liveLandmarkPosition(landmark)
@@ -858,26 +858,12 @@ function Community:ReturnFromTeleport()
 end
 function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     section(page,"QUICK TRAVEL")
-    UI:AddLabel(page,"Merchant and Arcade use saved floor points to avoid rooftops. Calibrate once at the correct floor; Jack uses its streamed NPC.").TextWrapped=true
+    UI:AddLabel(page,"Merchant and Arcade use existing saved floor locations. Jack uses the streamed NPC. Saved positions are preserved.").TextWrapped=true
     button(page,"TELEPORT TO MERCHANT",function()
         return self:TeleportToLandmark("merchant")
     end,UI,style,track)
-    button(page,"SAVE MERCHANT POSITION",function()
-        return self:SaveMerchantTeleportHere()
-    end,UI,style,track)
     button(page,"TELEPORT TO ARCADE",function()
         return self:TeleportToLandmark("arcade")
-    end,UI,style,track)
-    local arcadeCalibrated=savedFloorPosition("ArcadeTeleportPosition")~=nil
-    local arcadeStatus=UI:AddLabel(page,arcadeCalibrated and
-        "ARCADE: saved floor found. TELEPORT TO ARCADE is ready." or
-        "ARCADE: not calibrated. Stand on the real entrance floor, stop farms, then SAVE ARCADE ENTRANCE.")
-    arcadeStatus.TextWrapped=true
-    arcadeStatus.Size=UDim2.new(1,-4,0,42)
-    button(page,"SAVE ARCADE ENTRANCE",function()
-        local ok,msg=self:SaveArcadeTeleportHere()
-        arcadeStatus.Text=(ok and "ARCADE: " or "ARCADE SAVE FAILED: ")..tostring(msg)
-        return ok,msg
     end,UI,style,track)
     button(page,"TELEPORT TO HALLOWEEN JACK",function()
         return self:TeleportToLandmark("jack")
