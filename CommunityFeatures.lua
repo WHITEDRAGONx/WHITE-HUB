@@ -429,15 +429,39 @@ local function findWorldPart(inst)
     if inst:IsA("Model") and inst.PrimaryPart then return inst.PrimaryPart end
     return inst:FindFirstChildWhichIsA("BasePart",true)
 end
+-- StreamingEnabled can leave only 2-3 physical quest NPCs in Workspace.
+-- Include the known quest catalogue so the picker is not artificially tiny.
+-- Teleporting still requires a real, currently visible NPC position.
+local questNamesForTeleport={
+    "Officer Sam [Lvl. 1+]",
+    "Deputy Bertrude [Lvl. 10+]",
+    "Abbacchio's Partner [Lvl 15+]",
+    "Homeless Man Jill [Lvl. 15+]",
+    "Dracula [Lvl. 20+]",
+    "William Zeppeli [Lvl. 25+]",
+    "Doppio [Lvl. 30+]",
+    "Dio [Lvl. 35+]",
+    "Darius, The Executioner [Lvl. 20+]",
+    "Kars [Lvl. 30+]",
+    "Pucci [Lvl. 40+]",
+    "Jotaro (Tallest Peak)",
+}
 local function liveQuestNames()
-    local folder=workspace:FindFirstChild("Dialogues")
-    local results={}
-    local seen={}
-    if folder then
-        for _, inst in ipairs(folder:GetChildren()) do
-            if inst.Name~="" and not seen[inst.Name] then
-                results[#results+1]=inst.Name
-                seen[inst.Name]=true
+    local results, seen={},{}
+    local function add(name)
+        if type(name)=="string" and name~="" and not seen[name] then
+            seen[name]=true
+            results[#results+1]=name
+        end
+    end
+    for _,name in ipairs(questNamesForTeleport) do add(name) end
+    for _, folder in ipairs({workspace:FindFirstChild("Dialogues"),
+        ReplicatedStorage:FindFirstChild("NewDialogue")}) do
+        if folder then
+            for _,inst in ipairs(folder:GetChildren()) do
+                local n=inst.Name
+                if n:lower():find("lvl",1,true) or n:lower():find("jotaro",1,true)
+                    or n:lower():find("quest",1,true) then add(n) end
             end
         end
     end
@@ -545,6 +569,7 @@ function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     local quests=liveQuestNames()
     local selectedQuest=quests[1]
     local _,updateQuests=dropdown(page,"Quest NPC",quests,function(name) selectedQuest=name end)
+    UI:AddLabel(page, "Scroll dropdown for all quests; remote NPCs may not be streamed in.").TextWrapped=true
     button(page,"TELEPORT TO QUEST NPC",function()
         return self:TeleportToNPC(selectedQuest,true)
     end,UI,style,track)
