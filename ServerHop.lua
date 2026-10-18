@@ -136,8 +136,7 @@ end
 -- Fetch one read-only page while Merchant work is already running. A guarded
 -- Hop still validates state/destination before teleport; no automatic transfer.
 function ServerHop:Prepare()
-    -- Fresh Place matchmaking does not use the public-server list or its cache.
-    if _config and _config:Get("CleanHopBeta")==true then return false end
+    -- Both classic and clean hops now prefetch eligible public servers.
     if prepareBusy or hopBusy or (_config and _config:Get("StayInPrivateServer")) then return false end
     resetHourlyCacheIfNeeded()
     local url = serverListURL()
@@ -212,9 +211,10 @@ function ServerHop:Init(Modules)
     moduleLog("INFO", "[ServerHop] Auto Rejoin enabled; one attempt per runtime, no automatic retry loop")
 end
 
--- CLEAN HOP (opt-in): like pressing Play, ask Roblox matchmaking for a
--- fresh Place session instead of selecting a particular JobId. Unlike a full
--- application relaunch this cannot reset the Roblox process or Delta VM.
+-- CLEAN HOP (opt-in): choose a DIFFERENT live JobId and request an explicit
+-- instance transfer, then clean up only after Roblox confirms InProgress.
+-- Fresh Place matchmaking was removed: it can route us back to the same JobId.
+-- Unlike relaunching from Play, neither teleport resets the Roblox/Delta VM.
 -- Do not destroy running modules until Roblox reports InProgress: a request
 -- can fail or be refused, in which case the current Farm must remain usable.
 local function disconnectCleanHopListeners()
@@ -273,6 +273,8 @@ function ServerHop:CleanHop(canContinue)
     local epoch=cleanHopEpoch
     local transitionStarted=false
     local cleanupPerformed=false
+    local originJob=tostring(game.JobId)
+    local targetJob=nil
     disconnectCleanHopListeners()
     local function fail(reason)
         if epoch~=cleanHopEpoch then return end
@@ -289,7 +291,8 @@ function ServerHop:CleanHop(canContinue)
                 if not cleanupPerformed then fail("TeleportState.Failed") end
             elseif state==Enum.TeleportState.Started then
                 transitionStarted=true
-                moduleLog("INFO","[CleanHop] Teleport Started; waiting for transfer confirmation")
+                moduleLog("INFO","[CleanHop] Teleport Started: source="..originJob..
+                    " target="..tostring(targetJob).."; waiting for transfer confirmation")
             elseif state==Enum.TeleportState.InProgress then
                 if cleanupPerformed then return end
                 transitionStarted=true
@@ -317,17 +320,41 @@ function ServerHop:CleanHop(canContinue)
     end)
     if okFailure and failureSignal then table.insert(cleanHopConnections,failureSignal) end
 
-    -- A new Place join is closer to Roblox's Play action, but matchmaking
-    -- MAY return to this same JobId. No server-list API or forced-instance hop.
-    moduleLog("INFO","[CleanHop] Requesting fresh Place matchmaking (Play-style), source JobId="..tostring(game.JobId))
-    local ok,err=pcall(function() TeleportService:Teleport(PlaceID,Player) end)
+    -- Matchmaking by PlaceId alone often returns to originJob. Reuse the
+    -- proven server-list selector (which excludes game.JobId and visited IDs)
+    -- while retaining the separate transfer-confirmed cleanup lifecycle.
+    local function permitted()
+        return epoch==cleanHopEpoch and cleanHopRequested and
+            (not canContinue or canContinue())
+    end
+    local function selected(id)
+        if not permitted() or tostring(id)==originJob then return false end
+        targetJob=tostring(id)
+        moduleLog("INFO","[CleanHop] Selected distinct destination: source="..
+            originJob.." target="..targetJob)
+        return true
+    end
+    moduleLog("INFO","[CleanHop] Searching for a different public JobId; source="..originJob)
+    local ok,requested=pcall(function()
+        if TPReturner(permitted,selected) then return true end
+        if not permitted() then return false end
+        -- Inspect at most the next page. Never fall back to PlaceId matchmaking
+        -- or silently send the player to the original JobId.
+        if foundAnything~="" then return TPReturner(permitted,selected) end
+        return false
+    end)
     if not ok then
-        fail(err)
+        fail("server selection/teleport error: "..tostring(requested))
         return false
     end
-    moduleLog("INFO","[CleanHop] Teleport accepted by API; arrival is NOT confirmed yet")
-    -- A long matchmaking wait must not trigger a second automatic teleport.
-    -- Failure is handled only by TeleportInitFailed / TeleportState.Failed.
+    if not requested then
+        fail("no eligible different public JobId found, or request canceled")
+        return false
+    end
+    moduleLog("INFO","[CleanHop] Instance teleport requested: "..originJob..
+        " -> "..tostring(targetJob).."; arrival NOT confirmed yet")
+    -- A long transfer wait must not initiate a second teleport.
+    -- Failure is handled by TeleportInitFailed / TeleportState.Failed.
     task.delay(45,function()
         if epoch==cleanHopEpoch and cleanHopRequested and not cleanupPerformed then
             moduleLog("WARN","[CleanHop] Still awaiting teleport after 45s (started="..
