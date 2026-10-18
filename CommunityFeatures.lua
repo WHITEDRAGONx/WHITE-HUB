@@ -501,15 +501,6 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
             UI:ShowPopup(reason,3)
         end
     end)
-    section(eventsPage,"HALLOWEEN EVENT - DISCOVERY")
-    button(eventsPage,"SCAN HALLOWEEN CANDY / NPCS",function() return self:ScanEvent() end,UI,style,track)
-    button(eventsPage,"SCAN CANDY INVENTORY",function() return self:ScanCandy() end,UI,style,track)
-    button(eventsPage,"GO TO HALLOWEEN JACK",function() return self:TeleportToLandmark("jack") end,UI,style,track)
-    button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
-    button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
-    button(eventsPage,"RECORD JACK DIALOGUE (30S)",function() return self:WatchEventDialogue(30) end,UI,style,track)
-    local label=UI:AddLabel(eventsPage,"Dialogue scanner is READ-ONLY. Halloween Exchange beta has separate opt-in buttons above; monitor candy counts and event points after each action.")
-    label.TextWrapped=true
     section(settingsPage,"AFK / STABILITY")
     button(settingsPage,"TOGGLE ANTI-AFK",function()
         return self:SetAntiAFK(not (config:Get("CommunityAntiAFK")==true))
