@@ -1,15 +1,16 @@
 -- Presentation only: reparent controls without replacing callbacks or config keys.
 local Compact={}
 local captions={
+ ['Auto Prestige']='Auto prestige (BETA)',
  ['Enable Farm']='Item farm', ['Auto Buy Lucky']='Buy Lucky',
  ['Stay in Private Server']='Stay in server', ['Auto Restock Consumables (BETA)']='Auto restock',
  ['Hop After Restock Limit (BETA)']='Restock hop', ['Auto Resume Owned Hop (BETA)']='Resume owned hop',
  ['Shiny Farm Mode (BETA)']='Shiny mode', ['Stand Farm (BETA)']='Stand farm',
  ['Add Skill (press a key)']='Add skill', ['Clear Skills']='Clear skills',
  ['CANCEL RESTOCK TRANSFER / STOP']='STOP / CANCEL HOP',
- ['COPY LATEST PROPOSAL LINK']='COPY PROPOSAL', ['SAVE HTTPS ENDPOINT']='SAVE ENDPOINT',
+
  ['Stand consumable']='Consumable', ['Target Stand']='Stand', ['Select Quest']='Quest', ['Select NPC']='NPC',
- ['WHITE AI V1 - DIAGNOSTICS']='AI DIAGNOSTICS', ['STAND FARM - EXPERIMENTAL']='STAND / BETA',
+ ['STAND FARM - EXPERIMENTAL']='STAND / BETA',
  ['FARM SETTINGS']='AUTOMATION', ['QUEST FARM']='QUEST', ['NPC FARM']='NPC',
 }
 function Compact:Init() end

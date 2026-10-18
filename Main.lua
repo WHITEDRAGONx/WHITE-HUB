@@ -1,3 +1,4 @@
+-- WHITE HUB V5 PUBLIC BETA — owner-authorized release; Auto Prestige is experimental.
 -- =====================
 -- Main.lua (WHITE HUB V3 modular)
 -- Safe re-execution + fail-fast boot diagnostics.
@@ -535,8 +536,7 @@ end
 env.AutoPrestigeEnabled = false
 local previous = _G.WhiteHubModules
 if previous then
-    for _, name in ipairs({"UI", "CombatFarm", "Farm", "ServerHop", "Movement"}) do
-        local module = previous[name]
+    for _, module in pairs(previous) do
         if module and module.Destroy then
             pcall(function() module:Destroy() end)
         elseif module and module.Stop then
@@ -559,7 +559,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"UI", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"HalloweenExchange", "CommunityFeatures", "AutoPrestigeRuntime", "Settings", "CatalogRefresh", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -656,6 +656,18 @@ local moduleRequirements = {
     ServerHop  = {"Init"},
     Inventory  = {"Init"},
     CombatFarm = {"Init"},
+    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
+    StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
+    StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
+    CatalogRefresh = {"Init", "GetNames", "GetState", "Refresh", "Destroy"},
+    GameCatalog = {"Init", "Names", "GetSkins", "GetQuests", "IsInfo"},
+    ChoiceUI = {"Init", "Build", "Toggle", "Filter", "Close", "Destroy"},
+    UICompact = {"Init", "Caption", "Arrange", "Observe", "Responsive", "ScaleFor"},
+    Settings = {"Init", "SetOption", "GetStatus", "Build", "Destroy"},
+    AutoPrestigeRuntime = {"Init", "Start", "Stop", "IsBusy", "Register", "Watch", "GetStatus", "BuildStatus"},
+    PrestigeDialogue = {"Init", "Run", "Drive", "Restore"},
+    CommunityFeatures = {"Init", "Build", "ScanEvent", "StartPilot", "StopPilot", "Destroy"},
+    HalloweenExchange = {"Init", "TurnInCandy", "BuySelectedReward", "GetCandyTotal", "GetPoints", "IsBusy", "Destroy"},
     Farm       = {"Init", "Start"},
     UI         = {"Init", "Create"},
 }
@@ -732,6 +744,18 @@ local moduleFiles = {
     { key = "ServerHop",  file = "ServerHop.lua" },
     { key = "Inventory",  file = "Inventory.lua" },
     { key = "CombatFarm", file = "CombatFarm.lua" },
+    { key = "StandFarm",  file = "StandFarm.lua" },
+    { key = "StandTransfer", file = "StandTransfer.lua" },
+    { key = "StandV2UI", file = "StandV2UI.lua" },
+    { key = "CatalogRefresh", file = "CatalogRefresh.lua" },
+    { key = "GameCatalog", file = "GameCatalog.lua" },
+    { key = "ChoiceUI", file = "ChoiceUI.lua" },
+    { key = "UICompact", file = "UICompact.lua" },
+    { key = "Settings", file = "Settings.lua" },
+    { key = "PrestigeDialogue", file = "PrestigeDialogue.lua" },
+    { key = "AutoPrestigeRuntime", file = "AutoPrestigeRuntime.lua" },
+    { key = "CommunityFeatures", file = "CommunityFeatures.lua" },
+    { key = "HalloweenExchange", file = "HalloweenExchange.lua" },
     { key = "Farm",       file = "Farm.lua" },
     { key = "UI",         file = "UI.lua" },
 }
@@ -778,7 +802,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "Farm", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "Settings", "UICompact", "CatalogRefresh", "GameCatalog", "ChoiceUI", "CommunityFeatures", "HalloweenExchange", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()
@@ -831,4 +855,6 @@ task.spawn(function()
     end
 end)
 
-LOG("BOOT", "WHITE HUB V3 running. All critical modules passed boot validation.")
+LOG("BOOT", "WHITE HUB V5 PUBLIC BETA running. All critical modules passed boot validation.")
+-- Only a valid one-use arrival intent can authorize the opt-in exception.
+Modules.StandFarm:RecoverTransfer()

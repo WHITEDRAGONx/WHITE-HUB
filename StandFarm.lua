@@ -773,7 +773,7 @@ local function restockHop(token, name, selected, mode)
         chain.hops=chain.hops+1
         if issuedRecord then chain.visited=issuedRecord.visited end
         stoppedOn = issuedRecord and "Teleport requested; one-use opt-in resume armed for destination"
-            or "Teleport requested; reload DevMain and restart beta manually after joining"
+            or "Teleport requested; reload Main and restart beta manually after joining"
         log("INFO", stoppedOn)
         return true
     end

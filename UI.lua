@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-20261013-R4"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -92,6 +92,7 @@ local function styleActionButton(button, primary)
 end
 
 local _config      = nil
+local _farm        = nil
 local _webhook     = nil
 local _combatFarm  = nil
 local _standFarm = nil
@@ -99,9 +100,11 @@ local _standV2UI = nil
 local _prestigeRuntime = nil
 local _compactUI = nil
 local _settings = nil
+local _community = nil
+local _whiteAI = nil
+local _halloween = nil
 local _catalog, _choices = nil, nil
 local _serverHop   = nil
-local _whiteAI     = nil
 local _runtimeLog   = nil
 
 local toggleObjects = {}
@@ -121,6 +124,7 @@ local npcDropdownRefresh = nil
 
 function UI:Init(Modules)
     _config      = Modules.Config
+    _farm        = Modules.Farm
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
@@ -128,9 +132,11 @@ function UI:Init(Modules)
     _prestigeRuntime = Modules.AutoPrestigeRuntime
     _compactUI = Modules.UICompact
     _settings = Modules.Settings
+    _community = Modules.CommunityFeatures
+    _whiteAI = Modules.WhiteAI
+    _halloween = Modules.HalloweenExchange
     _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
     _serverHop   = Modules.ServerHop
-    _whiteAI    = Modules.WhiteAI
     _runtimeLog  = Modules.RuntimeLog
 end
 
@@ -438,7 +444,11 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
         menu = Instance.new("ScrollingFrame")
         menu.BackgroundColor3 = THEME.PANEL2
         menu.BorderSizePixel = 0
-        menu.ScrollBarThickness = 5
+        menu.ScrollBarThickness = 7
+        menu.Active = true
+        menu.ScrollingEnabled = true
+        menu.ScrollingDirection = Enum.ScrollingDirection.Y
+        menu.ScrollBarImageColor3 = THEME.GOLD
         menu.ZIndex = 20
         menu.Parent = container
         Instance.new("UICorner", menu).CornerRadius = UDim.new(0,7)
@@ -468,12 +478,21 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
         end
 
         local count = #currentOptions
-        local height = math.min(math.max(count, 1) * 32, 150)
-        menu.Size = UDim2.new(0, 200, 0, height)
-        menu.CanvasSize = UDim2.new(0,0,0,count * 32)
+        local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+            or Vector2.new(720, 520)
+        local height = math.min(math.max(count, 1)*32, math.max(100, viewport.Y*0.48), 280)
+        local width = math.min(280, math.max(120, viewport.X-16))
+        menu.Size = UDim2.fromOffset(width, height)
+        menu.CanvasSize = UDim2.fromOffset(0, count*32)
         local btnAbsPos = dropdownBtn.AbsolutePosition
         local btnSize = dropdownBtn.AbsoluteSize
-        menu.Position = UDim2.new(0, btnAbsPos.X, 0, btnAbsPos.Y + btnSize.Y)
+        -- Keep the full scrolling popup inside the display on mobile.
+        local x = math.clamp(btnAbsPos.X, 8, math.max(8, viewport.X-width-8))
+        local below = btnAbsPos.Y + btnSize.Y + 4
+        local above = btnAbsPos.Y-height-4
+        local y = below + height <= viewport.Y-8 and below
+            or (above >= 8 and above or math.clamp(below,8,math.max(8,viewport.Y-height-8)))
+        menu.Position = UDim2.fromOffset(x,y)
 
         outsideConnection = UserInputService.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
@@ -755,22 +774,26 @@ function UI:Create()
     local StandPage   = MakePage("StandPage")
     local ItemsPage   = MakePage("ItemsPage")
     local QuestPage   = MakePage("QuestPage")
+    local TeleportPage = MakePage("TeleportPage")
     local WebhookPage = MakePage("WebhookPage")
     local ConsolePage = MakePage("ConsolePage")
+    local AIPage = MakePage("AIPage")
     local SettingsPage = MakePage("SettingsPage")
-    local AIPage      = MakePage("AIPage")
+    local EventsPage = MakePage("EventsPage")
     local CreditsPage = MakePage("CreditsPage")
     FarmPage.Visible = true
 
     local tabDefs = {
         { name="Farm",    page=FarmPage    },
+        { name="Events",  page=EventsPage  },
         { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
+        { name="Teleport", page=TeleportPage },
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
-        { name="Settings", page=SettingsPage },
         { name="AI DEBUG", page=AIPage },
+        { name="Settings", page=SettingsPage },
         { name="Credits", page=CreditsPage },
     }
     local tabButtons = {}
@@ -858,7 +881,15 @@ function UI:Create()
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
         end
-        if _config then _config:Set("FarmEnabled", v) end
+        if _config then
+            if v then
+                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false, HalloweenAutoBuy=false})
+                UI:SetToggleValue("Events Items Farm", false)
+                UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+            else
+                _config:Set("FarmEnabled", false)
+            end
+        end
         if not v then
             print("[UI] Farm disabled by user.")
             runtimeLog("INFO", "Farm disabled by user.")
@@ -917,18 +948,23 @@ function UI:Create()
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
         if _prestigeRuntime then
             if not v then _prestigeRuntime:Stop(); return end
-            _config:SetMany({FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
+            _config:SetMany({FarmEnabled=false,EventItemsFarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
             if _standFarm then _standFarm:Stop() end
             if _combatFarm then _combatFarm:Stop() end
-            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
+            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Events Items Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
             UI:SetToggleValue("Quest Farm",false); UI:SetToggleValue("NPC Farm",false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("Auto Prestige", false)
+                UI:ShowPopup("Pickup is still finishing; retry Auto Prestige.", 5)
+                return
+            end
             local ok,reason=_prestigeRuntime:Start()
             if not ok then UI:SetToggleValue("Auto Prestige",false); UI:ShowPopup(tostring(reason),6) end
             return
         end
         if _config then
             if v then
-                _config:SetMany({ AutoPrestige = true, QuestFarmEnabled = false, NPCFarmEnabled = false })
+                _config:SetMany({ AutoPrestige = true, EventItemsFarmEnabled = false, QuestFarmEnabled = false, NPCFarmEnabled = false })
             else
                 _config:Set("AutoPrestige", false)
             end
@@ -941,6 +977,7 @@ function UI:Create()
             end
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("NPC Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             if _combatFarm then _combatFarm:Stop() end
             print("[UI] Auto Prestige enabled.")
             runtimeLog("INFO", "Auto Prestige enabled.")
@@ -1067,6 +1104,11 @@ function UI:Create()
     end))
 
     MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+        if enabled and _config and _config:Get("EventItemsFarmEnabled") then
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+            UI:ShowPopup("Disable Events Items Farm before starting Stand Farm.", 5)
+            return
+        end
         if enabled and not stopPrestigeForSwitch("Stand Farm (BETA)") then return end
         if not _standFarm then
             UI:SetToggleValue("Stand Farm (BETA)", false)
@@ -1114,6 +1156,46 @@ function UI:Create()
     -- ITEMS PAGE
     -- =====================
     MakeSection(ItemsPage, "SELL ITEMS")
+
+    -- Manual one-shot Merchant sale: independent of the Auto Sell toggle and
+    -- the Server Hop timer. The same saved item selection is respected.
+    local sellNowButton = Instance.new("TextButton")
+    sellNowButton.Name = "SellNow"
+    sellNowButton.Size = UDim2.new(1, -4, 0, 36)
+    sellNowButton.Text = "SELL NOW"
+    sellNowButton.Font = Enum.Font.GothamBold
+    sellNowButton.TextSize = 13
+    sellNowButton.Parent = ItemsPage
+    styleActionButton(sellNowButton, true)
+
+    local manualSaleUiBusy = false
+    trackConnection(sellNowButton.MouseButton1Click:Connect(function()
+        if manualSaleUiBusy then return end
+        if not _farm or type(_farm.SellNow) ~= "function" then
+            UI:ShowPopup("Manual Merchant sale is unavailable.", 4)
+            return
+        end
+        manualSaleUiBusy = true
+        sellNowButton.Text = "SELLING..."
+        task.spawn(function()
+            local ok, sold, description = pcall(function()
+                return _farm:SellNow()
+            end)
+            if ok and sold then
+                runtimeLog("INFO", "SELL NOW: " .. tostring(description))
+                UI:ShowPopup(tostring(description), 4)
+            else
+                local reason = ok and tostring(description) or "Unexpected sale error; see Console"
+                runtimeLog("WARN", "SELL NOW: " .. reason)
+                UI:ShowPopup(reason, 5)
+            end
+            if sellNowButton and sellNowButton.Parent then
+                sellNowButton.Text = "SELL NOW"
+            end
+            manualSaleUiBusy = false
+        end)
+    end))
+
     local itemOrder = { "Gold Coin","Diamond","Rokakaka","Pure Rokakaka","Mysterious Arrow","Lucky Arrow","Lucky Stone Mask","Ancient Scroll","Caesar's Headband","Stone Mask","Rib Cage of The Saint's Corpse","Quinton's Glove","Zeppeli's Hat","Clackers","Steel Ball","Dio's Diary", }
     for _, name in ipairs(itemOrder) do
         local default = _config and _config:GetSellItem(name)
@@ -1160,9 +1242,18 @@ function UI:Create()
     -- Quest/NPC are mutually exclusive and CombatFarm enforces one worker.
     MakeToggle(QuestPage, "Quest Farm", _config and _config:Get("QuestFarmEnabled"), function(v)
         if v and not stopPrestigeForSwitch("Quest Farm") then return end
+        if v and _config and _config:Get("EventItemsFarmEnabled") then
+            _config:Set("EventItemsFarmEnabled", false)
+            UI:SetToggleValue("Events Items Farm", false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("Quest Farm", false)
+                UI:ShowPopup("Event pickup is still in progress. Try Quest Farm again.", 5)
+                return
+            end
+        end
         if _config then
             if v then
-                _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, AutoPrestige = false })
+                _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
             else
                 _config:Set("QuestFarmEnabled", false)
             end
@@ -1174,6 +1265,7 @@ function UI:Create()
             end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("NPC Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
             runtimeLog("INFO", "Quest Farm enabled.")
             if _combatFarm then _combatFarm:StartQuest() end
@@ -1200,9 +1292,18 @@ function UI:Create()
     
     MakeToggle(QuestPage, "NPC Farm", _config and _config:Get("NPCFarmEnabled"), function(v)
         if v and not stopPrestigeForSwitch("NPC Farm") then return end
+        if v and _config and _config:Get("EventItemsFarmEnabled") then
+            _config:Set("EventItemsFarmEnabled", false)
+            UI:SetToggleValue("Events Items Farm", false)
+            if _farm and _farm.WaitForCollection and not _farm:WaitForCollection(3) then
+                UI:SetToggleValue("NPC Farm", false)
+                UI:ShowPopup("Event pickup is still in progress. Try NPC Farm again.", 5)
+                return
+            end
+        end
         if _config then
             if v then
-                _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, AutoPrestige = false })
+                _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
             else
                 _config:Set("NPCFarmEnabled", false)
             end
@@ -1214,6 +1315,7 @@ function UI:Create()
             end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("Quest Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
             runtimeLog("INFO", "NPC Farm enabled.")
             if _combatFarm then _combatFarm:StartNPC() end
@@ -1270,7 +1372,183 @@ function UI:Create()
         end
     end)
     
+
+    -- Separate item collection mode, reusing Farm.lua and original pickup guards.
+    MakeSection(EventsPage, "EVENT ITEMS FARM")
+    MakeToggle(EventsPage, "Events Items Farm",
+        _config and _config:Get("EventItemsFarmEnabled") == true, function(on)
+        if not _config then return end
+        if on then
+            local blocked = _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
+                or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled")
+            if _prestigeRuntime and _prestigeRuntime:IsBusy() then blocked = true end
+            if _standFarm and _standFarm:IsRunning() then blocked = true end
+            if _combatFarm then
+                local combatRunning = _combatFarm:IsRunning()
+                if combatRunning then blocked = true end
+            end
+            if _community and _community.IsPiloting and _community:IsPiloting() then
+                blocked = true
+            end
+            if _farm and _farm.CanEnableEvent and not _farm:CanEnableEvent() then blocked = true end
+            if blocked then
+                UI:SetToggleValue("Events Items Farm",false)
+                UI:ShowPopup("Stop Prestige, Stand, Quest or NPC Farm before enabling Event Farm.",6)
+                return
+            end
+            _config:SetMany({FarmEnabled=false, EventItemsFarmEnabled=true})
+            UI:SetToggleValue("Enable Farm", false)
+            runtimeLog("INFO", "[EventFarm] Candy-only mode enabled.")
+            UI:ShowPopup("Event Farm ON: only Yellow, Blue, Green and Red Candy.",5)
+        else
+            _config:SetMany({EventItemsFarmEnabled=false,HalloweenAutoBuy=false})
+            UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+            runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
+        end
+    end)
+    -- Read-only reward wishlist based on 39 captured dialogue states from Jack.
+    -- User can choose target; no purchase/candy action until server behavior is proven.
+    MakeSection(EventsPage, "HALLOWEEN REWARDS - BETA")
+    local rewards={
+        ["2026 Halloween Event Items"]={
+            {"Boxing Blobs (Boxing Gloves Skin)",60},
+            {"Spectral Marrow (Pluck Skin)",70},
+            {"Jack-o-Ball (Steel Ball Skin)",45},
+            {"Sanguine Veil (Umbrella Skin)",75}
+        },
+        ["2022 Halloween Event Items"]={
+            {"Eye of The Saint's Corpse (Steel Ball Skin)",45},
+            {"Bone Gloves (Boxing Gloves Skin)",60},
+            {"Cursed Scythe (Pluck Skin)",70}
+        },
+        ["2021 Halloween Event Items"]={
+            {"Stop Sign",45},{"Boxing Claws (Boxing Gloves Skin)",60},
+            {"Scythe (Pluck Skin)",70},{"Random Halloween Cosmetic",25}
+        },
+        ["Normal Items"]={
+            {"Mysterious Arrow",2},{"Rokakaka",3},
+            {"Rib Cage of The Saint's Corpse",5},{"DIO's Diary",10},
+            {"Green Baby",15},{"Lucky Arrow",100}
+        },
+    }
+    local categoryNames={
+        "2026 Halloween Event Items", "2022 Halloween Event Items",
+        "2021 Halloween Event Items", "Normal Items"
+    }
+    local currentCategory=_config:Get("HalloweenRewardCategory")
+    if not rewards[currentCategory] then currentCategory=categoryNames[1] end
+    local function labelsFor(category)
+        local options={"Choose reward..."}
+        for _,record in ipairs(rewards[category] or {}) do
+            options[#options+1]=record[1].." - "..tostring(record[2]).." points"
+        end
+        return options
+    end
+    local refreshRewards=nil
+    local categoryBtn=MakeStyledDropdown(EventsPage,"Category",categoryNames,function(category)
+        currentCategory=category
+        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget=""})
+        if refreshRewards then refreshRewards(labelsFor(category)) end
+        UI:ShowPopup("Category saved. Auto Buy is not enabled.",4)
+    end)
+    categoryBtn.Text=currentCategory
+    local choices=labelsFor(currentCategory)
+    local rewardBtn
+    rewardBtn,refreshRewards=MakeStyledDropdown(EventsPage,"Reward",choices,function(selection)
+        _config:Set("HalloweenRewardTarget",selection=="Choose reward..." and "" or selection)
+        UI:ShowPopup("Reward saved; no purchase yet. Use opt-in controls below.",4)
+    end)
+    local savedReward=_config:Get("HalloweenRewardTarget")
+    if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
+    -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
+    -- Saved reward is not permission to spend. Buy permission is per-runtime.
+    MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
+    MakeToggle(EventsPage, "Auto Turn-In Candy",
+        _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
+            if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
+            runtimeLog("INFO", "[Halloween] Auto Turn-In "..(on and "ON" or "OFF"))
+            UI:ShowPopup(on and "Candy conversion enabled at next dry-server checkpoint."
+                or "Auto Turn-In disabled.",5)
+        end)
+    MakeToggle(EventsPage, "Auto Buy Selected Reward (once)",
+        false, function(on)
+            if not _config or not _halloween then return end
+            if on then
+                if (_config:Get("HalloweenRewardTarget") or "")=="" then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Select a reward first. No points spent.",5)
+                    return
+                end
+                local points=_halloween:GetPoints()
+                if not points then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Halloween points are not exposed; Auto Buy is locked.",5)
+                    return
+                end
+                if _config:Get("EventItemsFarmEnabled")~=true then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Enable Events Items Farm for automatic one-shot buy.",5)
+                    return
+                end
+            end
+            _config:Set("HalloweenAutoBuy",on==true)
+            runtimeLog("INFO","[Halloween] Auto Buy (one attempt) "..(on and "ON" or "OFF"))
+        end)
+    local function eventAction(text,handler)
+        local b=Instance.new("TextButton")
+        b.Name="HalloweenAction"
+        b.Size=UDim2.new(1,-4,0,34)
+        b.Text=text
+        b.TextSize=12
+        b.Font=Enum.Font.GothamBold
+        b.Parent=EventsPage
+        styleActionButton(b,false)
+        local running=false
+        trackConnection(b.MouseButton1Click:Connect(function()
+            if running then return end
+            running=true
+            b.Text="WORKING..."
+            task.spawn(function()
+                local ok,success,message=pcall(handler)
+                local report=ok and tostring(message) or "Unexpected Halloween error; inspect Console."
+                runtimeLog(ok and success and "INFO" or "WARN", "[Halloween] "..report)
+                UI:ShowPopup(report,6)
+                if b.Parent then b.Text=text end
+                running=false
+            end)
+        end))
+    end
+    eventAction("GO TO HALLOWEEN JACK",function()
+        if not _community then return false,"Jack teleport unavailable" end
+        return _community:TeleportToLandmark("jack")
+    end)
+    eventAction("TURN IN CANDY NOW (ONCE)",function()
+        if not _halloween then return false,"Exchange module unavailable" end
+        return _halloween:TurnInCandy("manual")
+    end)
+    eventAction("BUY SELECTED REWARD NOW (ONCE)",function()
+        if not _halloween then return false,"Exchange module unavailable" end
+        return _halloween:BuySelectedReward("manual")
+    end)
+
+    -- Community features are separate opt-in tools; do not modify core workers.
+    -- Reflow all affected pages after inserting buttons/sections.
+    if _community then
+        -- Reuse the native Silver toggle visual and registry. A stopped Pilot
+        -- resets this switch through UI:SetToggleValue without re-firing callbacks.
+        UI._buildCommunityPilotToggle = function(page, label, callback)
+            MakeToggle(page, label, false, callback)
+        end
+        _community:Build(StandPage, QuestPage, EventsPage, SettingsPage,
+            UI, MakeSection, styleActionButton, trackConnection)
+        _community:BuildTeleports(TeleportPage, UI, MakeSection,
+            styleActionButton, trackConnection, MakeStyledDropdown)
+    end
+    AutoCanvas(StandPage)
     AutoCanvas(QuestPage)
+    AutoCanvas(TeleportPage)
+    AutoCanvas(EventsPage)
+    AutoCanvas(SettingsPage)
 
     -- =====================
     -- WEBHOOK PAGE
@@ -1417,6 +1695,34 @@ function UI:Create()
     local copyErrorBtn = makeConsoleButton("Copy ERROR", 0.54, 0.27, false)
     local clearLogBtn  = makeConsoleButton("Clear",      0.81, 0.19, false)
 
+    -- Controls stay separate from the existing four buttons for mobile readability.
+    local consoleTools = Instance.new("Frame")
+    consoleTools.Size = UDim2.new(1,-4,0,34)
+    consoleTools.BackgroundTransparency = 1
+    consoleTools.Parent = ConsolePage
+
+    local function makeConsoleTool(text, x, w)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(w,-3,1,0)
+        btn.Position = UDim2.new(x,0,0,0)
+        btn.BackgroundColor3 = THEME.PANEL3
+        btn.BorderSizePixel = 0
+        btn.Text = text
+        btn.TextColor3 = THEME.WHITE
+        btn.TextSize = 11
+        btn.Font = Enum.Font.GothamBold
+        btn.AutoButtonColor = false
+        btn.Parent = consoleTools
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0,7)
+        styleActionButton(btn, false)
+        return btn
+    end
+
+    local followLogBtn = makeConsoleTool("Follow: ON", 0.00, 0.50)
+    local copySaleBtn = makeConsoleTool("Copy SALE", 0.50, 0.50)
+    local followConsole = not _config or _config:Get("ConsoleFollow") ~= false
+    followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
+
     local warnStroke = copyWarnBtn:FindFirstChildOfClass("UIStroke")
     if warnStroke then warnStroke.Color = THEME.GOLD end
     local errorStroke = copyErrorBtn:FindFirstChildOfClass("UIStroke")
@@ -1446,9 +1752,13 @@ function UI:Create()
                 return TextService:GetTextSize(text, 11, Enum.Font.Code, Vector2.new(width, 100000))
             end)
             local height = ok and math.max(20, bounds.Y + 10) or math.max(20, (#text / 45) * 14)
+            -- Do not force the view to the bottom while the user is reading old entries.
+            -- Always clamp the retained position to the new canvas dimensions.
+            local retainedY = logScroll.CanvasPosition.Y
             logLabel.Size = UDim2.new(1,-8,0,height)
             logScroll.CanvasSize = UDim2.new(0,0,0,height + 6)
-            logScroll.CanvasPosition = Vector2.new(0, math.max(0, height - logScroll.AbsoluteSize.Y))
+            local maxY = math.max(0, height + 6 - logScroll.AbsoluteSize.Y)
+            logScroll.CanvasPosition = Vector2.new(0, followConsole and maxY or math.clamp(retainedY, 0, maxY))
         end)
     end
 
@@ -1514,6 +1824,66 @@ function UI:Create()
         return table.concat(lines, "\n")
     end
 
+    -- Export only Auto Sell performance and Inventory events. Unlike the scrolling
+    -- label, this report can be pasted and searched even as new entries arrive.
+    local function buildSaleRuntimeLog()
+        if not _runtimeLog or type(_runtimeLog.GetEntries) ~= "function" then
+            return "WHITE HUB V5 - Sell performance log unavailable"
+        end
+
+        local lines = {
+            "WHITE HUB V5 - AUTO SELL DIAGNOSTICS",
+            "========================================",
+            "Runtime ID: " .. tostring(_runtimeLog.RuntimeId or "unknown"),
+            "",
+            "AUTO SELL EVENTS",
+            "----------------------------------------",
+        }
+        local count, completed = 0, 0
+        local ok, entries = pcall(function() return _runtimeLog:GetEntries() end)
+        if ok and type(entries) == "table" then
+            for _, entry in ipairs(entries) do
+                local message = tostring(entry.Message or "")
+                local isSellPerf = message:find("[SellPerf]", 1, true) ~= nil
+                local isInventory = tostring(entry.Module or "") == "Inventory"
+                    and (message:find("Sell", 1, true) ~= nil
+                        or message:find("Sold", 1, true) ~= nil
+                        or message:find("Merchant", 1, true) ~= nil)
+                if isSellPerf or isInventory then
+                    count = count + 1
+                    if isSellPerf and message:find("END id=", 1, true) then
+                        completed = completed + 1
+                    end
+                    lines[#lines + 1] = ("[%s] [%s] [%s] %s"):format(
+                        tostring(entry.Time or "?"),
+                        tostring(entry.Level or "INFO"),
+                        tostring(entry.Module or "General"), message
+                    )
+                end
+            end
+        end
+        if count == 0 then
+            lines[#lines + 1] = "No Auto Sell events recorded in this runtime."
+        elseif completed == 0 then
+            lines[#lines + 1] = "Sale has not finished yet: wait for [SellPerf] END before copying the final measurements."
+        end
+
+        -- The sale normally finishes immediately before Server Hop. Show the
+        -- last completed report saved by Farm.lua in the previous server.
+        -- Never execute file contents: this is plain-text diagnostic output.
+        if completed == 0 and type(readfile) == "function" then
+            local savedOk, saved = pcall(readfile, "WhiteHubLastSellReport.txt")
+            if savedOk and type(saved) == "string"
+                and saved:find("WHITE HUB V5 - LAST COMPLETED AUTO SELL", 1, true) == 1
+                and #saved <= 50000 then
+                lines[#lines + 1] = ""
+                lines[#lines + 1] = "LAST COMPLETED SALE (SAVED ON DEVICE / MAY BE FROM PREVIOUS SERVER)"
+                lines[#lines + 1] = saved
+            end
+        end
+        return table.concat(lines, "\n")
+    end
+
     local function copyConsoleReport(button, idleText, report, successMessage)
         if copyToClipboard(report) then
             button.Text = "Copied!"
@@ -1541,6 +1911,17 @@ function UI:Create()
         copyConsoleReport(copyErrorBtn, "Copy ERROR", buildFilteredRuntimeLog("ERROR"), "ERROR-only runtime report copied to clipboard.")
     end)
 
+    copySaleBtn.MouseButton1Click:Connect(function()
+        copyConsoleReport(copySaleBtn, "Copy SALE", buildSaleRuntimeLog(), "Auto Sell diagnostic report copied to clipboard.")
+    end)
+
+    followLogBtn.MouseButton1Click:Connect(function()
+        followConsole = not followConsole
+        followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
+        if _config then _config:Set("ConsoleFollow", followConsole) end
+        if followConsole then refreshConsole() end
+    end)
+
     clearLogBtn.MouseButton1Click:Connect(function()
         if _runtimeLog then _runtimeLog:Clear() end
         refreshConsole()
@@ -1563,6 +1944,7 @@ function UI:Create()
     refreshConsole()
     AutoCanvas(ConsolePage)
 
+    -- =====================
     -- =====================
     -- WHITE AI DEBUG PAGE (NO AGENT CODE EXECUTION)
     -- =====================
@@ -1751,7 +2133,6 @@ function UI:Create()
     end)
     AutoCanvas(AIPage)
 
-    -- =====================
     -- CREDITS PAGE
     -- =====================
     MakeSection(CreditsPage, "WHITE HUB")
@@ -1894,7 +2275,7 @@ function UI:Create()
     end))
 
     if _compactUI then
-        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,SettingsPage,AIPage}) do
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,TeleportPage,SettingsPage,EventsPage,AIPage}) do
             _compactUI:Arrange(page,trackConnection,THEME)
         end
     end
