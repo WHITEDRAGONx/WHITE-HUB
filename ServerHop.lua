@@ -14,7 +14,11 @@ local PlaceID = game.PlaceId
 local ServerHop = {}
 local _movement = nil
 local _config = nil
+local _modules = nil
 local _kickConnection = nil
+local cleanHopConnections = {}
+local cleanHopEpoch = 0
+local cleanHopRequested = false
 local hopBusy = false
 local kickEpoch, rejoinBusy, autoRejoinAttempted = 0, false, false
 local seenErrorPrompts = setmetatable({}, {__mode="k"})
@@ -155,6 +159,7 @@ function ServerHop:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _movement = Modules.Movement
     _config = Modules.Config
+    _modules = Modules
     kickEpoch = kickEpoch + 1
     autoRejoinAttempted = false
     seenErrorPrompts = setmetatable({}, {__mode="k"})
@@ -205,10 +210,141 @@ function ServerHop:Init(Modules)
     moduleLog("INFO", "[ServerHop] Auto Rejoin enabled; one attempt per runtime, no automatic retry loop")
 end
 
+-- CLEAN HOP (opt-in): like pressing Play, ask Roblox matchmaking for a
+-- fresh Place session instead of selecting a particular JobId. Unlike a full
+-- application relaunch this cannot reset the Roblox process or Delta VM.
+-- Do not destroy running modules until Roblox reports InProgress: a request
+-- can fail or be refused, in which case the current Farm must remain usable.
+local function disconnectCleanHopListeners()
+    for _,connection in ipairs(cleanHopConnections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(cleanHopConnections)
+end
+
+local function cleanHopShutdown(epoch)
+    if epoch~=cleanHopEpoch then return end
+    moduleLog("INFO","[CleanHop] Teleport InProgress; releasing old-runtime connections and GUI")
+    local modules=_modules
+    if not modules then return end
+    -- Leave installed native metamethod hooks alone. Unhooking them or blindly
+    -- rehooking on destination can corrupt the Delta environment; the new
+    -- DevMain will reload modules and check the retained hook marker.
+    for _,name in ipairs({
+        "Farm","HalloweenExchange","WhiteAI","CommunityFeatures",
+        "AutoPrestigeRuntime","StandFarm","CatalogRefresh","Settings",
+        "UICompact","ChoiceUI","UI","Movement"
+    }) do
+        local m=modules[name]
+        if m then
+            local method=type(m.Destroy)=="function" and "Destroy"
+                or (type(m.Stop)=="function" and "Stop" or nil)
+            if method then
+                local ok,err=pcall(m[method],m)
+                if not ok then
+                    moduleLog("WARN","[CleanHop] Cleanup "..name.." failed: "..tostring(err))
+                end
+            end
+        end
+    end
+    if _G.WhiteHubModules==modules then _G.WhiteHubModules=nil end
+    moduleLog("INFO","[CleanHop] Old runtime released; destination loader should reinitialize modules")
+end
+
+function ServerHop:CleanHop(canContinue)
+    if canContinue~=nil and type(canContinue)~="function" then return false end
+    if hopBusy or cleanHopRequested then return false end
+    if _config and _config:Get("StayInPrivateServer") then
+        moduleLog("INFO","[CleanHop] StayInPrivateServer ON; clean hop skipped")
+        return false
+    end
+    if canContinue and not canContinue() then return false end
+    if _modules and _modules.AutoPrestigeRuntime and
+        type(_modules.AutoPrestigeRuntime.IsBusy)=="function" and
+        _modules.AutoPrestigeRuntime:IsBusy() then
+        moduleLog("WARN","[CleanHop] AutoPrestige has work pending; postponing teleport")
+        return false
+    end
+    hopBusy=true
+    cleanHopRequested=true
+    cleanHopEpoch=cleanHopEpoch+1
+    local epoch=cleanHopEpoch
+    local transitionStarted=false
+    local cleanupPerformed=false
+    disconnectCleanHopListeners()
+    local function fail(reason)
+        if epoch~=cleanHopEpoch then return end
+        moduleLog("WARN","[CleanHop] Teleport request failed: "..tostring(reason)..
+            "; existing runtime preserved")
+        hopBusy=false
+        cleanHopRequested=false
+        disconnectCleanHopListeners()
+    end
+    local okSignal,signal=pcall(function()
+        return Player.OnTeleport:Connect(function(state)
+            if epoch~=cleanHopEpoch then return end
+            if state==Enum.TeleportState.Failed then
+                if not cleanupPerformed then fail("TeleportState.Failed") end
+            elseif state==Enum.TeleportState.Started then
+                transitionStarted=true
+                moduleLog("INFO","[CleanHop] Teleport Started; waiting for transfer confirmation")
+            elseif state==Enum.TeleportState.InProgress then
+                if cleanupPerformed then return end
+                transitionStarted=true
+                cleanupPerformed=true
+                cleanHopShutdown(epoch)
+                -- No old runtime updates after a confirmed transfer.
+                disconnectCleanHopListeners()
+            end
+        end)
+    end)
+    if okSignal and signal then table.insert(cleanHopConnections,signal)
+    else
+        fail("Cannot monitor OnTeleport; clean transfer refused for safety")
+        return false
+    end
+    local okFailure,failureSignal=pcall(function()
+        return TeleportService.TeleportInitFailed:Connect(function(player,result,description)
+            if epoch~=cleanHopEpoch or player~=Player then return end
+            if not cleanupPerformed then
+                fail(tostring(result)..": "..tostring(description))
+            else
+                moduleLog("WARN","[CleanHop] TeleportInitFailed after transfer began; relaunch WHITE HUB if still in old server")
+            end
+        end)
+    end)
+    if okFailure and failureSignal then table.insert(cleanHopConnections,failureSignal) end
+
+    -- A new Place join is closer to Roblox's Play action, but matchmaking
+    -- MAY return to this same JobId. No server-list API or forced-instance hop.
+    moduleLog("INFO","[CleanHop] Requesting fresh Place matchmaking (Play-style), source JobId="..tostring(game.JobId))
+    local ok,err=pcall(function() TeleportService:Teleport(PlaceID,Player) end)
+    if not ok then
+        fail(err)
+        return false
+    end
+    moduleLog("INFO","[CleanHop] Teleport accepted by API; arrival is NOT confirmed yet")
+    -- A long matchmaking wait must not trigger a second automatic teleport.
+    -- Failure is handled only by TeleportInitFailed / TeleportState.Failed.
+    task.delay(45,function()
+        if epoch==cleanHopEpoch and cleanHopRequested and not cleanupPerformed then
+            moduleLog("WARN","[CleanHop] Still awaiting teleport after 45s (started="..
+                tostring(transitionStarted).."); no automatic retry")
+        end
+    end)
+    return true
+end
+
 function ServerHop:Hop(canContinue, onDestination)
     if canContinue ~= nil and type(canContinue) ~= "function" then return false end
     if onDestination ~= nil and type(onDestination) ~= "function" then return false end
     if hopBusy then return false end
+    if _config and _config:Get("CleanHopBeta")==true and onDestination==nil then
+        return self:CleanHop(canContinue)
+    end
+    if _config and _config:Get("CleanHopBeta")==true and onDestination~=nil then
+        moduleLog("INFO","[CleanHop] Ownership-dependent hop requires exact server; using classic route")
+    end
     if _config and _config:Get("StayInPrivateServer") then
         moduleLog("INFO", "[ServerHop] StayInPrivateServer is ON — skipping hop.")
         return false
@@ -249,6 +385,10 @@ function ServerHop:Rejoin()
 end
 
 function ServerHop:Destroy()
+    cleanHopEpoch=cleanHopEpoch+1
+    cleanHopRequested=false
+    disconnectCleanHopListeners()
+    hopBusy=false
     kickEpoch = kickEpoch + 1
     prepareEpoch = prepareEpoch + 1
     prepareBusy, preparedSite, preparedURL = false, nil, nil
