@@ -17,7 +17,8 @@ local Defaults = {
     MerchantPacingBeta = false, -- opt-in signal pacing diagnostic; stable Zero Delay unchanged by default.
     FastPickupEnabled = false, -- opt-in measured timing, no extra prompt calls.
     HalloweenFastDialogue = false, -- opt-in client-rendering suppression.
-    MerchantTeleportPosition = {}, -- explicit calibration or previously seen Merchant; numeric coords only.
+    MerchantTeleportPosition = {}, -- player standing point; never NPC center or roof.
+    ArcadeTeleportPosition = {}, -- opt-in player-calibrated Arcade floor/entrance.
     WebhookURL = "",
     Phase1Notified = false,
     Phase3Notified = false,
@@ -112,6 +113,14 @@ local function ApplyDefaults(data)
         or math.abs(merchantPos.x)>100000 or math.abs(merchantPos.y)>100000
         or math.abs(merchantPos.z)>100000 then
         data.MerchantTeleportPosition={}
+    end
+    local arcadePos=data.ArcadeTeleportPosition
+    if type(arcadePos)~="table" or type(arcadePos.x)~="number"
+        or type(arcadePos.y)~="number" or type(arcadePos.z)~="number"
+        or arcadePos.x~=arcadePos.x or arcadePos.y~=arcadePos.y or arcadePos.z~=arcadePos.z
+        or math.abs(arcadePos.x)>100000 or math.abs(arcadePos.y)>100000
+        or math.abs(arcadePos.z)>100000 then
+        data.ArcadeTeleportPosition={}
     end
     -- Old or corrupt saves must never enable two item collection modes together.
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
