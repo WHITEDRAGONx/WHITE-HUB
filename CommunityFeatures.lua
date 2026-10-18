@@ -587,7 +587,7 @@ local function liveLandmarkPosition(landmark)
     end
     return nil
 end
-function Community:TeleportToLandmark(landmark)
+function Community:TeleportToLandmark(landmark, allowEventTrade)
     if landmark=="arcade" then
         local live,path=liveLandmarkPosition("arcade")
         if live then
@@ -605,7 +605,7 @@ function Community:TeleportToLandmark(landmark)
         return false,label.." not found nearby. Approach its area and retry."
     end
     log("INFO","[Teleport] Resolved live NPC: "..tostring(path))
-    return self:TeleportTo(position+Vector3.new(4,0,0),label)
+    return self:TeleportTo(position+Vector3.new(4,0,0),label,landmark=="jack" and allowEventTrade)
 end
 -- StreamingEnabled can leave only 2-3 physical quest NPCs in Workspace.
 -- Include the known quest catalogue so the picker is not artificially tiny.
@@ -675,13 +675,24 @@ local function getNearbyNPCPosition(name, quest)
     if not part then return nil end
     return part.Position
 end
-function Community:TeleportTo(position, label)
+function Community:TeleportTo(position, label, allowEventTrade)
     if game.PlaceId~=2809202155 then return false,"Teleport destinations are only configured for main YBA." end
     if self._pilotStarting or pilot then
         return false,"Turn off Stand Pilot first."
     end
     local busy,why=activeWorkers()
-    if busy then return false,"Stop running farms before teleporting: "..tostring(why) end
+    local isOwnedEventTrade=allowEventTrade==true and label=="Jack, The Cauldron Specter"
+        and why=="EventItemsFarmEnabled" and modules and modules.HalloweenExchange
+        and modules.HalloweenExchange:IsBusy()==true
+        and config and config:Get("EventItemsFarmEnabled")==true
+        and config:Get("FarmEnabled")~=true
+        and config:Get("AutoPrestige")~=true
+        and config:Get("StandFarmEnabled")~=true
+        and config:Get("QuestFarmEnabled")~=true
+        and config:Get("NPCFarmEnabled")~=true
+    if busy and not isOwnedEventTrade then
+        return false,"Stop running farms before teleporting: "..tostring(why)
+    end
     local char,hum,hrp=charParts()
     if not char or not hum or not hrp or hum.Health<=0 then
         return false,"Character not ready for teleport."

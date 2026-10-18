@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-R1"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-JACK-R2"
 UI.Build = UI_BUILD
 
 local THEME = {
