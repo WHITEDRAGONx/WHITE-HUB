@@ -434,6 +434,7 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
     section(eventsPage,"HALLOWEEN EVENT - DISCOVERY")
     button(eventsPage,"SCAN HALLOWEEN CANDY / NPCS",function() return self:ScanEvent() end,UI,style,track)
     button(eventsPage,"SCAN CANDY INVENTORY",function() return self:ScanCandy() end,UI,style,track)
+    button(eventsPage,"GO TO HALLOWEEN JACK",function() return self:TeleportToLandmark("jack") end,UI,style,track)
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
     button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
     local label=UI:AddLabel(eventsPage,"AUTO TURN-IN / BUY: awaiting a verified Jack dialogue/price capture. Use Inspect Event Dialogue and send Console logs; no purchases triggered.")
@@ -474,6 +475,75 @@ local function findWorldPart(inst)
     if inst:IsA("BasePart") then return inst end
     if inst:IsA("Model") and inst.PrimaryPart then return inst.PrimaryPart end
     return inst:FindFirstChildWhichIsA("BasePart",true)
+end
+-- Resolve interaction landmarks from live NPCs first. No unverified Merchant
+-- or seasonal Jack coordinates are embedded in the script.
+local function landmarkMatches(name, landmark)
+    local n=tostring(name or ""):lower()
+    if landmark=="jack" then
+        return n=="jack, the cauldron specter" or n=="halloween event"
+            or (n:find("jack",1,true) and n:find("cauldron",1,true))
+    elseif landmark=="merchant" then
+        return n=="merchant" or n=="item merchant" or n=="item seller"
+            or n=="merchant npc"
+    elseif landmark=="arcade" then
+        return n=="arcade" or n=="item machine" or n=="the arcade"
+    end
+    return false
+end
+local function liveLandmarkPosition(landmark)
+    local roots={
+        workspace:FindFirstChild("Dialogues"),
+        workspace:FindFirstChild("Living"),
+        workspace:FindFirstChild("Locations"),
+        workspace:FindFirstChild("NPCs"),
+        workspace:FindFirstChild("Map"),
+    }
+    for _,root in ipairs(roots) do
+        if root then
+            local nodes={root}
+            local total=0
+            for _,desc in ipairs(root:GetDescendants()) do
+                total=total+1
+                if total>2200 then break end
+                if landmarkMatches(desc.Name,landmark) then
+                    nodes[#nodes+1]=desc
+                end
+            end
+            for _,node in ipairs(nodes) do
+                if landmarkMatches(node.Name,landmark) then
+                    local part=findWorldPart(node)
+                    -- ProximityPrompt / dialogue values often have their
+                    -- physical interaction part as an ancestor.
+                    if not part and node:IsA("ProximityPrompt") then
+                        part=findWorldPart(node.Parent)
+                    end
+                    if part then return part.Position,node:GetFullName() end
+                end
+            end
+        end
+    end
+    return nil
+end
+function Community:TeleportToLandmark(landmark)
+    if landmark=="arcade" then
+        local live,path=liveLandmarkPosition("arcade")
+        if live then
+            log("INFO","[Teleport] Live Arcade landmark: "..tostring(path))
+            return self:TeleportTo(live+Vector3.new(4,0,0),"Arcade")
+        end
+        -- Historical Xenon position remains a fallback *only* for Arcade
+        -- and still has to pass our own live ground raycast.
+        return self:TeleportToPreset("Arcade")
+    end
+    local label=landmark=="jack" and "Jack, The Cauldron Specter" or "Merchant"
+    local position,path=liveLandmarkPosition(landmark)
+    if not position then
+        log("WARN","[Teleport] "..label.." has no current physical NPC position (StreamingEnabled or map changes).")
+        return false,label.." not found nearby. Approach its area and retry."
+    end
+    log("INFO","[Teleport] Resolved live NPC: "..tostring(path))
+    return self:TeleportTo(position+Vector3.new(4,0,0),label)
 end
 -- StreamingEnabled can leave only 2-3 physical quest NPCs in Workspace.
 -- Include the known quest catalogue so the picker is not artificially tiny.
@@ -601,6 +671,17 @@ function Community:ReturnFromTeleport()
     return self:TeleportTo(pos,"Previous location")
 end
 function Community:BuildTeleports(page,UI,section,style,track,dropdown)
+    section(page,"QUICK TRAVEL")
+    UI:AddLabel(page,"Merchant and Halloween Jack use live NPC positions; Arcade has a validated map fallback.").TextWrapped=true
+    button(page,"TELEPORT TO MERCHANT",function()
+        return self:TeleportToLandmark("merchant")
+    end,UI,style,track)
+    button(page,"TELEPORT TO ARCADE",function()
+        return self:TeleportToLandmark("arcade")
+    end,UI,style,track)
+    button(page,"TELEPORT TO HALLOWEEN JACK",function()
+        return self:TeleportToLandmark("jack")
+    end,UI,style,track)
     section(page,"PLACES / LANDMARKS")
     UI:AddLabel(page,"Presets from older YBA map; destinations require verified ground.").TextWrapped=true
     local places={}
