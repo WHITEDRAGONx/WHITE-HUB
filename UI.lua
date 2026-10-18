@@ -757,6 +757,7 @@ function UI:Create()
     local StandPage   = MakePage("StandPage")
     local ItemsPage   = MakePage("ItemsPage")
     local QuestPage   = MakePage("QuestPage")
+    local TeleportPage = MakePage("TeleportPage")
     local WebhookPage = MakePage("WebhookPage")
     local ConsolePage = MakePage("ConsolePage")
     local SettingsPage = MakePage("SettingsPage")
@@ -769,6 +770,7 @@ function UI:Create()
         { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
+        { name="Teleport", page=TeleportPage },
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
         { name="Settings", page=SettingsPage },
@@ -1315,11 +1317,19 @@ function UI:Create()
     -- Community features are separate opt-in tools; do not modify core workers.
     -- Reflow all affected pages after inserting buttons/sections.
     if _community then
+        -- Reuse the native Silver toggle visual and registry. A stopped Pilot
+        -- resets this switch through UI:SetToggleValue without re-firing callbacks.
+        UI._buildCommunityPilotToggle = function(page, label, callback)
+            MakeToggle(page, label, false, callback)
+        end
         _community:Build(StandPage, QuestPage, EventsPage, SettingsPage,
             UI, MakeSection, styleActionButton, trackConnection)
+        _community:BuildTeleports(TeleportPage, UI, MakeSection,
+            styleActionButton, trackConnection, MakeStyledDropdown)
     end
     AutoCanvas(StandPage)
     AutoCanvas(QuestPage)
+    AutoCanvas(TeleportPage)
     AutoCanvas(EventsPage)
     AutoCanvas(SettingsPage)
 
@@ -1860,7 +1870,7 @@ function UI:Create()
     end))
 
     if _compactUI then
-        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,SettingsPage,EventsPage}) do
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,TeleportPage,SettingsPage,EventsPage}) do
             _compactUI:Arrange(page,trackConnection,THEME)
         end
     end
