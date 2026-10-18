@@ -49,7 +49,7 @@ local function labelCheck()
     for _, d in ipairs(hud:GetDescendants()) do
         if d:IsA("TextLabel") and #d.Text < 500 then
             local v = d.Text:lower()
-            if (v:find("dio", 1, true) and (v:find("heaven", 1, true) or v:find("oh", 1, true)))
+            if ((v:find("dio", 1, true) or v:find("deo", 1, true)) and (v:find("heaven", 1, true) or v:find("oh", 1, true)))
                 and (v:find("kill", 1, true) or v:find("defeat", 1, true) or v:find("quest", 1, true)) then
                 return true
             end
@@ -64,7 +64,8 @@ local function findBoss()
     if not living then return nil end
     for _, model in ipairs(living:GetChildren()) do
         local key = model.Name:lower():gsub("[^%a%d]", "")
-        if key:find("heavenascensiondio", 1, true) or key:find("diooverheaven", 1, true) then
+        if key:find("heavenascensiondio", 1, true) or key:find("heavenascensiondeo", 1, true)
+            or key:find("diooverheaven", 1, true) then
             return model.Name
         end
     end
@@ -100,6 +101,23 @@ function Community:ScanEvent()
     log("INFO", "[Halloween] Discovered: " .. table.concat(found, " | "))
     return true, "Event NPC candidates: "..tostring(#found)..". Review Console first."
 end
+-- Inspect only the currently open game dialogue. We do not press buttons,
+-- buy rewards or reveal private arguments; this supplies verified labels for a later release.
+function Community:InspectEventDialogue()
+    local pg = Player:FindFirstChild("PlayerGui")
+    local gui = pg and pg:FindFirstChild("DialogueGui")
+    if not gui then return false, "Open Jack's dialogue first, then inspect it." end
+    local names = {}
+    for _, d in ipairs(gui:GetDescendants()) do
+        if d:IsA("TextButton") or d:IsA("TextLabel") then
+            local textValue = tostring(d.Text or ""):gsub("[\\r\\n]", " ")
+            if #textValue>0 then names[#names+1] = d.Name .. ":" .. textValue:sub(1,110) end
+            if #names>=35 then break end
+        end
+    end
+    log("INFO", "[Halloween][Dialogue] "..table.concat(names, " | "))
+    return true, "Event dialogue inspected (labels logged); no options clicked."
+end
 function Community:OpenHalloweenDialogue()
     local dlg = ReplicatedStorage:FindFirstChild("NewDialogue")
     local npc = dlg and dlg:FindFirstChild("Halloween Event")
@@ -113,6 +131,9 @@ function Community:OpenHalloweenDialogue()
 end
 function Community:ScanDioOH()
     local list = probe("jotaro")
+    for _, candidate in ipairs(probe("joe")) do
+        if not table.find(list, candidate) then list[#list+1] = candidate end
+    end
     local bossName = findBoss()
     log("INFO", "[DIOOH] Jotaro sources: "..(#list>0 and table.concat(list, " | ") or "none"))
     log("INFO", "[DIOOH] Boss NPC="..tostring(bossName)..", HUD quest verified="..tostring(labelCheck()))
@@ -169,8 +190,17 @@ function Community:StopDioOH()
     if not state then return false, "DIO:OH Farm not running" end
     boss=nil
     local combat=modules and modules.CombatFarm
-    if combat then pcall(function() combat:Stop() end) end
-    if config then
+    local running, mode = false, nil
+    if combat and type(combat.IsRunning) == "function" then
+        local ok, a, b = pcall(function() return combat:IsRunning() end)
+        if ok then running, mode = a, b end
+    end
+    -- Never terminate a different farm started after this beta tool.
+    if combat and running and mode == "NPC" and config
+        and config:Get("SelectedNPC") == state.npc then
+        pcall(function() combat:Stop() end)
+    end
+    if config and config:Get("SelectedNPC") == state.npc then
         config:SetMany({NPCFarmEnabled=false, SelectedNPC=state.oldNPC or ""})
     end
     log("INFO","[DIOOH] Stopped and restored selected NPC.")
@@ -312,6 +342,7 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
     section(eventsPage,"HALLOWEEN EVENT - DISCOVERY")
     button(eventsPage,"SCAN HALLOWEEN CANDY / NPCS",function() return self:ScanEvent() end,UI,style,track)
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
+    button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
     local label=UI:AddLabel(eventsPage,"Candy turn-in and auto purchase: locked pending verified item/cost/dialogue mapping. Nothing will be spent blindly.")
     label.TextWrapped=true
     section(settingsPage,"AFK / STABILITY")
@@ -321,7 +352,7 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
 end
 function Community:Init(all)
     modules,config,logger=all,all.Config,all.RuntimeLog
-    self:SetAntiAFK(config:Get("CommunityAntiAFK")==true)
+    if config:Get("CommunityAntiAFK")==true then self:SetAntiAFK(true) end
     log("INFO","Community features opt-in (Pilot / DIO:OH beta / Halloween scout / AFK). No automatic purchases.")
 end
 function Community:Destroy()
