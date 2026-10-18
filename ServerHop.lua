@@ -136,6 +136,8 @@ end
 -- Fetch one read-only page while Merchant work is already running. A guarded
 -- Hop still validates state/destination before teleport; no automatic transfer.
 function ServerHop:Prepare()
+    -- Fresh Place matchmaking does not use the public-server list or its cache.
+    if _config and _config:Get("CleanHopBeta")==true then return false end
     if prepareBusy or hopBusy or (_config and _config:Get("StayInPrivateServer")) then return false end
     resetHourlyCacheIfNeeded()
     local url = serverListURL()
@@ -339,11 +341,15 @@ function ServerHop:Hop(canContinue, onDestination)
     if canContinue ~= nil and type(canContinue) ~= "function" then return false end
     if onDestination ~= nil and type(onDestination) ~= "function" then return false end
     if hopBusy then return false end
-    if _config and _config:Get("CleanHopBeta")==true and onDestination==nil then
+    local cleanRequested=_config and _config:Get("CleanHopBeta")==true
+    local prestigeTransfer=_modules and _modules.AutoPrestigeRuntime
+        and type(_modules.AutoPrestigeRuntime.IsBusy)=="function"
+        and _modules.AutoPrestigeRuntime:IsBusy()
+    if cleanRequested and onDestination==nil and not prestigeTransfer then
         return self:CleanHop(canContinue)
     end
-    if _config and _config:Get("CleanHopBeta")==true and onDestination~=nil then
-        moduleLog("INFO","[CleanHop] Ownership-dependent hop requires exact server; using classic route")
+    if cleanRequested and (onDestination~=nil or prestigeTransfer) then
+        moduleLog("INFO","[CleanHop] Protected transfer/ownership requires an exact server; using classic hop")
     end
     if _config and _config:Get("StayInPrivateServer") then
         moduleLog("INFO", "[ServerHop] StayInPrivateServer is ON — skipping hop.")
