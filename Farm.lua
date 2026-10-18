@@ -607,8 +607,12 @@ runAutoHalloween=function(source)
         ok,success,message=pcall(_halloween.TurnInCandy,_halloween,source)
         moduleLog(ok and success and "INFO" or "WARN",
             "[JackAuto][TurnIn] "..tostring(ok and message or "Trade exception; inspect Halloween Console"))
-        -- Wait until the next safe checkpoint before buying: the previous
-        -- dialogue can still be closing. Never combine two clicks blindly.
+        -- If a reward was explicitly armed, permit the NEXT checkpoint to
+        -- attempt it after a 10s cooldown instead of hopping while armed.
+        -- Do not click the next shop page in the same dialogue transaction.
+        if ok and success and _config:Get("HalloweenAutoBuy")==true then
+            lastHalloweenAttemptAt=tick()-25
+        end
     else
         -- Consume exactly one buy authorization BEFORE any network/UI action.
         -- An uncertain purchase must never be retried automatically.
