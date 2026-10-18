@@ -832,6 +832,9 @@ local function runCycle()
             if shouldPauseCycle() then return end
             CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
+        if shouldPauseCycle() then return end
+        runAutoHalloween("farm-checkpoint")
+        if shouldPauseCycle() then return end
         task.wait(1)
     end
 end
