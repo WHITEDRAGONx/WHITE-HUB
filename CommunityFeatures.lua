@@ -87,7 +87,7 @@ function Community:ScanEvent()
     local found=probe("halloween")
     local candy=candyCounts()
     if #found == 0 then
-        log("WARN","[Halloween] No Halloween/Jack dialogue detected in loaded NPCs. Purchases and turn-in remain locked.")
+        log("WARN","[Halloween] No loaded Halloween/Jack dialogue found. Exchange will require actual Jack dialogue.")
     else
         log("INFO", "[Halloween] Candidate nodes: " .. table.concat(found, " | "))
     end
@@ -508,7 +508,7 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
     button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
     button(eventsPage,"RECORD JACK DIALOGUE (30S)",function() return self:WatchEventDialogue(30) end,UI,style,track)
-    local label=UI:AddLabel(eventsPage,"AUTO TURN-IN / BUY: awaiting a verified Jack dialogue/price capture. Use Inspect Event Dialogue and send Console logs; no purchases triggered.")
+    local label=UI:AddLabel(eventsPage,"Dialogue scanner is READ-ONLY. Halloween Exchange beta has separate opt-in buttons above; monitor candy counts and event points after each action.")
     label.TextWrapped=true
     section(settingsPage,"AFK / STABILITY")
     button(settingsPage,"TOGGLE ANTI-AFK",function()
