@@ -2,7 +2,7 @@
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local Settings = {}
-local BUILD = "SETTINGS-BLACK-20261013-R2"
+local BUILD = "SETTINGS-YBA-20261018-R3"
 local config, logger, ui, statusLabel
 local alive, capOn, lowOn, blackOn = false, false, false, false
 local lowEpoch, lowConnections = 0, {}
@@ -11,6 +11,11 @@ local fpsSetter, fpsPrevious, fpsAssumed
 local overlay, recoveryConnection
 local qualityApplied, effectsChanged = false, 0
 local messages = {cap="Off", low="Off", black="Off"}
+local nativeState, nativeMessage = "idle", "Not requested"
+local nativeIssued = false
+-- The owner's R4 shows that YBA removes this control after activation. Keep an
+-- issued request across Init/OFF to avoid toggling the native feature twice.
+local nativeRequests = setmetatable({}, {__mode="k"})
 local labels = {
     SettingsCapFPS30="Cap FPS at 30",
     SettingsLowGraphics="Low graphics",
@@ -23,13 +28,134 @@ end
 
 local function refresh()
     if statusLabel and statusLabel.Parent then
-        statusLabel.Text = "FPS: "..messages.cap.."\nGraphics: "..messages.low.."\nScreen: "..messages.black
+        statusLabel.Text = "FPS: "..messages.cap.."\nGraphics: "..messages.low.."\nYBA: "..nativeMessage.."\nScreen: "..messages.black
     end
     if ui then
         ui:SetToggleValue(labels.SettingsCapFPS30, capOn)
         ui:SetToggleValue(labels.SettingsLowGraphics, lowOn)
         ui:SetToggleValue(labels.SettingsBlackScreen, blackOn)
     end
+end
+
+local function nativeTarget()
+    local player=Players.LocalPlayer
+    local parent=player and player:FindFirstChild("PlayerGui")
+    local hud=parent and parent:FindFirstChild("HUD")
+    local main=hud and hud:FindFirstChild("Main")
+    local frames=main and main:FindFirstChild("Frames")
+    local settings=frames and frames:FindFirstChild("Settings")
+    local list=settings and settings:FindFirstChild("List")
+    local row=list and list:FindFirstChild("ToggleLowGFX")
+    local button=row and row:FindFirstChild("Button")
+    return hud,list,row,button
+end
+
+local function nativeInput(button)
+    if type(getconnections)~="function" then return nil,"Click inspection unsupported" end
+    local ok,signal=pcall(function() return button.MouseButton1Click end)
+    if not ok or not signal then return nil,"Click signal unavailable" end
+    local inspected,connections=pcall(getconnections,signal)
+    if not inspected or type(connections)~="table" then return nil,"Click inspection failed" end
+    local handlers={}
+    for _,connection in pairs(connections) do
+        local enabled,connected,fire,fn
+        pcall(function() enabled=connection.Enabled end)
+        pcall(function() connected=connection.Connected end)
+        pcall(function() fire=connection.Fire end)
+        pcall(function() fn=connection.Function end)
+        if enabled~=false and connected~=false and
+            (type(fire)=="function" or type(fn)=="function") then
+            handlers[#handlers+1]={connection=connection,fire=fire,fn=fn}
+            if #handlers>16 then return nil,"Too many click handlers" end
+        end
+    end
+    if #handlers==0 then return nil,"No inspectable click handler" end
+    if type(firesignal)=="function" then
+        return function() return firesignal(signal) end
+    end
+    -- Without signal dispatch, only one unambiguous bound handler is allowed.
+    if #handlers~=1 then return nil,"Multiple handlers need signal dispatch" end
+    local handler=handlers[1]
+    if type(handler.fire)=="function" then
+        return function() return handler.fire(handler.connection) end
+    end
+    return handler.fn
+end
+
+local function requestNativeLow(epoch)
+    local function active() return alive and lowOn and epoch==lowEpoch end
+    local function report(state,message,level)
+        if not active() then return end
+        nativeState,nativeMessage=state,message
+        log(level or "INFO","[NativeLowGFX] "..message)
+        refresh()
+    end
+    task.spawn(function()
+        local hud,list,row,button
+        -- UI may not have loaded yet. This bounded wait is cancelled by OFF/reload.
+        for _=1,40 do
+            if not active() then return end
+            hud,list,row,button=nativeTarget()
+            if list then break end
+            task.wait(0.25)
+        end
+        if not active() then return end
+        if not list then report("unavailable","Native menu unavailable; local effects only","WARN");return end
+        local previous=nativeRequests[hud]
+        if previous and previous.issued then
+            if previous.state=="control_removed" then
+                report("control_removed","Control removed after request; session change")
+            else
+                report(previous.state or "requested","Request already issued; no retry")
+            end
+            return
+        end
+        if not row or not button then
+            report("unavailable","Control absent: used already or unavailable","WARN");return
+        end
+        if not button:IsA("TextButton") or button.Text~="TOGGLE LOW GFX" then
+            report("unavailable","Unexpected native control; local effects only","WARN");return
+        end
+        local dispatch,reason=nativeInput(button)
+        if not active() then return end
+        if not dispatch then report("unsupported",reason.."; local effects only","WARN");return end
+        local record={issued=false,state="pending"}
+        nativeRequests[hud]=record
+        local finished,callOk=false,false
+        task.spawn(function()
+            if not active() or nativeRequests[hud]~=record then return end
+            local currentHud,currentList,currentRow,currentButton=nativeTarget()
+            if currentHud~=hud or currentList~=list or currentRow~=row or currentButton~=button then
+                finished=true;return
+            end
+            -- Set the guard before entering a yielding/native callback. A failure
+            -- may already have side effects, so never try another input afterward.
+            record.issued=true;record.state="requested"
+            nativeIssued=true
+            nativeState,nativeMessage="requested","Request issued; waiting for native UI"
+            local ok,result=pcall(dispatch)
+            callOk=ok and result~=false
+            finished=true
+        end)
+        -- A game callback may yield. Observe its UI outcome for at most 8 seconds.
+        for _=1,32 do
+            if not active() then return end
+            local currentHud,currentList=nativeTarget()
+            if record.issued and currentHud==hud and currentList==list and row.Parent~=list then
+                record.state="control_removed"
+                report("control_removed","Control removed after request; session change")
+                return
+            end
+            if finished and not callOk then
+                record.state=record.issued and "failed" or "not_sent"
+                report(record.state,"Request failed/changed UI; no automatic retry","WARN");return
+            end
+            task.wait(0.25)
+        end
+        if not active() then return end
+        record.state="unconfirmed"
+        report("unconfirmed","Request unconfirmed; no automatic retry","WARN")
+    end)
 end
 
 local function fpsValue()
@@ -112,6 +238,9 @@ local function setLow(enabled)
     lowOn=enabled
     if not enabled then
         restoreGraphics(); qualityApplied=false; effectsChanged=0; messages.low="Off"
+        if nativeState=="control_removed" then nativeMessage="Session change remains; rejoin to reset"
+        elseif nativeIssued then nativeMessage="Local OFF; native request may need rejoin"
+        else nativeState="idle";nativeMessage="Not requested" end
         return true
     end
     local ok, gameSettings=pcall(function() return UserSettings():GetService("UserGameSettings") end)
@@ -123,7 +252,9 @@ local function setLow(enabled)
     end
     change(Lighting,"GlobalShadows",false)
     messages.low=qualityApplied and "Low quality; reducing effects" or "Effects only; lower quality manually"
+    nativeState,nativeMessage="pending","Waiting for native control"
     local epoch=lowEpoch
+    requestNativeLow(epoch)
     local roots={workspace,Lighting}
     for _,root in ipairs(roots) do
         local connected, connection=pcall(function()
@@ -216,7 +347,8 @@ function Settings:SetOption(key,enabled)
 end
 function Settings:GetStatus()
     return {build=BUILD,cap30=capOn,low=lowOn,black=blackOn,rendering_paused=false,
-        message="FPS: "..messages.cap.." | Graphics: "..messages.low.." | Screen: "..messages.black}
+        native_low_gfx=nativeState,
+        message="FPS: "..messages.cap.." | Graphics: "..messages.low.." | YBA: "..nativeMessage.." | Screen: "..messages.black}
 end
 function Settings:RestoreView()
     local ok,reason=setBlack(false)
@@ -235,10 +367,10 @@ function Settings:Build(page,owner,makeToggle,theme)
         end)
     end
     statusLabel=owner:AddLabel(page,"")
-    statusLabel.Size=UDim2.new(1,-4,0,66); statusLabel.TextWrapped=true; statusLabel.TextSize=10
+    statusLabel.Size=UDim2.new(1,-4,0,86); statusLabel.TextWrapped=true; statusLabel.TextSize=10
     statusLabel.TextColor3=theme.MUTED
-    local note=owner:AddLabel(page,"FPS/graphics settings are saved.\nEnable Black screen manually each load.")
-    note.Size=UDim2.new(1,-4,0,38); note.TextWrapped=true; note.TextSize=10
+    local note=owner:AddLabel(page,"Graphics: includes one native YBA Low GFX request.\nNative changes may need a rejoin to undo.\nEnable Black screen manually each load.")
+    note.Size=UDim2.new(1,-4,0,52); note.TextWrapped=true; note.TextSize=10
     ui=owner; refresh()
 end
 function Settings:Init(modules)

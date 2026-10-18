@@ -1,5 +1,19 @@
 # Changelog
 
+## Native YBA Low GFX beta — 2026-10-18 (Settings R3)
+
+- Low graphics retains local quality/effect reduction and attempts the observed
+  native Settings/List/ToggleLowGFX/Button action once per HUD.
+- Requires the exact known button/label and an inspectable click binding; no
+  guessed remotes. Bounded UI/result waits, OFF/reload guards, no retry after an
+  issued action, and explicit unsupported/unconfirmed status.
+- Native changes may persist after OFF and may require a rejoin to undo. A
+  disappearing control acknowledges the UI action; it does not prove FPS gains.
+- Runtime change is isolated to Settings.lua. Merchant, pickup, combat, Stand
+  Farm, Auto Prestige, loaders and private WHITE AI distribution are unchanged.
+- 46 offline Settings/packaging checks passed on the identical module. Native
+  activation through Delta is still pending; owner authorized this public beta.
+
 ## Pickup compatibility rollback / Auto Rejoin — 2026-10-14 (R2)
 
 - Withdraws the faster pickup cadence after an owner-supplied tester screenshot
