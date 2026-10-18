@@ -41,6 +41,13 @@ at a time; Auto Sell can remain ON while Stand Farm runs with Item Farm OFF.
 ## Features
 
 - Item Farm, item sell/keep selection and the existing Merchant workflow.
+- **Events Items Farm** in Events (directly below Farm): exclusive opt-in pickup
+  of Yellow, Blue, Green and Red Candy using the normal inventory-confirmed collector.
+  Event mode does not trigger Merchant sales or Lucky purchases; a dry server can
+  hop without selling/buying unless Stay in Private Server is enabled.
+- Halloween reward preview/wishlist based on observed Jack menus, with prices.
+  **Auto Turn-In and Auto Buy are not yet enabled** pending confirmed candy
+  exchange and purchase response logs.
 - Quest/NPC Farm, manual or automatic quest selection and configurable skills.
 - Stand/Shiny/Rib beta: searchable touch selection for Stands and skins, skin
   preservation, pity limit and session stats.
