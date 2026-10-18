@@ -233,24 +233,24 @@ function Trade:TurnInCandy(source)
         log("INFO",("[TurnIn] Option2 dispatched via %s; candy before=%d; points before=%s"):format(
             route,before,tostring(beforePoints)))
         local deadline=tick()+7
+        local reduction=0
         while tick()<deadline do
             local after=candies()
             local points=self:GetPoints()
-            if after<before then
-                local delta=before-after
+            if after<before then reduction=math.max(reduction,before-after) end
+            if reduction>0 and (not beforePoints or not points or points>beforePoints) then
                 local pointsNote=(beforePoints and points)
                     and ("; points "..tostring(beforePoints).." -> "..tostring(points))
-                    or "; point counter not exposed"
-                local credited=(beforePoints and points and points>beforePoints)
-                if beforePoints and points and not credited then
-                    blockedUntilReload=true
-                    log("WARN","[TurnIn] Candy decreased, but the event point balance did not increase.")
-                    return false,"Candy count decreased but points did not increase; result unresolved"
-                end
-                log("INFO",("[TurnIn] Confirmed inventory decrease: %d candy%s"):format(delta,pointsNote))
-                return true,"Candy count decreased by "..delta..pointsNote
+                    or "; event-point counter not exposed"
+                log("INFO",("[TurnIn] Inventory decreased by %d candy%s"):format(reduction,pointsNote))
+                return true,"Candy count decreased by "..reduction..pointsNote
             end
             task.wait(0.16)
+        end
+        if reduction>0 then
+            blockedUntilReload=true
+            log("WARN","[TurnIn] Candy decreased but event point balance did not rise within 7s.")
+            return false,"Candy decreased but points did not increase; inspect event currency before retrying"
         end
         blockedUntilReload=true
         log("WARN","[TurnIn] Option2 submitted but inventory not reduced; retry blocked.")
