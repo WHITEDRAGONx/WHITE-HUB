@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261013-R4"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-COMMUNITY-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -100,6 +100,7 @@ local _standV2UI = nil
 local _prestigeRuntime = nil
 local _compactUI = nil
 local _settings = nil
+local _community = nil
 local _catalog, _choices = nil, nil
 local _serverHop   = nil
 local _runtimeLog   = nil
@@ -129,6 +130,7 @@ function UI:Init(Modules)
     _prestigeRuntime = Modules.AutoPrestigeRuntime
     _compactUI = Modules.UICompact
     _settings = Modules.Settings
+    _community = Modules.CommunityFeatures
     _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
     _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
@@ -758,6 +760,7 @@ function UI:Create()
     local WebhookPage = MakePage("WebhookPage")
     local ConsolePage = MakePage("ConsolePage")
     local SettingsPage = MakePage("SettingsPage")
+    local EventsPage = MakePage("EventsPage")
     local CreditsPage = MakePage("CreditsPage")
     FarmPage.Visible = true
 
@@ -769,6 +772,7 @@ function UI:Create()
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
         { name="Settings", page=SettingsPage },
+        { name="Events", page=EventsPage },
         { name="Credits", page=CreditsPage },
     }
     local tabButtons = {}
@@ -1308,7 +1312,16 @@ function UI:Create()
         end
     end)
     
+    -- Community features are separate opt-in tools; do not modify core workers.
+    -- Reflow all affected pages after inserting buttons/sections.
+    if _community then
+        _community:Build(StandPage, QuestPage, EventsPage, SettingsPage,
+            UI, MakeSection, styleActionButton, trackConnection)
+    end
+    AutoCanvas(StandPage)
     AutoCanvas(QuestPage)
+    AutoCanvas(EventsPage)
+    AutoCanvas(SettingsPage)
 
     -- =====================
     -- WEBHOOK PAGE
@@ -1847,7 +1860,7 @@ function UI:Create()
     end))
 
     if _compactUI then
-        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,SettingsPage}) do
+        for _,page in ipairs({FarmPage,StandPage,ItemsPage,QuestPage,SettingsPage,EventsPage}) do
             _compactUI:Arrange(page,trackConnection,THEME)
         end
     end
