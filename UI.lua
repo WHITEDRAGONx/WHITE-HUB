@@ -440,7 +440,11 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
         menu = Instance.new("ScrollingFrame")
         menu.BackgroundColor3 = THEME.PANEL2
         menu.BorderSizePixel = 0
-        menu.ScrollBarThickness = 5
+        menu.ScrollBarThickness = 7
+        menu.Active = true
+        menu.ScrollingEnabled = true
+        menu.ScrollingDirection = Enum.ScrollingDirection.Y
+        menu.ScrollBarImageColor3 = THEME.GOLD
         menu.ZIndex = 20
         menu.Parent = container
         Instance.new("UICorner", menu).CornerRadius = UDim.new(0,7)
@@ -470,12 +474,21 @@ local function MakeStyledDropdown(parent, labelText, options, callback)
         end
 
         local count = #currentOptions
-        local height = math.min(math.max(count, 1) * 32, 150)
-        menu.Size = UDim2.new(0, 200, 0, height)
-        menu.CanvasSize = UDim2.new(0,0,0,count * 32)
+        local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+            or Vector2.new(720, 520)
+        local height = math.min(math.max(count, 1)*32, math.max(100, viewport.Y*0.48), 280)
+        local width = math.min(280, math.max(120, viewport.X-16))
+        menu.Size = UDim2.fromOffset(width, height)
+        menu.CanvasSize = UDim2.fromOffset(0, count*32)
         local btnAbsPos = dropdownBtn.AbsolutePosition
         local btnSize = dropdownBtn.AbsoluteSize
-        menu.Position = UDim2.new(0, btnAbsPos.X, 0, btnAbsPos.Y + btnSize.Y)
+        -- Keep the full scrolling popup inside the display on mobile.
+        local x = math.clamp(btnAbsPos.X, 8, math.max(8, viewport.X-width-8))
+        local below = btnAbsPos.Y + btnSize.Y + 4
+        local above = btnAbsPos.Y-height-4
+        local y = below + height <= viewport.Y-8 and below
+            or (above >= 8 and above or math.clamp(below,8,math.max(8,viewport.Y-height-8)))
+        menu.Position = UDim2.fromOffset(x,y)
 
         outsideConnection = UserInputService.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
