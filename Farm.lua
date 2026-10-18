@@ -122,6 +122,8 @@ local EVENT_CANDY = {
 }
 local fastPickupFailed=0
 local lastPromptAt=0
+local pickupDiagLastLogAt=0
+local pickupDiagFirstLog=true
 local function pickupFastEnabled(restockGuard)
     return not restockGuard and _config and _config:Get("FastPickupEnabled")==true
 end
@@ -191,6 +193,17 @@ end
 -- Hooks & bypasses
 local function ApplyHooks()
     local env = getgenv and getgenv() or _G
+    local currentJob=tostring(game.JobId)
+    local priorJob=tostring(env.__WhiteHubFarmDiagJobId or "none")
+    local hookFlag=env.__WhiteHubFarmHooksApplied==true
+    moduleLog("INFO",("[Farm][HopDiag] job=%s priorJob=%s hookFlagAtBoot=%s fastPickup=%s runtime=%s"):format(
+        currentJob,priorJob,tostring(hookFlag),
+        tostring(_config and _config:Get("FastPickupEnabled")==true),
+        tostring(env.__WhiteHubRuntimeId or "unknown")))
+    if priorJob~="none" and priorJob~=currentJob and hookFlag then
+        moduleLog("WARN","[Farm][HopDiag] Hook marker survived a server change; hook validity is UNVERIFIED in this game instance")
+    end
+    env.__WhiteHubFarmDiagJobId=currentJob
     if env.__WhiteHubFarmHooksApplied then return end
     env.__WhiteHubFarmHooksApplied = true
 
@@ -352,29 +365,45 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     local beforeCount = _inventory:Count(itemInfo.Name)
     local model = itemInfo.Model or index
     local started, bv, requests = tick(), nil, 0
+    -- Lightweight passive timings, only logged occasionally in Fast Pickup mode.
+    local timing={setupMs=0,settleMs=0,gapMs=0,dispatchMs=0,verifyMs=0,
+        cleanupMs=0,dispatchResult="not-attempted"}
     local ok, collected = pcall(function()
+        local setupAt=tick()
         bv = _movement:Freeze()
         if restockGuard then restockFreeze = bv end
         _movement:SetNoclip(true)
         _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
+        timing.setupMs=math.floor((tick()-setupAt)*1000+0.5)
+        local settlingAt=tick()
         task.wait(fast and 0.26 or 0.35)
+        timing.settleMs=math.floor((tick()-settlingAt)*1000+0.5)
         local function fire()
             if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
             -- Never fire twice; even the fast preset has a minimum dispatch gap.
             if fast then
+                local gapAt=tick()
                 local remaining=0.75-(tick()-lastPromptAt)
                 if remaining>0 then task.wait(remaining) end
+                timing.gapMs=math.floor((tick()-gapAt)*1000+0.5)
                 if not allowed() or not model.Parent then return false end
             end
             requests = requests + 1
             lastPromptAt=tick()
+            local firedAt=tick()
             local fired, result = pcall(fireproximityprompt, itemInfo.ProximityPrompt)
+            timing.dispatchMs=math.floor((tick()-firedAt)*1000+0.5)
+            timing.dispatchResult=fired and (result~=false and "ok" or "false") or "exception"
             return fired and result ~= false
         end
         if not fire() then return false end
+        local verifyAt=tick()
         local deadline, disappeared = tick() + 1.5, nil
         while tick() < deadline and allowed() do
-            if _inventory:Count(itemInfo.Name) > beforeCount then return true end
+            if _inventory:Count(itemInfo.Name) > beforeCount then
+                timing.verifyMs=math.floor((tick()-verifyAt)*1000+0.5)
+                return true
+            end
             if not model.Parent then
                 disappeared = disappeared or tick()
                 -- Give a removed spawn a replication grace, but never call a
@@ -383,8 +412,10 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
             end
             task.wait(fast and 0.075 or 0.1)
         end
+        timing.verifyMs=math.floor((tick()-verifyAt)*1000+0.5)
         return _inventory:Count(itemInfo.Name) > beforeCount
     end)
+    local cleanupAt=tick()
     if bv then pcall(function() _movement:Unfreeze(bv) end) end
     if restockFreeze == bv then restockFreeze = nil end
     -- Event cancellation still restores the real character to the safe spot.
@@ -394,6 +425,16 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     end
     if allowed() then task.wait(fast and 0.10 or 0.15) end
     pcall(function() _movement:SetNoclip(false) end)
+    timing.cleanupMs=math.floor((tick()-cleanupAt)*1000+0.5)
+    if fast and (pickupDiagFirstLog or tick()-pickupDiagLastLogAt>=12) then
+        pickupDiagFirstLog=false
+        pickupDiagLastLogAt=tick()
+        moduleLog("INFO",("[Farm][PickupDiag] job=%s item=%s confirmed=%s fast=%s totalMs=%d setupMs=%d settleMs=%d gapMs=%d dispatchMs=%d dispatch=%s verifyMs=%d cleanupMs=%d prompts=%d"):format(
+            tostring(game.JobId),tostring(itemInfo.Name),tostring(ok and collected),
+            tostring(fast),math.floor((tick()-started)*1000+0.5),
+            timing.setupMs,timing.settleMs,timing.gapMs,timing.dispatchMs,
+            timing.dispatchResult,timing.verifyMs,timing.cleanupMs,requests))
+    end
     if not allowed() then return false end
     if not ok then error("Item collection operation failed after cleanup", 0) end
 
