@@ -127,11 +127,11 @@ local function notePickupResult(fast,confirmed,name)
     if confirmed then fastPickupFailed=0;return end
     fastPickupFailed=fastPickupFailed+1
     if fastPickupFailed>=3 then
-        _config:Set("FastPickupEnabled",false)
-        if _ui and _ui.SetToggleValue then
-            pcall(function() _ui:SetToggleValue("Fast Pickup (BETA)",false) end)
-        end
-        moduleLog("WARN","[PickupTune] 3 unconfirmed pickups; reverted to stable original timings. Last item="..tostring(name))
+        -- A prompt can fail because the item despawned, was taken by another
+        -- player, or has not replicated. Preserve the owner's opt-in setting:
+        -- only the UI toggle may disable Fast Pickup. Inventory confirmation,
+        -- per-prompt dispatch gap and the normal cycle retry limits remain.
+        moduleLog("WARN","[PickupTune] 3 unconfirmed pickups; Fast Pickup remains enabled (user-controlled). Last item="..tostring(name))
         fastPickupFailed=0
     end
 end
