@@ -1180,6 +1180,7 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     local before = Inventory:Count(itemName)
     if before <= 0 then return true, 0 end
+    local itemStartedAt=tick()
 
     local tool = equipSellTool(itemName)
     if not tool then return false, 0, "could not equip item" end
@@ -1202,18 +1203,27 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
 
     local state = newFinalState()
     local startedAt = tick()
+    -- Passive measurements only: proven Merchant callback logic stays identical.
+    local equipAndPreparationMs=math.floor((startedAt-itemStartedAt)*1000+0.5)
+    local openWaitMs=0
+    local verifyWaitMs=0
+    local cleanupMs=0
+    local selectionMs={}
     local stageWaitMs = {}
     local stageLoops = {}
     local stageSignals = {}
     installFastDialogueWait(state)
 
     local okRun, soldAmount, reason = xpcall(function()
+        local openedAt=tick()
         local opened = pcall(function() fireproximityprompt(merchantPrompt) end)
         if not opened then return 0, "Merchant prompt failed" end
 
         if not waitForDialogueGuiHidden(1.0) then
+            openWaitMs=math.floor((tick()-openedAt)*1000+0.5)
             return 0, "DialogueGui did not appear"
         end
+        openWaitMs=math.floor((tick()-openedAt)*1000+0.5)
 
         local desired = {"Option1", "Option1", "Option6"}
         local previousSignature = nil
@@ -1228,7 +1238,9 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
                 return 0, "stage " .. tostring(stage) .. " timed out"
             end
 
+            local selectStartedAt=tick()
             local selected, selectReason = injectDialogueOption(optionName, buttons)
+            selectionMs[#selectionMs+1]=math.floor((tick()-selectStartedAt)*1000+0.5)
             if not selected then
                 return 0, "stage " .. tostring(stage) .. " injection failed: " .. tostring(selectReason)
             end
@@ -1240,24 +1252,34 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
             state.lastGCScan = 0
         end
 
-        local verifyDeadline = tick() + 0.55
+        local verifyStartedAt=tick()
+        local verifyDeadline = verifyStartedAt + 0.55
         while tick() < verifyDeadline do
             local now = Inventory:Count(itemName)
             if now < before then
                 task.wait(0.03)
+                verifyWaitMs=math.floor((tick()-verifyStartedAt)*1000+0.5)
                 return before - Inventory:Count(itemName), nil
             end
             task.wait(0.02)
         end
-
+        verifyWaitMs=math.floor((tick()-verifyStartedAt)*1000+0.5)
         return 0, "dialogue completed but inventory did not change"
     end, function(err)
         return tostring(err)
     end)
 
+    local cleanupStartedAt=tick()
     restoreFinalState(state)
     closeDialogueIfOpen()
     restoreDialogueRendering()
+    cleanupMs=math.floor((tick()-cleanupStartedAt)*1000+0.5)
+
+    moduleLog("INFO",("[Inventory][Latency] name=%s pacing=%s totalMs=%d equipMs=%d openingMs=%d stageWaitMs=%s injectMs=%s confirmMs=%d cleanupMs=%d"):format(
+        tostring(itemName),tostring(_config and _config:Get("MerchantPacingBeta")==true),
+        math.floor((tick()-itemStartedAt)*1000+0.5),
+        equipAndPreparationMs,openWaitMs,table.concat(stageWaitMs,","),
+        table.concat(selectionMs,","),verifyWaitMs,cleanupMs))
 
     if not okRun then
         return false, 0, soldAmount
