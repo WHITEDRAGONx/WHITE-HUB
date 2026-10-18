@@ -59,14 +59,43 @@ local function probe(text)
     end
     return matches
 end
-function Community:ScanEvent()
-    local found = probe("halloween")
-    if #found == 0 then
-        log("WARN","[Halloween] No verified candy/event dialogue found. Purchases and turn-in remain locked.")
-        return false, "No Halloween dialogue detected. Keep purchases locked."
+local function candyCounts()
+    local counts = {["Yellow Candy"]=0, ["Blue Candy"]=0, ["Green Candy"]=0, ["Red Candy"]=0}
+    local sources = {Player:FindFirstChild("Backpack"), Player.Character}
+    for _,root in ipairs(sources) do
+        if root then
+            for _,entry in ipairs(root:GetChildren()) do
+                if counts[entry.Name]~=nil and entry:IsA("Tool") then
+                    counts[entry.Name]=counts[entry.Name]+1
+                end
+            end
+        end
     end
-    log("INFO", "[Halloween] Discovered: " .. table.concat(found, " | "))
-    return true, "Event NPC candidates: "..tostring(#found)..". Review Console first."
+    return counts
+end
+function Community:ScanCandy()
+    local found=candyCounts()
+    local messages={}
+    for _,name in ipairs({"Yellow Candy","Blue Candy","Green Candy","Red Candy"}) do
+        messages[#messages+1]=name..": "..tostring(found[name])
+    end
+    local summary=table.concat(messages," | ")
+    log("INFO", "[Halloween][Inventory] "..summary)
+    return true,summary.." (Backpack + equipped only)"
+end
+function Community:ScanEvent()
+    local found=probe("halloween")
+    local candy=candyCounts()
+    if #found == 0 then
+        log("WARN","[Halloween] No Halloween/Jack dialogue detected in loaded NPCs. Purchases and turn-in remain locked.")
+    else
+        log("INFO", "[Halloween] Candidate nodes: " .. table.concat(found, " | "))
+    end
+    log("INFO",("[Halloween] Candy tools: Yellow=%d Blue=%d Green=%d Red=%d"):format(
+        candy["Yellow Candy"],candy["Blue Candy"],candy["Green Candy"],candy["Red Candy"]))
+    return #found>0,
+        ("Event nodes: %d. Candy found: %d. Interact with Jack, then INSPECT EVENT DIALOGUE."):format(
+        #found,candy["Yellow Candy"]+candy["Blue Candy"]+candy["Green Candy"]+candy["Red Candy"])
 end
 -- Inspect only the currently open game dialogue. We do not press buttons,
 -- buy rewards or reveal private arguments; this supplies verified labels for a later release.
@@ -83,6 +112,22 @@ function Community:InspectEventDialogue()
         end
     end
     log("INFO", "[Halloween][Dialogue] "..table.concat(names, " | "))
+    -- Option names / visible state are needed to reconstruct the current
+    -- event quest dialog safely. No callbacks are invoked by this inspector.
+    for _,obj in ipairs(gui:GetDescendants()) do
+        if obj.Name:match("^Option%d+$") then
+            local labelText={}
+            for _,label in ipairs(obj:GetDescendants()) do
+                if (label:IsA("TextButton") or label:IsA("TextLabel")) and label.Text~="" then
+                    labelText[#labelText+1]=label.Text:sub(1,140)
+                end
+                if #labelText>=8 then break end
+            end
+            log("INFO",("[Halloween][Option] %s visible=%s text=%s"):format(
+                obj.Name,tostring(obj:IsA("GuiObject") and obj.Visible),
+                table.concat(labelText," / ")))
+        end
+    end
     return true, "Event dialogue inspected (labels logged); no options clicked."
 end
 function Community:OpenHalloweenDialogue()
@@ -388,9 +433,10 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
     end)
     section(eventsPage,"HALLOWEEN EVENT - DISCOVERY")
     button(eventsPage,"SCAN HALLOWEEN CANDY / NPCS",function() return self:ScanEvent() end,UI,style,track)
+    button(eventsPage,"SCAN CANDY INVENTORY",function() return self:ScanCandy() end,UI,style,track)
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
     button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
-    local label=UI:AddLabel(eventsPage,"Candy turn-in and auto purchase: locked pending verified item/cost/dialogue mapping. Nothing will be spent blindly.")
+    local label=UI:AddLabel(eventsPage,"AUTO TURN-IN / BUY: awaiting a verified Jack dialogue/price capture. Use Inspect Event Dialogue and send Console logs; no purchases triggered.")
     label.TextWrapped=true
     section(settingsPage,"AFK / STABILITY")
     button(settingsPage,"TOGGLE ANTI-AFK",function()
