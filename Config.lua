@@ -90,7 +90,8 @@ local function ApplyDefaults(data)
 
     -- Old or corrupt saves must never enable two item collection modes together.
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
-    if data.FarmEnabled == true and data.EventItemsFarmEnabled == true then
+    if data.FarmEnabled == true or data.AutoPrestige == true or data.StandFarmEnabled == true
+        or data.QuestFarmEnabled == true or data.NPCFarmEnabled == true then
         data.EventItemsFarmEnabled = false
     end
     if type(data.HalloweenRewardCategory) ~= "string" then data.HalloweenRewardCategory = Defaults.HalloweenRewardCategory end
