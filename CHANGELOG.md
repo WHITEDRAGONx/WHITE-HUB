@@ -1,5 +1,22 @@
 # Changelog
 
+## Floor-accurate Merchant / Arcade teleport & private DEV UI — 2026-10-18
+
+- Merchant: SAVE MERCHANT POSITION records the player's root at the actual
+  standing floor, even when StreamingEnabled hides the NPC. The teleport
+  reuses it without the old +4-stud horizontal offset.
+- Arcade: Workspace.Locations.The Arcade can point to roof geometry. A
+  SAVE ARCADE ENTRANCE calibration button stores a user-confirmed standing
+  floor; otherwise TELEPORT TO ARCADE intentionally refuses an unknown
+  rooftop destination instead of falsely claiming a safe arrival.
+- Calibrated teleport casts from just above the saved player root downward,
+  requires a level match of 1-6 studs, and never chooses surfaces 18 studs
+  above or floors up to 28 studs away.
+- Stand Pilot, Event Jack trading and combat teleports retain existing
+  ground rules. No changes to Merchant Zero Delay/Inventory.
+- The AI DEBUG UI is PRIVATE-DEV ONLY (DevMain.lua), not the public Main.lua;
+  public boot logs / public screenshots cannot verify a missing dev tab.
+
 ## FPS unlock & Merchant callback pacing diagnostics — 2026-10-18 (V5 Silver R4)
 
 - Settings: added opt-in **Unlock FPS (BETA)**. Requests setfpscap(0),
