@@ -418,72 +418,104 @@ end
 -- Only advance the exact GUI that our own openJack() recognized, and only on
 -- the verified "You now have N points" result. No speculative purchases or
 -- remote actions; bounded attempts prevent a stuck hidden dialogue.
+-- Resolve the final Jack result using the candy deduction ALREADY verified
+-- by TurnInCandy, not the visibility of a typewriter TextLabel. During the
+-- Invisible Jack mode the ScreenGui is disabled and the visible() predicate
+-- can suppress the terminal string even while the final dialogue exists.
+-- Never guess the next dialogue option or create a purchase request.
+local function jackFinalPageState(owned)
+    local textVerified=false
+    for _,node in ipairs(owned:GetDescendants()) do
+        if (node:IsA("TextLabel") or node:IsA("TextButton")
+            or node:IsA("TextBox")) and type(node.Text)=="string" then
+            local t=clean(node.Text)
+            if t:find("you now have",1,true) and t:find("point",1,true) then
+                textVerified=true
+                break
+            end
+        end
+    end
+    -- An option is never a confirmation page. Its actions could spend points;
+    -- do not call any continuation callback while real options are active.
+    local choices=owned:FindFirstChild("Options",true)
+    if choices then
+        for _,node in ipairs(choices:GetDescendants()) do
+            if node:IsA("GuiButton") and actualVisible(node,owned) then
+                return false,textVerified,nil,"visible options still active"
+            end
+        end
+    end
+    local control=owned:FindFirstChild("ClickContinue",true)
+    local button=control and (control:IsA("GuiButton") and control
+        or control:FindFirstChildWhichIsA("GuiButton",true))
+    return button~=nil,textVerified,button,
+        control and (button and "continue ready" or "continue is not a GuiButton")
+            or "continue control missing"
+end
+
 local function closeConfirmedJackTurnInResult()
     local owned=activeJackGui
     if not owned then return false,"Jack dialogue identity missing" end
     local pg=Player:FindFirstChild("PlayerGui")
-    local deadline=tick()+4.5
+    local started=tick()
+    local deadline=started+5.5
     local attempts=0
-    local resultSeen=false
+    local revealed=false
+    local sawText=false
+    local status="result not ready"
+    -- TurnInCandy only invokes this after detecting inventory candy decrease.
+    -- Wait briefly for the YBA dialogue to leave Option2 and show Continue.
     while tick()<deadline do
         local current=pg and pg:FindFirstChild("DialogueGui")
         if not current or not owned.Parent then
-            log("INFO","[TurnIn][Close] Jack dialogue closed, attempts="..tostring(attempts))
+            log("INFO","[TurnIn][Close] Jack dialogue closed after "..tostring(attempts).." Continue dispatch(es)")
             return true,"closed"
         end
-        if current~=owned then
-            -- Do not drive a replacement GUI whose dialogue ownership is unknown.
-            return false,"Jack dialogue replaced before cleanup"
+        if current~=owned then return false,"Jack dialogue replaced before cleanup" end
+        local ready,terminal,button,reason=jackFinalPageState(owned)
+        sawText=sawText or terminal
+        status=reason
+        local elapsed=tick()-started
+        if not revealed and hiddenDialogue==owned and elapsed>=0.65
+            and (not ready or not terminal) then
+            -- Fallback only for the verified Jack dialogue. Some YBA clients
+            -- suspend text/typewriter updates while ScreenGui.Enabled=false.
+            restoreJackRendering()
+            revealed=true
+            log("INFO","[TurnIn][Close] Temporarily restored final Jack page for Continue recovery")
         end
-        local terminal=false
-        for _,node in ipairs(owned:GetDescendants()) do
-            if (node:IsA("TextLabel") or node:IsA("TextButton"))
-                and actualVisible(node,owned) and type(node.Text)=="string" then
-                local t=clean(node.Text)
-                if t:find("you now have",1,true) and t:find("point",1,true) then
-                    terminal=true
-                    break
-                end
-            end
-        end
-        if terminal then
-            resultSeen=true
-            if attempts>=3 then break end
-            local control=owned:FindFirstChild("ClickContinue",true)
-            local button=control and (control:IsA("GuiButton") and control
-                or control:FindFirstChildWhichIsA("GuiButton",true))
-            if button then
-                local clicked,route=clickOnce(button)
-                if clicked then
-                    attempts=attempts+1
-                    log("INFO",("[TurnIn][Close] Final Continue dispatched via %s (%d/3)"):format(
-                        tostring(route),attempts))
-                    local untilTime=math.min(deadline,tick()+0.75)
-                    while tick()<untilTime do
-                        if not owned.Parent or not pg or pg:FindFirstChild("DialogueGui")~=owned then
-                            log("INFO","[TurnIn][Close] Final result dismissed")
-                            return true,"closed"
-                        end
-                        task.wait(0.08)
-                    end
+        if ready and (terminal or elapsed>=0.55) then
+            if attempts>=4 then break end
+            local clicked,route=clickOnce(button)
+            if not clicked then
+                status="Continue dispatch failed: "..tostring(route)
+                if not revealed and hiddenDialogue==owned then
+                    restoreJackRendering()
+                    revealed=true
+                    task.wait(0.12)
                 else
-                    log("WARN","[TurnIn][Close] Continue unavailable: "..tostring(route))
                     break
                 end
             else
-                log("WARN","[TurnIn][Close] Exact ClickContinue button not found")
-                break
+                attempts=attempts+1
+                log("INFO",("[TurnIn][Close] Continue dispatched %d/4 via %s (pointsText=%s)"):
+                    format(attempts,tostring(route),tostring(terminal)))
+                local untilTime=math.min(deadline,tick()+0.65)
+                while tick()<untilTime do
+                    if not owned.Parent or not pg or pg:FindFirstChild("DialogueGui")~=owned then
+                        log("INFO","[TurnIn][Close] Final Jack result dismissed")
+                        return true,"closed"
+                    end
+                    task.wait(0.07)
+                end
             end
         else
-            if resultSeen then
-                -- A different page appeared. Never click an unknown choice.
-                return false,"Jack result changed without closing"
-            end
             task.wait(0.10)
         end
     end
-    return false,resultSeen and "Jack result screen stayed open after bounded Continue"
-        or "Jack final points page not verified"
+    log("WARN",("[TurnIn][Close] Could not close final GUI; attempts=%d pointsText=%s lastState=%s"):
+        format(attempts,tostring(sawText),tostring(status)))
+    return false,"Jack final Continue unresolved ("..tostring(status)..")"
 end
 
 local function action(source,job,operation)
