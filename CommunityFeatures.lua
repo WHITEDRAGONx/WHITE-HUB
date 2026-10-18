@@ -787,10 +787,12 @@ function Community:TeleportTo(position, label, allowEventTrade, groundMode)
         and modules and modules.HalloweenExchange and modules.Farm
         and modules.HalloweenExchange:IsBusy()==true
         and modules.Farm.IsHalloweenTradeActive and modules.Farm:IsHalloweenTradeActive()
-        and config and (why=="EventItemsFarmEnabled" or why=="FarmEnabled")
+        and config and (why=="EventItemsFarmEnabled" or why=="FarmEnabled" or why=="Farm busy")
         and ((why=="EventItemsFarmEnabled" and config:Get("EventItemsFarmEnabled")==true
             and config:Get("FarmEnabled")~=true)
           or (why=="FarmEnabled" and config:Get("FarmEnabled")==true
+            and config:Get("EventItemsFarmEnabled")~=true)
+          or (why=="Farm busy" and config:Get("FarmEnabled")~=true
             and config:Get("EventItemsFarmEnabled")~=true))
         and config:Get("AutoPrestige")~=true
         and config:Get("StandFarmEnabled")~=true
