@@ -17,6 +17,7 @@ local _movement  = nil
 local _serverHop = nil
 local _webhook   = nil
 local _halloween = nil
+local _ui = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
@@ -139,6 +140,7 @@ function Farm:Init(Modules)
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
     _halloween = Modules.HalloweenExchange
+    _ui = Modules.UI
     moduleLog("INFO", "[Farm] Build PICKUP-COMPAT-20261014-R2; original cadence restored after kick report, live retest pending")
 end
 
@@ -593,6 +595,7 @@ local function runEventCycle()
                         moduleLog(ok and "INFO" or "WARN", "[EventFarm][TurnIn] "..tostring(message))
                         if not ok then
                             _config:Set("HalloweenAutoTurnIn", false)
+                            if _ui and _ui.SetToggleValue then _ui:SetToggleValue("Auto Turn-In Candy",false) end
                             moduleLog("WARN", "[EventFarm] Auto Turn-In disabled after uncertain result; manual inspection required.")
                         end
                     end
@@ -602,6 +605,7 @@ local function runEventCycle()
                     moduleLog(ok and "INFO" or "WARN", "[EventFarm][Buy] "..tostring(message))
                     -- One explicit authorization covers at most one attempt.
                     _config:Set("HalloweenAutoBuy", false)
+                    if _ui and _ui.SetToggleValue then _ui:SetToggleValue("Auto Buy Selected Reward (once)",false) end
                 end
             end
             if not eventModeReady() then break end
