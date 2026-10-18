@@ -9,7 +9,7 @@ local Player = Players.LocalPlayer
 
 local Community = {}
 local modules, config, logger
-local pilot, boss, afkConnection = nil, nil, nil
+local pilot, afkConnection = nil, nil
 local connections = {}
 local enabled = true
 local function log(level, message)
@@ -36,39 +36,6 @@ local function charParts()
     local h = c and c:FindFirstChildOfClass("Humanoid")
     local hrp = c and c:FindFirstChild("HumanoidRootPart")
     return c, h, hrp
-end
-local function inventoryInfo()
-    local stats = Player:FindFirstChild("PlayerStats")
-    return stats and stats:FindFirstChild("QuestProgress"), stats and stats:FindFirstChild("QuestMaxProgress")
-end
-local function labelCheck()
-    -- Only the game's own HUD can confirm a boss quest. Ignore WHITE HUB UI.
-    local hud = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("HUD")
-    if not hud then return false end
-    local scanned = 0
-    for _, d in ipairs(hud:GetDescendants()) do
-        if d:IsA("TextLabel") and #d.Text < 500 then
-            local v = d.Text:lower()
-            if ((v:find("dio", 1, true) or v:find("deo", 1, true)) and (v:find("heaven", 1, true) or v:find("oh", 1, true)))
-                and (v:find("kill", 1, true) or v:find("defeat", 1, true) or v:find("quest", 1, true)) then
-                return true
-            end
-        end
-        scanned = scanned + 1
-        if scanned > 850 then break end
-    end
-    return false
-end
-local function findBoss()
-    local living = workspace:FindFirstChild("Living")
-    if not living then return nil end
-    for _, model in ipairs(living:GetChildren()) do
-        local key = model.Name:lower():gsub("[^%a%d]", "")
-        if key:find("heavenascensiondio", 1, true) or key:find("heavenascensiondeo", 1, true)
-            or key:find("diooverheaven", 1, true) then
-            return model.Name
-        end
-    end
 end
 local function probe(text)
     local matches = {}
@@ -129,83 +96,6 @@ function Community:OpenHalloweenDialogue()
     log("INFO","[Halloween] Opened NPC dialogue only; no candy or money spent.")
     return true,"Halloween dialogue requested. Select an option manually."
 end
-function Community:ScanDioOH()
-    local list = probe("jotaro")
-    for _, candidate in ipairs(probe("joe")) do
-        if not table.find(list, candidate) then list[#list+1] = candidate end
-    end
-    local bossName = findBoss()
-    log("INFO", "[DIOOH] Jotaro sources: "..(#list>0 and table.concat(list, " | ") or "none"))
-    log("INFO", "[DIOOH] Boss NPC="..tostring(bossName)..", HUD quest verified="..tostring(labelCheck()))
-    return #list>0, "Jotaro sources "..#list.."; boss "..tostring(bossName or "not spawned")..
-        ". Review Console; accept Jotaro quest manually."
-end
-function Community:StartDioOH()
-    if boss then return false, "DIO:OH Farm already running" end
-    if pilot then return false, "Stop Stand Pilot first" end
-    local busy, name = activeWorkers()
-    if busy then return false,"Disable other farms first: "..tostring(name) end
-    if not labelCheck() then
-        log("WARN", "[DIOOH] No confirmed Jotaro -> DIO:OH quest in YBA HUD; refusing to farm unrelated NPCs.")
-        return false, "Accept the Jotaro DIO:OH quest first; HUD verification missing."
-    end
-    local b = findBoss()
-    if not b then return false, "Heaven Ascension DIO not spawned/visible in workspace.Living" end
-    local progress, maximum = inventoryInfo()
-    if not maximum or maximum.Value <= 0 or progress.Value >= maximum.Value then
-        return false,"Quest inactive or already complete. Turn in at Jotaro first."
-    end
-    local combat = modules and modules.CombatFarm
-    if not combat then return false,"Combat module unavailable" end
-    boss = {oldNPC=config:Get("SelectedNPC"), npc=b, oldQuest=config:Get("QuestFarmEnabled"),
-        oldFarm=config:Get("FarmEnabled")}
-    config:SetMany({SelectedNPC=b, NPCFarmEnabled=true, QuestFarmEnabled=false})
-    local ok, err = pcall(function() combat:StartNPC() end)
-    if not ok then
-        self:StopDioOH()
-        return false,"Combat worker failed: "..tostring(err)
-    end
-    log("INFO","[DIOOH] Started combat against "..b.." only. Quest turn-in remains manual.")
-    local this = boss
-    task.spawn(function()
-        while boss == this do
-            local p,m=inventoryInfo()
-            if not p or not m or (m.Value>0 and p.Value>=m.Value) then
-                log("INFO","[DIOOH] Objective complete/unknown; stopping boss farm; turn in manually.")
-                self:StopDioOH()
-                break
-            end
-            if not labelCheck() then
-                log("WARN","[DIOOH] Verified HUD quest disappeared; stopping.")
-                self:StopDioOH()
-                break
-            end
-            task.wait(0.5)
-        end
-    end)
-    return true, "Farming "..b..". Stop/turn-in remains under your control."
-end
-function Community:StopDioOH()
-    local state=boss
-    if not state then return false, "DIO:OH Farm not running" end
-    boss=nil
-    local combat=modules and modules.CombatFarm
-    local running, mode = false, nil
-    if combat and type(combat.IsRunning) == "function" then
-        local ok, a, b = pcall(function() return combat:IsRunning() end)
-        if ok then running, mode = a, b end
-    end
-    -- Never terminate a different farm started after this beta tool.
-    if combat and running and mode == "NPC" and config
-        and config:Get("SelectedNPC") == state.npc then
-        pcall(function() combat:Stop() end)
-    end
-    if config and config:Get("SelectedNPC") == state.npc then
-        config:SetMany({NPCFarmEnabled=false, SelectedNPC=state.oldNPC or ""})
-    end
-    log("INFO","[DIOOH] Stopped and restored selected NPC.")
-    return true,"DIO:OH combat stopped."
-end
 -- Camera follows the Stand itself, never a HumanoidRootPart moved under the map.
 -- While piloting the character is kept safely where it was.
 function Community:StopPilot()
@@ -265,7 +155,6 @@ end
 
 function Community:StartPilot()
     if pilot or self._pilotStarting then return false, "Stand Pilot is already starting or active" end
-    if boss then return false, "Stop DIO:OH first" end
     local busy, name=activeWorkers()
     if busy then return false,"Disable other farms first: "..tostring(name) end
     local c,h,hrp=charParts()
@@ -450,10 +339,6 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
             UI:ShowPopup(reason,3)
         end
     end)
-    section(questPage, "JOTARO / DIO:OH - BETA")
-    button(questPage,"SCAN JOTARO + DIO:OH",function() return self:ScanDioOH() end,UI,style,track)
-    button(questPage,"START DIO:OH BOSS FARM",function() return self:StartDioOH() end,UI,style,track)
-    button(questPage,"STOP DIO:OH BOSS FARM",function() return self:StopDioOH() end,UI,style,track)
     section(eventsPage,"HALLOWEEN EVENT - DISCOVERY")
     button(eventsPage,"SCAN HALLOWEEN CANDY / NPCS",function() return self:ScanEvent() end,UI,style,track)
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
@@ -543,8 +428,8 @@ local function getNearbyNPCPosition(name, quest)
 end
 function Community:TeleportTo(position, label)
     if game.PlaceId~=2809202155 then return false,"Teleport destinations are only configured for main YBA." end
-    if self._pilotStarting or pilot or boss then
-        return false,"Turn off Stand Pilot and DIO:OH first."
+    if self._pilotStarting or pilot then
+        return false,"Turn off Stand Pilot first."
     end
     local busy,why=activeWorkers()
     if busy then return false,"Stop running farms before teleporting: "..tostring(why) end
@@ -641,11 +526,11 @@ end
 function Community:Init(all)
     modules,config,logger=all,all.Config,all.RuntimeLog
     if config:Get("CommunityAntiAFK")==true then self:SetAntiAFK(true) end
-    log("INFO","Community features opt-in (Pilot / DIO:OH beta / Halloween scout / AFK). No automatic purchases.")
+    log("INFO","Community features opt-in (Stand Pilot / Halloween scanner / AFK). DIO:OH deferred until quest is verified.")
 end
 function Community:Destroy()
     enabled=false
-    self:StopPilot();self:StopDioOH()
+    self:StopPilot()
     disconnect(afkConnection);afkConnection=nil
     for _,con in ipairs(connections) do disconnect(con) end
     connections={}
