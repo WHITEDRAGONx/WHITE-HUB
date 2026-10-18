@@ -210,7 +210,13 @@ end
 -- While piloting the character is kept safely where it was.
 function Community:StopPilot()
     local state=pilot
-    if not state then return false, "Pilot not running" end
+    if not state then
+        if self._pilotStarting then
+            self._pilotStartCancelled=true
+            return true, "Pilot activation cancelled."
+        end
+        return false, "Pilot not running"
+    end
     pilot=nil
     disconnect(state.move)
     disconnect(state.respawn)
@@ -266,6 +272,7 @@ function Community:StartPilot()
     if not c or not h or not hrp or h.Health<=0 then return false,"Character not ready" end
 
     self._pilotStarting=true
+    self._pilotStartCancelled=false
     local stand=c:FindFirstChild("StandMorph")
     if not stand then
         -- Current YBA exposes ToggleStand through RemoteEvent. This is one
@@ -285,10 +292,13 @@ function Community:StartPilot()
     local root=stand and (stand:FindFirstChild("HumanoidRootPart") or stand.PrimaryPart)
     if stand and not root then root=stand:WaitForChild("HumanoidRootPart",2) end
     self._pilotStarting=false
+    if self._pilotStartCancelled then
+        return false,"Stand Pilot was cancelled before activation."
+    end
     if Player.Character~=c or not root or not root:IsA("BasePart") then
         return false,"Stand did not summon; no character movement was changed."
     end
-    local attach=root:FindFirstChild("StandAttach")
+    local attach=root:FindFirstChild("StandAttach") or root:WaitForChild("StandAttach",2)
     if not attach then return false,"StandAttach not found; pilot remains OFF." end
     local constraints={}
     for _,child in ipairs(attach:GetDescendants()) do
