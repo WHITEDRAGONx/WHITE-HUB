@@ -594,9 +594,14 @@ local function runEventCycle()
                         local ok, message = _halloween:TurnInCandy("event-farm")
                         moduleLog(ok and "INFO" or "WARN", "[EventFarm][TurnIn] "..tostring(message))
                         if not ok then
-                            _config:Set("HalloweenAutoTurnIn", false)
-                            if _ui and _ui.SetToggleValue then _ui:SetToggleValue("Auto Turn-In Candy",false) end
-                            moduleLog("WARN", "[EventFarm] Auto Turn-In disabled after uncertain result; manual inspection required.")
+                            _config:SetMany({HalloweenAutoTurnIn=false, EventItemsFarmEnabled=false,
+                                HalloweenAutoBuy=false})
+                            if _ui and _ui.SetToggleValue then
+                                _ui:SetToggleValue("Auto Turn-In Candy",false)
+                                _ui:SetToggleValue("Events Items Farm",false)
+                                _ui:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                            end
+                            moduleLog("WARN", "[EventFarm] Trade unresolved: event worker stopped before hopping.")
                         end
                     end
                 end
