@@ -65,7 +65,12 @@ function Trade:GetCandyTotal() return candies() end
 -- Only explicitly named event/candy point balances qualify; generic skill points do not.
 -- Prefer a real event-specific numeric value; never confuse combat or skill points.
 local function observedPoints()
-    for _,root in ipairs({Player:FindFirstChild("PlayerStats"),Player:FindFirstChild("leaderstats")}) do
+    local roots={}
+    for _,name in ipairs({"PlayerStats","leaderstats"}) do
+        local root=Player:FindFirstChild(name)
+        if root then roots[#roots+1]=root end
+    end
+    for _,root in ipairs(roots) do
         if root then
             for _,entry in ipairs(root:GetDescendants()) do
                 local name=entry.Name:lower():gsub("[^%a]","")
@@ -98,7 +103,12 @@ function Trade:InspectPoints()
         return true,("Verified event point balance: %d"):format(found)
     end
     local hints={}
-    for _,root in ipairs({Player:FindFirstChild("PlayerStats"),Player:FindFirstChild("leaderstats")}) do
+    local roots={}
+    for _,name in ipairs({"PlayerStats","leaderstats"}) do
+        local root=Player:FindFirstChild(name)
+        if root then roots[#roots+1]=root end
+    end
+    for _,root in ipairs(roots) do
         if root then
             local checked=0
             for _,entry in ipairs(root:GetDescendants()) do
@@ -325,7 +335,34 @@ local function action(source,job)
     local allowed,reason=safeToTrade(source)
     if not allowed then return false,reason end
     busy=true
+    local original,character,hrp=nil,nil,nil
+    if source=="event-farm" then
+        character=Player.Character
+        hrp=character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then busy=false;return false,"Player root not available for Jack trip" end
+        original=hrp.CFrame
+        local moved,moveReason=modules.CommunityFeatures:TeleportToLandmark("jack",true)
+        if not moved then
+            busy=false
+            log("WARN","[Jack] Event Farm could not reach Jack: "..tostring(moveReason))
+            return false,"Unable to reach Jack for automatic trade; "..tostring(moveReason)
+        end
+        log("INFO","[Jack] Event Farm visited real Jack location; returning after transaction.")
+        task.wait(0.35)
+    end
     local ok,success,message=pcall(job)
+    if original then
+        local restored=Player.Character==character and hrp and hrp.Parent
+            and modules.Movement and modules.Movement:Teleport(original)
+        if not restored then
+            blockedUntilReload=true
+            log("WARN","[Jack] Return to original Safe Spot failed; automatic retries blocked.")
+            success=false
+            message="Jack transaction ended but character could not be restored; stop auto trade"
+        else
+            log("INFO","[Jack] Character restored to previous Event Farm position.")
+        end
+    end
     busy=false
     if not ok then log("WARN","[Trade] "..tostring(success));return false,"Halloween transaction failed; check Console" end
     return success,message
@@ -384,6 +421,7 @@ function Trade:BuySelectedReward(source)
         local points,path=self:GetPoints()
         if not points then
             log("WARN","[Buy] No verified Halloween point balance; abort before selecting an item")
+            self:InspectPoints()
             return false,"Halloween point balance not exposed; purchase locked, no points spent"
         end
         if points<price then return false,("Not enough event points: %d/%d"):format(points,price) end
