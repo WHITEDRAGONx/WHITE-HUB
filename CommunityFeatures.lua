@@ -130,6 +130,72 @@ function Community:InspectEventDialogue()
     end
     return true, "Event dialogue inspected (labels logged); no options clicked."
 end
+-- Timed, read-only discovery recorder. The user clicks Jack's options
+-- normally while this watches *only* YBA's DialogueGui; no remote arguments,
+-- purchases, or callbacks are fired by this feature.
+function Community:WatchEventDialogue(seconds)
+    if self._eventWatchActive then return false, "Jack dialogue capture is already running." end
+    self._eventWatchActive=true
+    local duration=math.clamp(tonumber(seconds) or 30,5,45)
+    local expires=tick()+duration
+    local lastSignature=nil
+    local captured=0
+    log("INFO","[Halloween][Watch] Started "..tostring(duration).."s capture. Interact with Jack; open turn-in (Option2) and points shop (Option3) manually.")
+    while self._eventWatchActive and enabled and tick()<expires do
+        local pg=Player:FindFirstChild("PlayerGui")
+        local gui=pg and pg:FindFirstChild("DialogueGui")
+        local entries={}
+        if gui then
+            for _,obj in ipairs(gui:GetDescendants()) do
+                if obj.Name:match("^Option%d+$") and obj:IsA("GuiObject") and obj.Visible then
+                    local fragments={}
+                    for _,d in ipairs(obj:GetDescendants()) do
+                        if (d:IsA("TextButton") or d:IsA("TextLabel")) and d.Text~="" then
+                            local t=tostring(d.Text):gsub("[%c]"," "):sub(1,145)
+                            if not table.find(fragments,t) then
+                                fragments[#fragments+1]=t
+                            end
+                        end
+                        if #fragments>=3 then break end
+                    end
+                    if #fragments>0 then
+                        entries[#entries+1]=obj.Name.."="..table.concat(fragments," / ")
+                    end
+                end
+                if #entries>=14 then break end
+            end
+            -- Reward pages often expose point balances in labels, not options.
+            local extra=0
+            for _,obj in ipairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") and obj.Visible then
+                    local t=tostring(obj.Text or ""):gsub("[%c]"," "):sub(1,115)
+                    local lower=t:lower()
+                    if #t>3 and (lower:find("candy",1,true) or lower:find("point",1,true)
+                        or lower:find("redeem",1,true) or lower:find("cost",1,true)) then
+                        local tag="Info="..t
+                        if not table.find(entries,tag) then
+                            entries[#entries+1]=tag
+                            extra=extra+1
+                        end
+                    end
+                end
+                if extra>=7 or #entries>=20 then break end
+            end
+        end
+        table.sort(entries)
+        local snapshot=gui and (#entries>0 and table.concat(entries," | ") or "Dialogue open; no visible options yet") or "Dialogue closed"
+        if snapshot~=lastSignature then
+            captured=captured+1
+            log("INFO","[Halloween][Watch] state="..captured.." "..snapshot:sub(1,1800))
+            lastSignature=snapshot
+        end
+        task.wait(0.28)
+    end
+    self._eventWatchActive=false
+    log("INFO","[Halloween][Watch] Finished: "..captured.." distinct dialogue states captured. No purchases or candy turn-ins triggered by scanner.")
+    return true, "Captured "..captured.." event dialogue states; copy the Console log."
+end
+
 function Community:OpenHalloweenDialogue()
     local dlg = ReplicatedStorage:FindFirstChild("NewDialogue")
     local npc = dlg and dlg:FindFirstChild("Halloween Event")
@@ -437,6 +503,7 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
     button(eventsPage,"GO TO HALLOWEEN JACK",function() return self:TeleportToLandmark("jack") end,UI,style,track)
     button(eventsPage,"OPEN HALLOWEEN DIALOGUE",function() return self:OpenHalloweenDialogue() end,UI,style,track)
     button(eventsPage,"INSPECT EVENT DIALOGUE",function() return self:InspectEventDialogue() end,UI,style,track)
+    button(eventsPage,"RECORD JACK DIALOGUE (30S)",function() return self:WatchEventDialogue(30) end,UI,style,track)
     local label=UI:AddLabel(eventsPage,"AUTO TURN-IN / BUY: awaiting a verified Jack dialogue/price capture. Use Inspect Event Dialogue and send Console logs; no purchases triggered.")
     label.TextWrapped=true
     section(settingsPage,"AFK / STABILITY")
@@ -729,6 +796,7 @@ function Community:Init(all)
 end
 function Community:Destroy()
     enabled=false
+    self._eventWatchActive=false
     self:StopPilot()
     disconnect(afkConnection);afkConnection=nil
     for _,con in ipairs(connections) do disconnect(con) end
