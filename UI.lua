@@ -885,9 +885,8 @@ function UI:Create()
         end
         if _config then
             if v then
-                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false, HalloweenAutoBuy=false})
+                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false})
                 UI:SetToggleValue("Events Items Farm", false)
-                UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
             else
                 _config:Set("FarmEnabled", false)
             end
@@ -1416,8 +1415,7 @@ function UI:Create()
             runtimeLog("INFO", "[EventFarm] Candy-only mode enabled.")
             UI:ShowPopup("Event Farm ON: only Yellow, Blue, Green and Red Candy.",5)
         else
-            _config:SetMany({EventItemsFarmEnabled=false,HalloweenAutoBuy=false})
-            UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+            _config:Set("EventItemsFarmEnabled",false)
             runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
         end
     end)
@@ -1487,8 +1485,8 @@ function UI:Create()
         _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
             if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
             runtimeLog("INFO", "[Halloween] Auto Turn-In "..(on and "ON" or "OFF"))
-            UI:ShowPopup(on and "Candy conversion enabled at next dry-server checkpoint."
-                or "Auto Turn-In disabled.",5)
+            UI:ShowPopup(on and "Candy turn-in armed for Item Farm, Event Farm or idle. Runs only at a safe checkpoint."
+                or "Auto Turn-In disabled.",6)
         end)
     MakeToggle(EventsPage, "Auto Buy Selected Reward (once)",
         false, function(on)
@@ -1499,20 +1497,13 @@ function UI:Create()
                     UI:ShowPopup("Select a reward first. No points spent.",5)
                     return
                 end
-                local points=_halloween:GetPoints()
-                if not points then
-                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
-                    UI:ShowPopup("Halloween points are not exposed; Auto Buy is locked.",5)
-                    return
-                end
-                if _config:Get("EventItemsFarmEnabled")~=true then
-                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
-                    UI:ShowPopup("Enable Events Items Farm for automatic one-shot buy.",5)
-                    return
-                end
+                local ready,why=_halloween:AutoBuyReadiness()
+                UI:ShowPopup(ready and
+                    "Auto Buy armed: one purchase at next safe checkpoint." or
+                    ("Auto Buy armed but pending: "..tostring(why)..". No points spent."),7)
             end
             _config:Set("HalloweenAutoBuy",on==true)
-            runtimeLog("INFO","[Halloween] Auto Buy (one attempt) "..(on and "ON" or "OFF"))
+            runtimeLog("INFO","[Halloween] Independent Auto Buy (one attempt) "..(on and "ON" or "OFF"))
         end)
     local function eventAction(text,handler)
         local b=Instance.new("TextButton")
