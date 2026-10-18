@@ -473,7 +473,11 @@ local function button(page, text, callback, UI, style, track)
         b.Text="WORKING..."
         task.spawn(function()
             local ok, success, message=pcall(callback)
-            if not ok then log("WARN", "[Action] "..tostring(success)) end
+            if not ok then
+                log("WARN", "[Action] "..tostring(text)..": "..tostring(success))
+            elseif success==false then
+                log("WARN", "[Action] "..tostring(text).." refused: "..tostring(message))
+            end
             local msg=ok and message or "Action failed; check Console."
             if UI and UI.ShowPopup then UI:ShowPopup(tostring(msg),5) end
             if b and b.Parent then b.Text=text end
@@ -605,20 +609,25 @@ local function saveFloorPosition(key,pos,placeName)
 end
 local function canCalibrateHere()
     if game.PlaceId~=2809202155 then return false,"Only supported in YBA main map" end
-    local working=activeWorkers()
-    if working or pilot or Community._pilotStarting then return false,"Stop farms/Pilot before calibrating" end
+    local working,worker=activeWorkers()
+    if working then
+        return false,"Turn off farming before saving a teleport ("..tostring(worker or "worker busy")..")"
+    end
+    if pilot or Community._pilotStarting then return false,"Stop Stand Pilot before calibrating" end
     local char,h,root=charParts()
     if not root or not h or h.Health<=0 then return false,"Character unavailable" end
     local params=RaycastParams.new()
     params.FilterType=Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances={char}
     params.IgnoreWater=false
-    -- Low-level probe can only select ground at or below the standing player's root.
-    -- Do not look 18 studs up: that was landing on upper floors / Arcade roofs.
-    local hit=workspace:Raycast(root.Position+Vector3.new(0,1,0),Vector3.new(0,-9,0),params)
-    if not hit or hit.Normal.Y<0.7 or hit.Material==Enum.Material.Water
-        or (root.Position.Y-hit.Position.Y)<1 or (root.Position.Y-hit.Position.Y)>6 then
-        return false,"Stand on a solid floor at the exact destination before saving"
+    params.RespectCanCollide=true -- Decorative noncollidable models are not standing floors.
+    -- Never cast from above the ceiling: only validate the current standing floor.
+    local hit=workspace:Raycast(root.Position+Vector3.new(0,0.5,0),Vector3.new(0,-10,0),params)
+    if not hit then return false,"No solid ground detected below character; move onto the Arcade entrance floor" end
+    local delta=root.Position.Y-hit.Position.Y
+    if hit.Normal.Y<0.65 or hit.Material==Enum.Material.Water or delta<0.8 or delta>7 then
+        return false,("Invalid standing floor (delta %.2f, normalY %.2f, material %s); stand still on Arcade ground."):
+            format(delta,hit.Normal.Y,tostring(hit.Material))
     end
     return true,root.Position
 end
@@ -633,14 +642,37 @@ function Community:SaveMerchantTeleportHere()
     return true,"Merchant floor saved. Teleport now uses this exact standing position."
 end
 function Community:SaveArcadeTeleportHere()
+    log("INFO","[Teleport][ArcadeSave] Button requested")
     local ok,position=canCalibrateHere()
-    if not ok then return false,position end
-    local landmark=liveLandmarkPosition("arcade")
-    if landmark and (Vector3.new(landmark.X,0,landmark.Z)-Vector3.new(position.X,0,position.Z)).Magnitude>85 then
-        return false,"Stand at the Arcade entrance/inside its floor before saving"
+    if not ok then
+        log("WARN","[Teleport][ArcadeSave] Refused: "..tostring(position))
+        return false,position
     end
-    saveFloorPosition("ArcadeTeleportPosition",position,"Arcade")
-    return true,"Arcade floor/entrance saved. Teleport now avoids its roof."
+    local landmark,path=liveLandmarkPosition("arcade")
+    -- A roof-level model is suitable as a horizontal landmark, not a height.
+    local anchor=landmark or Vector3.new(255,5,-239) -- legacy Arcade X/Z map position
+    local gap=(Vector3.new(anchor.X,0,anchor.Z)-Vector3.new(position.X,0,position.Z)).Magnitude
+    if gap>125 then
+        local why=("Not near the Arcade (%.0f studs from %s); stand at its entrance, then SAVE."):
+            format(gap,landmark and "live landmark" or "map preset")
+        log("WARN","[Teleport][ArcadeSave] Refused: "..why)
+        return false,why
+    end
+    -- SetMany stores the session value and reports whether it was written to disk.
+    local savedToDisk=config:SetMany({ArcadeTeleportPosition={
+        x=position.X,y=position.Y,z=position.Z
+    }})
+    local confirmed=savedFloorPosition("ArcadeTeleportPosition")
+    if not confirmed or (confirmed-position).Magnitude>0.1 then
+        log("WARN","[Teleport][ArcadeSave] Failed to store position in config")
+        return false,"Arcade position could not be saved"
+    end
+    local info=("Arcade floor saved (X=%d Y=%d Z=%d, distance %.0f; %s)"):
+        format(math.floor(position.X+0.5),math.floor(position.Y+0.5),
+            math.floor(position.Z+0.5),gap,
+            savedToDisk and "persistent" or "session-only")
+    log(savedToDisk and "INFO" or "WARN","[Teleport][ArcadeSave] "..info)
+    return true,info
 end
 function Community:TeleportToLandmark(landmark,allowEventTrade)
     if landmark=="merchant" then
@@ -836,8 +868,16 @@ function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     button(page,"TELEPORT TO ARCADE",function()
         return self:TeleportToLandmark("arcade")
     end,UI,style,track)
+    local arcadeCalibrated=savedFloorPosition("ArcadeTeleportPosition")~=nil
+    local arcadeStatus=UI:AddLabel(page,arcadeCalibrated and
+        "ARCADE: saved floor found. TELEPORT TO ARCADE is ready." or
+        "ARCADE: not calibrated. Stand on the real entrance floor, stop farms, then SAVE ARCADE ENTRANCE.")
+    arcadeStatus.TextWrapped=true
+    arcadeStatus.Size=UDim2.new(1,-4,0,42)
     button(page,"SAVE ARCADE ENTRANCE",function()
-        return self:SaveArcadeTeleportHere()
+        local ok,msg=self:SaveArcadeTeleportHere()
+        arcadeStatus.Text=(ok and "ARCADE: " or "ARCADE SAVE FAILED: ")..tostring(msg)
+        return ok,msg
     end,UI,style,track)
     button(page,"TELEPORT TO HALLOWEEN JACK",function()
         return self:TeleportToLandmark("jack")
