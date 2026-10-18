@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PRIVATE-DEV-20261018-WHITEAI-TAB-R3"
+local UI_BUILD = "SILVER-V5-PRIVATE-DEV-20261018-UNCAP-MERCHANT-AI-R5"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -903,6 +903,12 @@ function UI:Create()
         end
     end)
     
+    MakeToggle(FarmPage, "Fast Pickup (BETA)",_config and _config:Get("FastPickupEnabled")==true,function(v)
+        if _config then _config:Set("FastPickupEnabled",v==true) end
+        runtimeLog("INFO","[PickupTune] "..(v and "Optional faster pickup enabled: original safeguards retained"
+            or "Fast pickup disabled: original delays restored"))
+    end)
+
     MakeToggle(FarmPage, "Auto Sell", _config and _config:Get("AutoSell"), function(v)
         if _config then _config:Set("AutoSell", v) end
     end)
@@ -1158,6 +1164,13 @@ function UI:Create()
     -- ITEMS PAGE
     -- =====================
     MakeSection(ItemsPage, "SELL ITEMS")
+
+    MakeToggle(ItemsPage, "Merchant Callback Pacing (BETA)",
+        _config and _config:Get("MerchantPacingBeta")==true, function(v)
+            if _config then _config:Set("MerchantPacingBeta",v==true) end
+            runtimeLog("INFO","[MerchantPacing] "..(v and
+                "Opt-in 75ms dialogue callback pacing enabled" or "Proven FINAL signal cadence restored"))
+        end)
 
     -- Manual one-shot Merchant sale: independent of the Auto Sell toggle and
     -- the Server Hop timer. The same saved item selection is respected.
@@ -1465,6 +1478,11 @@ function UI:Create()
     -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
     -- Saved reward is not permission to spend. Buy permission is per-runtime.
     MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
+    MakeToggle(EventsPage,"Invisible Jack Dialogue (BETA)",
+        _config and _config:Get("HalloweenFastDialogue")==true,function(v)
+            if _config then _config:Set("HalloweenFastDialogue",v==true) end
+            runtimeLog("INFO","[Halloween] Hidden Jack dialogue "..(v and "ON" or "OFF"))
+        end)
     MakeToggle(EventsPage, "Auto Turn-In Candy",
         _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
             if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
@@ -2210,7 +2228,7 @@ function UI:Create()
     launcherText.BackgroundTransparency = 1
     launcherText.Position = UDim2.new(0, 28, 0, 0)
     launcherText.Size = UDim2.new(1, -34, 1, 0)
-    launcherText.Text = "WHITE HUB"
+    launcherText.Text = "WHITE DEV"
     launcherText.TextColor3 = THEME.WHITE
     launcherText.TextSize = 11
     launcherText.Font = Enum.Font.GothamBold
@@ -2248,6 +2266,26 @@ function UI:Create()
     end
 
     ToggleBtn.MouseButton1Click:Connect(ToggleWindow)
+    -- Private dev-only AI launcher: visible even if the sidebar has been scrolled.
+    local aiQuick=Instance.new("TextButton",ScreenGui)
+    aiQuick.Name="WhiteAIQuickLauncher"
+    aiQuick.Size=UDim2.new(0,60,0,30)
+    aiQuick.Position=UDim2.new(0,125,1,-276)
+    aiQuick.BackgroundColor3=THEME.PANEL2
+    aiQuick.TextColor3=THEME.GOLD_BRIGHT
+    aiQuick.Text="AI DEBUG"
+    aiQuick.TextSize=10
+    aiQuick.Font=Enum.Font.GothamBold
+    aiQuick.BorderSizePixel=0
+    Instance.new("UICorner",aiQuick).CornerRadius=UDim.new(0,8)
+    aiQuick.MouseButton1Click:Connect(function()
+        if not isOpen then ToggleWindow() end
+        SetActiveTab(AIPage)
+        Sidebar.CanvasPosition=Vector2.new(0,0)
+        runtimeLog("INFO","[Dev UI] WhiteAI quick launcher opened AI DEBUG page.")
+    end)
+    runtimeLog("INFO","[Dev UI] WhiteAI quick launcher ready; private dev module="..tostring(_whiteAI~=nil))
+
     CloseButton.MouseButton1Click:Connect(function() if isOpen then ToggleWindow() end end)
 
     trackConnection(UserInputService.InputBegan:Connect(function(input, gp)

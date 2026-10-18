@@ -14,6 +14,10 @@ local Defaults = {
     AutoSell = true,
     ConsoleFollow = true, -- Keep Console follow preference across server hops via WhiteHubConfig.json.
     FastSellHidden = true,
+    MerchantPacingBeta = false, -- only optional; original Merchant intact by default.
+    FastPickupEnabled = false, -- opt-in measured timing, no extra prompt calls.
+    HalloweenFastDialogue = false, -- opt-in client-rendering suppression.
+    MerchantTeleportPosition = {}, -- explicit calibration or previously seen Merchant; numeric coords only.
     WebhookURL = "",
     Phase1Notified = false,
     Phase3Notified = false,
@@ -27,6 +31,7 @@ local Defaults = {
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
     SettingsCapFPS30 = false,
+    SettingsUncapFPS = false,
     SettingsLowGraphics = false,
     SettingsBlackScreen = false,
     WhiteAIEnabled = false, -- private dev only
@@ -94,7 +99,20 @@ local function ApplyDefaults(data)
 
     -- Purchases never resume silently after a server change.
     data.HalloweenAutoBuy = false
+    if type(data.SettingsUncapFPS) ~= "boolean" then data.SettingsUncapFPS = false end
+    if data.SettingsUncapFPS==true and data.SettingsCapFPS30==true then data.SettingsCapFPS30=false end
+    if type(data.MerchantPacingBeta) ~= "boolean" then data.MerchantPacingBeta=false end
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
+    if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
+    if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
+    local merchantPos=data.MerchantTeleportPosition
+    if type(merchantPos)~="table" or type(merchantPos.x)~="number"
+        or type(merchantPos.y)~="number" or type(merchantPos.z)~="number"
+        or merchantPos.x~=merchantPos.x or merchantPos.y~=merchantPos.y or merchantPos.z~=merchantPos.z
+        or math.abs(merchantPos.x)>100000 or math.abs(merchantPos.y)>100000
+        or math.abs(merchantPos.z)>100000 then
+        data.MerchantTeleportPosition={}
+    end
     -- Old or corrupt saves must never enable two item collection modes together.
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
     if data.FarmEnabled == true or data.AutoPrestige == true or data.StandFarmEnabled == true

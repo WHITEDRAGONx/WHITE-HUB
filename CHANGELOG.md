@@ -1,5 +1,40 @@
 # Changelog
 
+## FPS unlock & Merchant callback pacing diagnostics — 2026-10-18 (V5 Silver R4)
+
+- Settings: added opt-in **Unlock FPS (BETA)**. Requests setfpscap(0),
+  falling back to 999 if that call explicitly fails; the live FPS counter
+  remains the ground truth, because the executor may silently clamp.
+- Unlock FPS and Cap FPS at 30 are mutually exclusive. When disabling an
+  unlock, the module restores the previously reported FPS cap where safe;
+  if the old cap was unreadable it uses 60, with a warning.
+- Items: added **Merchant Callback Pacing (BETA)**, OFF by default. When
+  enabled, avoids firing ClickContinue more often than once per 75ms.
+  Continues using the original FINAL Merchant dialogue/inventory verification
+  and compatibility fallbacks, plus new per-stage loop and signal diagnostics.
+- Benchmark logs on 2026-10-18 showed 0.543s versus 1.498s mean per type
+  for two separate manual sales; this comparison DOES NOT prove the cause.
+  Re-test both settings on the same server and with similar inventories.
+- Does not change XenonLock, StandFarm, WhiteAI or Merchant item selection.
+
+## Pickup timing, Merchant calibration, Jack hidden mode & FPS — 2026-10-18 (V5 R3)
+
+- Opt-in Fast Pickup (BETA): new spawn settle 1.00s -> 0.55s; pre-prompt
+  settle 0.35s -> 0.26s; original inventory confirmation retained.
+  Minimum 0.75s between prompts and revert to normal timings after 3
+  unconfirmed attempts. This does NOT guarantee avoiding server kicks.
+- Merchant teleport caches position from live streamed NPC or via one-time
+  SAVE MERCHANT POSITION button while standing beside Merchant. On subsequent
+  sessions it can use that point when the NPC is unstreamed; raycast-based
+  ground safety checks remain in effect.
+- Opt-in Invisible Jack Dialogue: uses internally fired GUI callbacks when
+  available and hides only the dialogue ScreenGui, restoring it after each
+  transaction. Unsupported paths revert to visible UI.
+- Settings R5 records measured FPS via RenderStepped, updating at ~0.8s
+  intervals in the Settings panel and on the visual Black Screen overlay.
+- No modifications to Inventory.lua, Merchant Zero Delay, XenonLock or
+  automatic kick recovery. Features require real Delta validation.
+
 ## Halloween Jack live dialogue fix — 2026-10-18 (V5 SILVER R2)
 
 - Turn-In first resolves a real Jack ProximityPrompt under Workspace.Dialogues,

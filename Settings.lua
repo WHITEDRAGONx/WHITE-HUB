@@ -1,16 +1,39 @@
 -- Client presentation settings only; no farm, dialogue or inventory ownership.
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
 local Settings = {}
-local BUILD = "SETTINGS-YBA-20261018-R4"
-local config, logger, ui, statusLabel
-local alive, capOn, lowOn, blackOn = false, false, false, false
+local BUILD = "SETTINGS-YBA-20261018-R6-FPS-UNCAP"
+local config, logger, ui, statusLabel, fpsLabel, overlayFpsLabel
+local alive, capOn, lowOn, blackOn, unlockOn = false, false, false, false, false
 local lowEpoch, lowConnections = 0, {}
 local originals = setmetatable({}, {__mode="k"})
 local fpsSetter, fpsPrevious, fpsAssumed
-local overlay, recoveryConnection
+local unlockSetter, unlockPrevious, unlockAssumed, unlockApplied
+local overlay, recoveryConnection, fpsConnection
 local qualityApplied, effectsChanged = false, 0
 local messages = {cap="Off", low="Off", black="Off"}
+local measuredFps=nil
+local function publishFps()
+    local reading=measuredFps and string.format("%d FPS",math.floor(measuredFps+0.5)) or "Measuring FPS..."
+    if fpsLabel and fpsLabel.Parent then fpsLabel.Text="LIVE FPS: "..reading end
+    if overlayFpsLabel and overlayFpsLabel.Parent then overlayFpsLabel.Text=reading end
+end
+local function startFpsMonitor()
+    if fpsConnection then fpsConnection:Disconnect();fpsConnection=nil end
+    local frames,seconds=0,0
+    measuredFps=nil
+    fpsConnection=RunService.RenderStepped:Connect(function(dt)
+        if not alive then return end
+        if type(dt)~="number" or dt<=0 or dt>1 then return end
+        frames+=1;seconds+=dt
+        if seconds>=0.8 then
+            measuredFps=frames/seconds
+            frames,seconds=0,0
+            publishFps()
+        end
+    end)
+end
 local nativeState, nativeMessage = "idle", "Not requested"
 local nativeIssued = false
 -- The owner's R4 shows that YBA removes this control after activation. Keep an
@@ -22,6 +45,7 @@ if type(nativeRequests)~="table" then
 end
 local labels = {
     SettingsCapFPS30="Cap FPS at 30",
+    SettingsUncapFPS="Unlock FPS (BETA)",
     SettingsLowGraphics="Low graphics",
     SettingsBlackScreen="Black screen",
 }
@@ -36,6 +60,7 @@ local function refresh()
     end
     if ui then
         ui:SetToggleValue(labels.SettingsCapFPS30, capOn)
+        ui:SetToggleValue(labels.SettingsUncapFPS, unlockOn)
         ui:SetToggleValue(labels.SettingsLowGraphics, lowOn)
         ui:SetToggleValue(labels.SettingsBlackScreen, blackOn)
     end
@@ -178,8 +203,25 @@ local function fpsValue()
     if ok and type(value)=="number" and value==value and value>=0 and value<math.huge then return value end
 end
 
+local function restoreUnlock()
+    if not unlockOn then return true end
+    local current=fpsValue()
+    if current==nil or current==0 or (unlockApplied and math.abs(current-unlockApplied)<0.1) then
+        if type(unlockSetter)=="function" then
+            local ok,result=pcall(unlockSetter,unlockPrevious)
+            if not ok or result==false then return false,"Could not restore the previous FPS limit." end
+        end
+    end
+    unlockOn=false;unlockSetter=nil;unlockPrevious=nil;unlockAssumed=nil;unlockApplied=nil
+    messages.cap="Off"
+    return true
+end
 local function setCap(enabled)
     if enabled == capOn then return true end
+    if enabled and unlockOn then
+        local stopped,why=restoreUnlock()
+        if not stopped then return false,why end
+    end
     if enabled then
         local setter = setfpscap or set_fps_cap
         if type(setter) ~= "function" then
@@ -209,6 +251,30 @@ local function setCap(enabled)
         capOn=false; fpsSetter=nil; fpsPrevious=nil; fpsAssumed=nil
         messages.cap="Off"
     end
+    return true
+end
+
+local function setUnlock(enabled)
+    if enabled==unlockOn then return true end
+    if not enabled then return restoreUnlock() end
+    if capOn then
+        local stopped,why=setCap(false)
+        if not stopped then return false,why end
+    end
+    local setter=setfpscap or set_fps_cap
+    if type(setter)~="function" then return false,"This executor does not support FPS unlock." end
+    local previous=fpsValue()
+    local ok,result=pcall(setter,0)
+    local selected=0
+    if not ok or result==false then
+        selected=999
+        ok,result=pcall(setter,selected)
+    end
+    if not ok or result==false then return false,"FPS unlock request failed." end
+    unlockSetter=setter;unlockPrevious=previous or 60;unlockAssumed=previous==nil;unlockApplied=selected
+    unlockOn=true
+    messages.cap=selected==0 and "Unlimited requested" or "999 FPS limit requested"
+    if unlockAssumed then log("WARN","Previous FPS limit unreadable; disabling Unlock FPS restores 60.") end
     return true
 end
 
@@ -323,6 +389,17 @@ local function makeOverlay()
     button.BackgroundColor3=Color3.fromRGB(145,163,184)
     button.TextColor3=Color3.fromRGB(10,13,18); button.BorderSizePixel=0
     Instance.new("UICorner",button).CornerRadius=UDim.new(0,8)
+    overlayFpsLabel=Instance.new("TextLabel",background)
+    overlayFpsLabel.Name="LiveFPS"
+    overlayFpsLabel.BackgroundTransparency=1
+    overlayFpsLabel.AnchorPoint=Vector2.new(0.5,0.5)
+    overlayFpsLabel.Position=UDim2.new(0.5,0,0.45,0)
+    overlayFpsLabel.Size=UDim2.new(0.9,0,0,38)
+    overlayFpsLabel.TextColor3=Color3.fromRGB(204,223,241)
+    overlayFpsLabel.TextSize=24
+    overlayFpsLabel.Font=Enum.Font.GothamBold
+    overlayFpsLabel.Text="Measuring FPS..."
+    publishFps()
     recoveryConnection=button.Activated:Connect(function()
         Settings:RestoreView()
     end)
@@ -344,22 +421,29 @@ local function setBlack(enabled)
     else
         if recoveryConnection then recoveryConnection:Disconnect(); recoveryConnection=nil end
         if overlay then overlay:Destroy(); overlay=nil end
+        overlayFpsLabel=nil
         blackOn=false; messages.black="Off"
     end
     return true
 end
 
-local actions={SettingsCapFPS30=setCap, SettingsLowGraphics=setLow, SettingsBlackScreen=setBlack}
+local actions={SettingsCapFPS30=setCap, SettingsUncapFPS=setUnlock, SettingsLowGraphics=setLow, SettingsBlackScreen=setBlack}
 function Settings:SetOption(key,enabled)
     if not alive or not actions[key] or type(enabled)~="boolean" then return false,"Unknown setting." end
     local ok, reason=actions[key](enabled)
-    if ok then config:Set(key,enabled) end
+    if ok then
+        if key=="SettingsCapFPS30" and enabled then
+            config:SetMany({SettingsCapFPS30=true,SettingsUncapFPS=false})
+        elseif key=="SettingsUncapFPS" and enabled then
+            config:SetMany({SettingsCapFPS30=false,SettingsUncapFPS=true})
+        else config:Set(key,enabled) end
+    end
     log(ok and "INFO" or "WARN", ok and labels[key].." = "..tostring(enabled) or tostring(reason))
     refresh()
     return ok,reason
 end
 function Settings:GetStatus()
-    return {build=BUILD,cap30=capOn,low=lowOn,black=blackOn,rendering_paused=false,
+    return {build=BUILD,cap30=capOn,uncap=unlockOn,low=lowOn,black=blackOn,rendering_paused=false,
         native_low_gfx=nativeState,
         message="FPS: "..messages.cap.." | Graphics: "..messages.low.." | YBA: "..nativeMessage.." | Screen: "..messages.black}
 end
@@ -372,13 +456,19 @@ function Settings:RestoreView()
 end
 function Settings:Build(page,owner,makeToggle,theme)
     local status=self:GetStatus()
-    for _,option in ipairs({{"SettingsCapFPS30",status.cap30},{"SettingsLowGraphics",status.low},{"SettingsBlackScreen",status.black}}) do
+    for _,option in ipairs({{"SettingsCapFPS30",status.cap30},{"SettingsUncapFPS",status.uncap},{"SettingsLowGraphics",status.low},{"SettingsBlackScreen",status.black}}) do
         local key=option[1]
         makeToggle(page,labels[key],option[2],function(enabled)
             local ok,reason=self:SetOption(key,enabled)
             if not ok then owner:ShowPopup(reason,5) end
         end)
     end
+    fpsLabel=owner:AddLabel(page,"LIVE FPS: Measuring FPS...")
+    fpsLabel.Size=UDim2.new(1,-4,0,26)
+    fpsLabel.TextSize=15
+    fpsLabel.Font=Enum.Font.GothamBold
+    fpsLabel.TextColor3=theme.GOLD_BRIGHT or theme.WHITE
+    publishFps()
     statusLabel=owner:AddLabel(page,"")
     statusLabel.Size=UDim2.new(1,-4,0,86); statusLabel.TextWrapped=true; statusLabel.TextSize=10
     statusLabel.TextColor3=theme.MUTED
@@ -390,11 +480,12 @@ function Settings:Init(modules)
     self:Destroy()
     config,logger=modules.Config,modules.RuntimeLog
     alive=true
+    startFpsMonitor()
     if config:Get("SettingsBlackScreen")==true then
         config:Set("SettingsBlackScreen",false)
         log("INFO","Saved Black screen reset to OFF; enable the visual mode manually.")
     end
-    for _,key in ipairs({"SettingsCapFPS30","SettingsLowGraphics"}) do
+    for _,key in ipairs({"SettingsUncapFPS","SettingsCapFPS30","SettingsLowGraphics"}) do
         if config:Get(key)==true then
             local ok,reason=actions[key](true)
             if not ok then log("WARN",tostring(reason)) end
@@ -403,11 +494,15 @@ function Settings:Init(modules)
     log("INFO","Build "..BUILD.."; Black screen is visual only and starts OFF.")
 end
 function Settings:Destroy()
-    alive=false; ui=nil; statusLabel=nil
+    alive=false; ui=nil; statusLabel=nil; fpsLabel=nil;overlayFpsLabel=nil
+    if fpsConnection then fpsConnection:Disconnect();fpsConnection=nil end
+    measuredFps=nil
     setLow(false)
     local capOk,capReason=setCap(false)
+    local unlockOk,unlockReason=restoreUnlock()
     local blackOk,blackReason=setBlack(false)
     if not capOk then log("WARN",tostring(capReason)) end
+    if not unlockOk then log("WARN",tostring(unlockReason)) end
     if not blackOk then log("WARN",tostring(blackReason)) end
 end
 return Settings

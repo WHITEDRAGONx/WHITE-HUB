@@ -65,7 +65,7 @@ function Inventory:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
     _config   = Modules.Config
     _movement = Modules.Movement
-    moduleLog("INFO", "[Inventory] Build SALE-20261014-R1; cached Merchant lookup, live timing pending")
+    moduleLog("INFO", "[Inventory] Build SALE-20261018-PACING-BETA; proven FINAL unchanged unless Merchant Pacing beta enabled")
 
     -- Detect 2x gamepass and double all item caps
     pcall(function()
@@ -859,6 +859,9 @@ local function newFinalState()
         active1982 = nil,
         lastGCScan = 0,
         clickContinue = nil,
+        lastContinueAt = 0,
+        continueAttempts = 0,
+        skippedRapidFires = 0,
         signalFires = 0,
         direct1982Calls = 0,
         richObjects = 0,
@@ -1103,7 +1106,20 @@ local function forceDialogueAdvance(dialogueGui, state, deepScanAllowed)
         clickContinue = findClickContinue(dialogueGui)
         state.clickContinue = clickContinue
     end
-    if clickContinue then fireButtonSignal(clickContinue, state) end
+    if clickContinue then
+        local paced = _config and _config:Get("MerchantPacingBeta")==true
+        local now=tick()
+        -- Previous slow sessions produced 34-43 signals per item while
+        -- fast sessions needed 8-12. Avoid invoking a pending callback each
+        -- render frame. Default OFF preserves the validated Zero Delay route.
+        if not paced or now-(state.lastContinueAt or 0)>=0.075 then
+            state.lastContinueAt=now
+            state.continueAttempts=(state.continueAttempts or 0)+1
+            fireButtonSignal(clickContinue,state)
+        else
+            state.skippedRapidFires=(state.skippedRapidFires or 0)+1
+        end
+    end
     -- In the observed Delta sessions the signals complete sales, while
     -- line-1982 cannot be found. Search the GC only when the stage stalls.
     if deepScanAllowed then patchAndInvoke1982(state) end
@@ -1187,6 +1203,8 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
     local state = newFinalState()
     local startedAt = tick()
     local stageWaitMs = {}
+    local stageLoops = {}
+    local stageSignals = {}
     installFastDialogueWait(state)
 
     local okRun, soldAmount, reason = xpcall(function()
@@ -1204,6 +1222,8 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
             local stageStartedAt = tick()
             local _, signature, loops, buttons = waitForFinalStage(previousSignature, 1.35, state)
             stageWaitMs[#stageWaitMs + 1] = math.floor((tick() - stageStartedAt) * 1000 + 0.5)
+            stageLoops[#stageLoops + 1] = loops
+            stageSignals[#stageSignals + 1] = state.signalFires
             if not signature then
                 return 0, "stage " .. tostring(stage) .. " timed out"
             end
@@ -1250,6 +1270,9 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
             state.richObjects, state.constantsZeroed, state.gcScans or 0, state.gcMissSkips or 0,
             table.concat(stageWaitMs, ",")
         ))
+        moduleLog("INFO",("[Inventory][Pacing] beta=%s callbacks=%d suppressed=%d stageLoops=%s cumulativeSignals=%s"):format(
+            tostring(_config and _config:Get("MerchantPacingBeta")==true),state.continueAttempts,
+            state.skippedRapidFires,table.concat(stageLoops,","),table.concat(stageSignals,",")))
         return true, soldAmount
     end
 

@@ -9,6 +9,17 @@ local Trade={}
 local modules,config,logger
 local busy=false
 local blockedUntilReload=false
+local hiddenDialogue=nil
+local hiddenConn=nil
+local hiddenOriginallyEnabled=nil
+local function restoreJackRendering()
+    if hiddenConn then pcall(function() hiddenConn:Disconnect() end);hiddenConn=nil end
+    if hiddenDialogue and hiddenDialogue.Parent and hiddenDialogue:IsA("ScreenGui") then
+        pcall(function() hiddenDialogue.Enabled=hiddenOriginallyEnabled~=false end)
+    end
+    hiddenDialogue=nil
+    hiddenOriginallyEnabled=nil
+end
 local boughtThisRuntime=false
 local CANDIES={"Yellow Candy","Blue Candy","Green Candy","Red Candy"}
 local SHOP={
@@ -135,7 +146,7 @@ local function actualVisible(object,gui)
     local node=object
     while node do
         if node:IsA("GuiObject") and not node.Visible then return false end
-        if node:IsA("ScreenGui") and not node.Enabled then return false end
+        if node:IsA("ScreenGui") and not node.Enabled and node~=hiddenDialogue then return false end
         if node==gui then return true end
         node=node.Parent
     end
@@ -144,9 +155,30 @@ end
 local function dialogue()
     local pg=Player:FindFirstChild("PlayerGui")
     local gui=pg and pg:FindFirstChild("DialogueGui")
-    if gui and gui:IsA("ScreenGui") and not gui.Enabled then return nil end
+    if gui and gui:IsA("ScreenGui") and not gui.Enabled and gui~=hiddenDialogue then return nil end
     return gui
 end
+local function hideJackRendering()
+    if not config or config:Get("HalloweenFastDialogue")~=true then return false end
+    if type(firesignal)~="function" and type(getconnections)~="function" then
+        log("WARN","[Jack] Hidden dialogue unavailable: executor lacks internal click support")
+        return false
+    end
+    local gui=dialogue()
+    if not gui or not gui:IsA("ScreenGui") or gui~=Player.PlayerGui:FindFirstChild("DialogueGui") then
+        return false
+    end
+    restoreJackRendering()
+    hiddenDialogue=gui
+    hiddenOriginallyEnabled=gui.Enabled
+    hiddenConn=gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if hiddenDialogue==gui and gui.Enabled then gui.Enabled=false end
+    end)
+    gui.Enabled=false
+    log("INFO","[Jack] Hidden dialogue active; underlying GUI kept for exact option checks")
+    return true
+end
+
 -- Only a visible, exactly labelled OptionN is eligible for an automatic click.
 local function findOption(wantedOption,wantedText)
     local gui=dialogue()
@@ -212,7 +244,12 @@ local function clickOnce(button)
         local ok=pcall(firesignal,signal)
         if ok then return true,"firesignal" end
     end
-    -- Normal rendered click is the last supported route.
+    -- No internal callback: restore rendering before the compatibility click.
+    if hiddenDialogue then
+        log("WARN","[Jack] Internal click unsupported for option; switching back to visible mode")
+        restoreJackRendering()
+        task.wait()
+    end
     if button.AbsoluteSize.X>0 and button.AbsoluteSize.Y>0 then
         local ok=pcall(function()
             local p,z=button.AbsolutePosition,button.AbsoluteSize
@@ -302,11 +339,13 @@ local function openJack()
     local deadline=tick()+3
     while dialogue() and tick()<deadline do task.wait(0.12) end
     if dialogue() then return false,"Close any existing dialogue before using Jack" end
+    restoreJackRendering()
     local prompt,path=jackPrompt()
     if prompt and type(fireproximityprompt)=="function" then
         log("INFO","[Jack] Opening via live ProximityPrompt: "..path)
         local ok,err=pcall(fireproximityprompt,prompt)
         if ok and waitForJackOptions(4.5) then
+            hideJackRendering()
             return true,"Live Jack prompt confirmed"
         end
         -- A prompt that failed to open might be out of streaming/range.
@@ -327,7 +366,10 @@ local function openJack()
         log("WARN","[Jack] PromptTriggered failed: "..tostring(err))
         return false,"Jack dialogue request failed"
     end
-    if waitForJackOptions(5) then return true,"Jack dialogue confirmed" end
+    if waitForJackOptions(5) then
+        hideJackRendering()
+        return true,"Jack dialogue confirmed"
+    end
     return false,"Jack did not show verified Turn-In/Shop options; no candy spent"
 end
 local function action(source,job)
@@ -351,6 +393,7 @@ local function action(source,job)
         task.wait(0.35)
     end
     local ok,success,message=pcall(job)
+    restoreJackRendering()
     if original then
         local restored=Player.Character==character and hrp and hrp.Parent
             and modules.Movement and modules.Movement:Teleport(original)
@@ -468,6 +511,7 @@ function Trade:Init(all)
     log("INFO","Halloween Exchange beta loaded; optional Turn-In and guarded one-shot Buy.")
 end
 function Trade:Destroy()
+    restoreJackRendering()
     blockedUntilReload=true
     config=nil
 end
