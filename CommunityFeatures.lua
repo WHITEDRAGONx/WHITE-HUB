@@ -455,6 +455,179 @@ function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, sec
         return self:SetAntiAFK(not (config:Get("CommunityAntiAFK")==true))
     end,UI,style,track)
 end
+-- Historical coordinates from Xenon are used as map presets only. Each
+-- destination is validated with a raycast before moving the character.
+local teleportPresets={
+    {"Newbie Giorno (Spawn)",Vector3.new(1,0,-697)},
+    {"Train Station - Front",Vector3.new(-214,0,18)},
+    {"Train Station - Back",Vector3.new(-265,-30,-447)},
+    {"Arcade",Vector3.new(255,5,-239)},
+    {"Pizza Place",Vector3.new(113,6,71)},
+    {"Boss Cafe",Vector3.new(-544,-25,-174)},
+    {"Diavolo Castle",Vector3.new(1126,116,-129)},
+    {"DIO Part 3",Vector3.new(-44,0,-973)},
+    {"Jotaro Part 3",Vector3.new(182,-25,578)},
+    {"Jotaro Part 6",Vector3.new(784,-42,144)},
+    {"Tallest Peak (JOE / Heaven)",Vector3.new(-237,284,305)},
+    {"Hamon Trainer",Vector3.new(421,8,-287)},
+    {"Boxing Trainer",Vector3.new(281,0,101)},
+    {"Pluck Trainer",Vector3.new(125,-27,438)},
+    {"Arrowsmith",Vector3.new(-667,16,-299)},
+    {"Cosmetics Merchants",Vector3.new(512,2,22)},
+    {"Leaky Eye Luca",Vector3.new(-382,0,-711)},
+    {"Dracula",Vector3.new(-420,-34,-75)},
+    {"Kars",Vector3.new(264,-33,112)},
+    {"Homeless Man Jill",Vector3.new(-142,-31,-577)},
+    {"Vampire Room",Vector3.new(391,-31,-166)},
+    {"Enrico Pucci",Vector3.new(917,34,-17)},
+}
+local function findWorldPart(inst)
+    if not inst or not inst:IsDescendantOf(workspace) then return nil end
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") and inst.PrimaryPart then return inst.PrimaryPart end
+    return inst:FindFirstChildWhichIsA("BasePart",true)
+end
+local function liveQuestNames()
+    local folder=workspace:FindFirstChild("Dialogues")
+    local results={}
+    local seen={}
+    if folder then
+        for _, inst in ipairs(folder:GetChildren()) do
+            if inst.Name~="" and not seen[inst.Name] then
+                results[#results+1]=inst.Name
+                seen[inst.Name]=true
+            end
+        end
+    end
+    table.sort(results)
+    return results
+end
+local function liveNPCNames()
+    local folder=workspace:FindFirstChild("Living")
+    local results={}
+    local seen={}
+    if folder then
+        for _, inst in ipairs(folder:GetChildren()) do
+            if not Players:FindFirstChild(inst.Name) and inst.Name~=""
+                and not seen[inst.Name] and inst:FindFirstChild("HumanoidRootPart") then
+                results[#results+1]=inst.Name
+                seen[inst.Name]=true
+            end
+        end
+    end
+    table.sort(results)
+    return results
+end
+local function getNearbyNPCPosition(name, quest)
+    local folder=quest and workspace:FindFirstChild("Dialogues") or workspace:FindFirstChild("Living")
+    local inst=folder and folder:FindFirstChild(name)
+    local part=findWorldPart(inst)
+    if not part and quest then
+        -- A quest entry may be a logical Dialogue node rather than a physical NPC.
+        local living=workspace:FindFirstChild("Living")
+        local fallback=living and living:FindFirstChild(name)
+        part=findWorldPart(fallback)
+    end
+    if not part then return nil end
+    return part.Position
+end
+function Community:TeleportTo(position, label)
+    if game.PlaceId~=2809202155 then return false,"Teleport destinations are only configured for main YBA." end
+    if self._pilotStarting or pilot or boss then
+        return false,"Turn off Stand Pilot and DIO:OH first."
+    end
+    local busy,why=activeWorkers()
+    if busy then return false,"Stop running farms before teleporting: "..tostring(why) end
+    local char,hum,hrp=charParts()
+    if not char or not hum or not hrp or hum.Health<=0 then
+        return false,"Character not ready for teleport."
+    end
+    if typeof(position)~="Vector3" then return false,"Invalid destination" end
+    local params=RaycastParams.new()
+    params.FilterType=Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances={char}
+    params.IgnoreWater=false
+    local from=position+Vector3.new(0,18,0)
+    local ray=workspace:Raycast(from,Vector3.new(0,-65,0),params)
+    if not ray or ray.Normal.Y<0.5 or ray.Material==Enum.Material.Water then
+        log("WARN","[Teleport] Unsafe or unverified surface: "..tostring(label))
+        return false,"No safe ground at "..tostring(label)..". Old coordinate may have changed."
+    end
+    if math.abs(position.Y-ray.Position.Y)>28 then
+        return false,"Destination altitude changed too much; teleport skipped."
+    end
+    local safe=ray.Position+Vector3.new(0,4.5,0)
+    self._lastTeleportPosition=hrp.Position
+    local facing=hrp.CFrame.LookVector
+    local horizontal=Vector3.new(facing.X,0,facing.Z)
+    if horizontal.Magnitude<0.01 then horizontal=Vector3.new(0,0,-1) end
+    local ok,err=pcall(function() hrp.CFrame=CFrame.lookAt(safe,safe+horizontal.Unit) end)
+    if not ok then
+        log("WARN","[Teleport] "..tostring(err))
+        return false,"Could not move character."
+    end
+    log("INFO","[Teleport] Arrived near "..tostring(label))
+    return true,"Teleported to "..tostring(label)
+end
+function Community:TeleportToPreset(label)
+    for _, row in ipairs(teleportPresets) do
+        if row[1]==label then return self:TeleportTo(row[2],label) end
+    end
+    return false,"Place not found"
+end
+function Community:TeleportToNPC(name, quest)
+    if not name or name=="" then return false,"Select an NPC first." end
+    local position=getNearbyNPCPosition(name,quest)
+    if not position then
+        return false,"This NPC has no visible world position. Try the nearby place preset."
+    end
+    return self:TeleportTo(position+Vector3.new(4,0,0),name)
+end
+function Community:ReturnFromTeleport()
+    local pos=self._lastTeleportPosition
+    if not pos then return false,"No previous teleport position recorded" end
+    return self:TeleportTo(pos,"Previous location")
+end
+function Community:BuildTeleports(page,UI,section,style,track,dropdown)
+    section(page,"PLACES / LANDMARKS")
+    UI:AddLabel(page,"Presets from older YBA map; destinations require verified ground.").TextWrapped=true
+    local places={}
+    for _,v in ipairs(teleportPresets) do places[#places+1]=v[1] end
+    local selectedPlace=places[1]
+    dropdown(page,"Destination",places,function(name) selectedPlace=name end)
+    button(page,"TELEPORT TO PLACE",function()
+        return self:TeleportToPreset(selectedPlace)
+    end,UI,style,track)
+
+    section(page,"QUEST NPCS")
+    local quests=liveQuestNames()
+    local selectedQuest=quests[1]
+    local _,updateQuests=dropdown(page,"Quest NPC",quests,function(name) selectedQuest=name end)
+    button(page,"TELEPORT TO QUEST NPC",function()
+        return self:TeleportToNPC(selectedQuest,true)
+    end,UI,style,track)
+
+    section(page,"NPCS / BOSSES")
+    local npcNames=liveNPCNames()
+    local selectedNPC=npcNames[1]
+    local _,updateNPCs=dropdown(page,"Target NPC",npcNames,function(name) selectedNPC=name end)
+    button(page,"TELEPORT TO NPC",function()
+        return self:TeleportToNPC(selectedNPC,false)
+    end,UI,style,track)
+    button(page,"REFRESH NPC LISTS",function()
+        quests=liveQuestNames()
+        npcNames=liveNPCNames()
+        selectedQuest=quests[1]
+        selectedNPC=npcNames[1]
+        updateQuests(quests)
+        updateNPCs(npcNames)
+        return true,("Found %d quest entries and %d NPCs."):format(#quests,#npcNames)
+    end,UI,style,track)
+    button(page,"RETURN TO LAST POSITION",function()
+        return self:ReturnFromTeleport()
+    end,UI,style,track)
+end
+
 function Community:Init(all)
     modules,config,logger=all,all.Config,all.RuntimeLog
     if config:Get("CommunityAntiAFK")==true then self:SetAntiAFK(true) end
