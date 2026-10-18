@@ -963,19 +963,26 @@ end
 
 local function installFastDialogueWait(state)
     local fn = findLiveDialogueType()
-    if type(fn) ~= "function" then return false end
+    if type(fn) ~= "function" then
+        if tick() < _dialogueTypeMissRetryAt then
+            return false, "DialogueType closure not found (negative cache active)"
+        end
+        return false, "DialogueType closure not found (ClientFunctions:2035 not visible)"
+    end
 
     local exists, originalWait = getIndexedUpvalue(fn, 2)
-    if not exists or type(originalWait) ~= "function" then return false end
+    if not exists or type(originalWait) ~= "function" then
+        return false, "DialogueType wait upvalue #2 unavailable"
+    end
 
     local fastWait = function(_)
         return task.wait()
     end
     local ok = pcall(_rawSetupvalue, fn, 2, fastWait)
-    if not ok then return false end
+    if not ok then return false, "DialogueType wait upvalue patch failed" end
 
     state.waitPatch = {fn = fn, value = originalWait}
-    return true
+    return true, "DialogueType wait patch requested"
 end
 
 local function findClickContinue(dialogueGui)
@@ -1212,7 +1219,16 @@ local function tryFinalMerchantSell(itemName, merchantPrompt)
     local stageWaitMs = {}
     local stageLoops = {}
     local stageSignals = {}
-    installFastDialogueWait(state)
+    local waitInstalled, waitReason=installFastDialogueWait(state)
+    -- New module locals are reset whenever the loader executes; this diagnostic
+    -- distinguishes a missing ClientFunctions closure from a persisted config.
+    moduleLog(waitInstalled and "INFO" or "WARN",
+        ("[Inventory][WaitPatch] item=%s installed=%s reason=%s cachedClosure=%s gcMissCooldownMs=%d pacing=%s job=%s"):format(
+        tostring(itemName),tostring(waitInstalled),tostring(waitReason),
+        tostring(type(_cachedDialogueType)=="function"),
+        math.max(0,math.floor((_dialogueTypeMissRetryAt-tick())*1000+0.5)),
+        tostring(_config and _config:Get("MerchantPacingBeta")==true),
+        tostring(game.JobId)))
 
     local okRun, soldAmount, reason = xpcall(function()
         local openedAt=tick()
