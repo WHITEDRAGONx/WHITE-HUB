@@ -2006,7 +2006,10 @@ function UI:Create()
     trackConnection(aiEndpointButton.MouseButton1Click:Connect(function()
         if not _whiteAI then return end
         local ok, why = _whiteAI:SetEndpoint(endpointBox.Text)
-        aiStatus.Text = ok and "HTTPS backend address saved." or tostring(why)
+        if ok and _config then
+            endpointBox.Text=tostring(_config:Get("WhiteAIEndpoint") or "")
+        end
+        aiStatus.Text=tostring(why or (ok and "HTTPS /reports endpoint saved." or "Invalid endpoint"))
     end))
 
     local keyBox = Instance.new("TextBox", AIPage)
