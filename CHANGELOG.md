@@ -1,5 +1,21 @@
 # Changelog
 
+## Events Items Farm and Halloween reward preview — 2026-10-18 (V5 Silver R1)
+
+- Sidebar order: Farm, Events, Stand; Events toggle is "Events Items Farm".
+- Opt-in event mode in the original Farm.lua worker collects only verified Yellow,
+  Blue, Green and Red Candy. Uses existing ProximityPrompt, inventory confirmation,
+  safe spot restoration and no-dry-item 20s server hop respecting private-server mode.
+- Normal Farm and Event Farm are mutually exclusive. No automatic Merchant selling,
+  Lucky purchases, normal farm phases, or unverified candy turn-ins in event mode.
+- Persisted configurations with conflicting farms are normalized to safe OFF.
+- Saved rewards preview: 2026, 2022, 2021 Halloween and normal shop items with
+  prices observed in the owner's 39-state Jack dialogue capture. No purchases made.
+- Candy exchange and post-purchase confirmation remain unverified; Auto Turn-In and
+  Auto Buy are deliberately not activated.
+- Preserves Inventory.lua Merchant Zero Delay, CombatFarm XenonLock, Settings Low GFX,
+  StandFarm, and private WHITE AI separation. Requires Delta/YBA runtime validation.
+
 ## Native Low GFX input compatibility — 2026-10-18 (Settings R4)
 
 - Prefers one bound connection:Fire or Function input over firesignal for the
