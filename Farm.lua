@@ -117,6 +117,24 @@ local EVENT_CANDY = {
     ["Yellow Candy"] = true, ["Blue Candy"] = true,
     ["Green Candy"] = true, ["Red Candy"] = true,
 }
+local fastPickupFailed=0
+local lastPromptAt=0
+local function pickupFastEnabled(restockGuard)
+    return not restockGuard and _config and _config:Get("FastPickupEnabled")==true
+end
+local function notePickupResult(fast,confirmed,name)
+    if not fast then return end
+    if confirmed then fastPickupFailed=0;return end
+    fastPickupFailed=fastPickupFailed+1
+    if fastPickupFailed>=3 then
+        _config:Set("FastPickupEnabled",false)
+        if _ui and _ui.SetToggleValue then
+            pcall(function() _ui:SetToggleValue("Fast Pickup (BETA)",false) end)
+        end
+        moduleLog("WARN","[PickupTune] 3 unconfirmed pickups; reverted to stable original timings. Last item="..tostring(name))
+        fastPickupFailed=0
+    end
+end
 local function eventModeEnabled()
     return _config and _config:Get("EventItemsFarmEnabled") == true
 end
@@ -141,7 +159,7 @@ function Farm:Init(Modules)
     _webhook   = Modules.Webhook
     _halloween = Modules.HalloweenExchange
     _ui = Modules.UI
-    moduleLog("INFO", "[Farm] Build PICKUP-COMPAT-20261014-R2; original cadence restored after kick report, live retest pending")
+    moduleLog("INFO", "[Farm] Build PICKUP-TUNE-20261018-R1; original stable timings by default; faster timing opt-in only")
 end
 
 -- Config change detection
@@ -275,7 +293,8 @@ local function InitItemDetection()
     local epoch = detectionEpoch
     local function detect(model, announce)
         if not model:IsA("Model") then return end
-        if announce then task.wait(1) end -- Restore the pre-speed new-spawn settle window.
+        -- Start listening earlier only in explicit fast mode; keep full prompt/inventory validation.
+        if announce then task.wait(pickupFastEnabled() and 0.55 or 1) end
         local deadline = tick() + 2
         -- Initial items keep their original immediate scan; new spawns settle first.
         while epoch == detectionEpoch and model.Parent == ItemSpawnFolder do
@@ -326,6 +345,7 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
         return false
     end
 
+    local fast=pickupFastEnabled(restockGuard)
     local beforeCount = _inventory:Count(itemInfo.Name)
     local model = itemInfo.Model or index
     local started, bv, requests = tick(), nil, 0
@@ -334,10 +354,17 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
         if restockGuard then restockFreeze = bv end
         _movement:SetNoclip(true)
         _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
-        task.wait(0.35)
+        task.wait(fast and 0.26 or 0.35)
         local function fire()
             if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
+            -- Never fire twice; even the fast preset has a minimum dispatch gap.
+            if fast then
+                local remaining=0.75-(tick()-lastPromptAt)
+                if remaining>0 then task.wait(remaining) end
+                if not allowed() or not model.Parent then return false end
+            end
             requests = requests + 1
+            lastPromptAt=tick()
             local fired, result = pcall(fireproximityprompt, itemInfo.ProximityPrompt)
             return fired and result ~= false
         end
@@ -351,7 +378,7 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
                 -- competitor's pickup our own successful acquisition.
                 if tick() - disappeared >= 0.35 then break end
             end
-            task.wait(0.1)
+            task.wait(fast and 0.075 or 0.1)
         end
         return _inventory:Count(itemInfo.Name) > beforeCount
     end)
@@ -362,12 +389,13 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     if hrp.Parent and (allowed() or (not restockGuard and Player.Character == character and (collectionMode == "event" or eventModeEnabled()))) then
         pcall(function() _movement:Teleport(SAFE_SPOT) end)
     end
-    if allowed() then task.wait(0.15) end
+    if allowed() then task.wait(fast and 0.10 or 0.15) end
     pcall(function() _movement:SetNoclip(false) end)
     if not allowed() then return false end
     if not ok then error("Item collection operation failed after cleanup", 0) end
 
     if ok and collected then
+        notePickupResult(fast,true,itemInfo.Name)
         SpawnedItems[index] = nil
         lastItemTime = tick()
         moduleLog("INFO", "[Farm] Collected: " .. itemInfo.Name)
@@ -382,6 +410,7 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     else
         SpawnedItems[index] = nil
     end
+    notePickupResult(fast,false,itemInfo.Name)
     moduleLog(model and model.Parent and "WARN" or "INFO", "[Farm] Collection was not confirmed: " .. tostring(itemInfo.Name))
     return false
 end
