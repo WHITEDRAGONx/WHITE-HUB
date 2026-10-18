@@ -30,6 +30,7 @@ local Defaults = {
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
     SettingsCapFPS30 = false,
+    SettingsUncapFPS = false,
     SettingsLowGraphics = false,
     SettingsBlackScreen = false,
     CommunityAntiAFK = false, -- Explicit opt-in; no kick/ban immunity claimed.
@@ -95,6 +96,10 @@ local function ApplyDefaults(data)
 
     -- Purchases never resume silently after a server change.
     data.HalloweenAutoBuy = false
+    if type(data.SettingsUncapFPS) ~= "boolean" then data.SettingsUncapFPS = false end
+    if data.SettingsUncapFPS == true and data.SettingsCapFPS30 == true then
+        data.SettingsCapFPS30 = false
+    end
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
     if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
     if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
