@@ -606,7 +606,7 @@ end
 local function canCalibrateHere()
     if game.PlaceId~=2809202155 then return false,"Only supported in YBA main map" end
     local working=activeWorkers()
-    if working or pilot or self._pilotStarting then return false,"Stop farms/Pilot before calibrating" end
+    if working or pilot or Community._pilotStarting then return false,"Stop farms/Pilot before calibrating" end
     local char,h,root=charParts()
     if not root or not h or h.Health<=0 then return false,"Character unavailable" end
     local params=RaycastParams.new()
@@ -804,6 +804,8 @@ function Community:TeleportTo(position, label, allowEventTrade, groundMode)
     return true,"Teleported to "..tostring(label)
 end
 function Community:TeleportToPreset(label)
+    -- Arcade is a multilevel building: never reuse the legacy map-preset raycast.
+    if label=="Arcade" then return self:TeleportToLandmark("arcade") end
     for _, row in ipairs(teleportPresets) do
         if row[1]==label then return self:TeleportTo(row[2],label) end
     end

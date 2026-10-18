@@ -1,5 +1,19 @@
 # Changelog
 
+## Arcade calibration failure & Merchant latency diagnostics — 2026-10-18
+
+- Fix `canCalibrateHere` referencing nil `self._pilotStarting`.
+  Arcade and Merchant floor save buttons now query the Community module state.
+- Route old "Arcade" selection in TELEPORT TO PLACE through the safe
+  saved Arcade floor instead of the old multistorey preset.
+- Add passive `[Inventory][Latency]` timing per FINAL Merchant sale,
+  splitting tool equip/prep, opening, stage wait, option injection,
+  inventory confirmation, and cleanup.
+- Preserve Option1 -> Option1 -> Option6, safety checks and existing
+  inventory-based sale confirmation. Merchant callback pacing remains opt-in.
+- Runtime validation in Delta is still required; diagnostics do not
+  imply faster selling or bypass game enforcement.
+
 ## Floor-accurate Merchant / Arcade teleport & private DEV UI — 2026-10-18
 
 - Merchant: SAVE MERCHANT POSITION records the player's root at the actual
