@@ -16,6 +16,7 @@ local _inventory = nil
 local _movement  = nil
 local _serverHop = nil
 local _webhook   = nil
+local _halloween = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
@@ -137,6 +138,7 @@ function Farm:Init(Modules)
     _movement  = Modules.Movement
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
+    _halloween = Modules.HalloweenExchange
     moduleLog("INFO", "[Farm] Build PICKUP-COMPAT-20261014-R2; original cadence restored after kick report, live retest pending")
 end
 
@@ -581,6 +583,28 @@ local function runEventCycle()
         end
         if not eventModeReady() then break end
         if tick() - lastItemTime > NO_ITEM_TIMEOUT then
+            -- Event trade is serialized on this same worker, after all pickups.
+            -- No Merchant sale or normal Farm phases are called here.
+            if _halloween and eventModeReady() then
+                if _config:Get("HalloweenAutoTurnIn") == true then
+                    local count = _halloween:GetCandyTotal()
+                    if count and count > 0 then
+                        local ok, message = _halloween:TurnInCandy("event-farm")
+                        moduleLog(ok and "INFO" or "WARN", "[EventFarm][TurnIn] "..tostring(message))
+                        if not ok then
+                            _config:Set("HalloweenAutoTurnIn", false)
+                            moduleLog("WARN", "[EventFarm] Auto Turn-In disabled after uncertain result; manual inspection required.")
+                        end
+                    end
+                end
+                if eventModeReady() and _config:Get("HalloweenAutoBuy") == true then
+                    local ok, message = _halloween:BuySelectedReward("event-farm")
+                    moduleLog(ok and "INFO" or "WARN", "[EventFarm][Buy] "..tostring(message))
+                    -- One explicit authorization covers at most one attempt.
+                    _config:Set("HalloweenAutoBuy", false)
+                end
+            end
+            if not eventModeReady() then break end
             if shouldSkipHop() then
                 if not lastWaiting then
                     moduleLog("INFO", "[EventFarm] No confirmed candy for 20s; staying in private server.")
