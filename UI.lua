@@ -923,9 +923,9 @@ function UI:Create()
     MakeToggle(FarmPage, "Clean Hop (BETA)",
         _config and _config:Get("CleanHopBeta")==true, function(v)
         if _config then _config:Set("CleanHopBeta",v==true) end
-        runtimeLog("INFO",("[CleanHop] Play-style fresh Place matchmaking %s"):format(v and "ON" or "OFF"))
+        runtimeLog("INFO",("[CleanHop] Different-server transfer with safe cleanup %s"):format(v and "ON" or "OFF"))
         UI:ShowPopup(v and
-            "Clean Hop enabled: future hops use fresh Place matchmaking, not a specific server. Roblox/Delta will NOT restart; you may join the same server." or
+            "Clean Hop enabled: selects a different public server and cleans the old runtime during transfer. Does NOT restart Roblox/Delta." or
             "Clean Hop disabled: original server-instance hop restored.",7)
     end)
 
