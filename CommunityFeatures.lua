@@ -206,35 +206,90 @@ function Community:StopDioOH()
     log("INFO","[DIOOH] Stopped and restored selected NPC.")
     return true,"DIO:OH combat stopped."
 end
+-- Camera follows the Stand itself, never a HumanoidRootPart moved under the map.
+-- While piloting the character is kept safely where it was.
 function Community:StopPilot()
     local state=pilot
     if not state then return false, "Pilot not running" end
     pilot=nil
-    disconnect(state.move); disconnect(state.respawn)
+    disconnect(state.move)
+    disconnect(state.respawn)
+    disconnect(state.unsummon)
+    disconnect(state.standGone)
     for obj, old in pairs(state.constraints) do
         if obj and obj.Parent then pcall(function() obj.Enabled=old end) end
     end
-    if state.focus and state.focus.Parent then pcall(function() state.focus:Destroy() end) end
-    local c,h,hrp=charParts()
-    if c == state.char and hrp and state.stand and state.stand.Parent then
-        local root=state.stand:FindFirstChild("HumanoidRootPart") or state.stand.PrimaryPart
-        if root then pcall(function() hrp.CFrame=root.CFrame+CFrame.new(0,2,0) end) end
+    if state.root and state.root.Parent then
+        pcall(function()
+            state.root.Anchored=state.rootAnchored
+            state.root.AssemblyLinearVelocity=Vector3.zero
+        end)
     end
-    log("INFO","[Pilot] Stopped; local constraints and camera restored.")
-    return true, "Stand Pilot stopped"
+    local human=state.hum
+    if human and human.Parent then
+        pcall(function()
+            human.WalkSpeed=state.walkSpeed
+            human.JumpPower=state.jumpPower
+            human.AutoRotate=state.autoRotate
+        end)
+    end
+    if state.focus and state.focus.Parent then
+        if state.createdFocus then
+            pcall(function() state.focus:Destroy() end)
+        else
+            pcall(function() state.focus.Value=state.oldFocus end)
+        end
+    end
+    -- Force a real player CameraSubject even when StandMorph was unsummoned.
+    local camera=workspace.CurrentCamera
+    local current=Player.Character
+    local playerHumanoid=current and current:FindFirstChildOfClass("Humanoid")
+    if camera then
+        pcall(function()
+            camera.CameraType=Enum.CameraType.Custom
+            camera.CameraSubject=playerHumanoid or state.hum or state.originalSubject
+        end)
+    end
+    if self._pilotUI and self._pilotUI.SetToggleValue then
+        pcall(function() self._pilotUI:SetToggleValue("Stand Pilot", false) end)
+    end
+    log("INFO","[Pilot] Stopped; Stand root/humanoid constraints restored; camera returned to player.")
+    return true, "Stand Pilot OFF. Camera returned to player."
 end
+
 function Community:StartPilot()
-    if pilot then return false, "Stand Pilot already active" end
-    if boss then return false,"Stop DIO:OH first" end
+    if pilot or self._pilotStarting then return false, "Stand Pilot is already starting or active" end
+    if boss then return false, "Stop DIO:OH first" end
     local busy, name=activeWorkers()
-    if busy then return false, "Disable other farms first: "..tostring(name) end
+    if busy then return false,"Disable other farms first: "..tostring(name) end
     local c,h,hrp=charParts()
     if not c or not h or not hrp or h.Health<=0 then return false,"Character not ready" end
+
+    self._pilotStarting=true
     local stand=c:FindFirstChild("StandMorph")
+    if not stand then
+        -- Current YBA exposes ToggleStand through RemoteEvent. This is one
+        -- normal summon request, not a repeated remote call loop.
+        local remote=c:FindFirstChild("RemoteEvent")
+        if not remote then
+            self._pilotStarting=false
+            return false,"No Stand summoned and ToggleStand remote is unavailable."
+        end
+        local ok=pcall(function() remote:FireServer("ToggleStand", "Toggle") end)
+        if not ok then
+            self._pilotStarting=false
+            return false,"Could not request Stand summon."
+        end
+        stand=c:WaitForChild("StandMorph",3)
+    end
     local root=stand and (stand:FindFirstChild("HumanoidRootPart") or stand.PrimaryPart)
-    if not root or not root:IsA("BasePart") then return false,"Summon your Stand before enabling Pilot." end
+    if stand and not root then root=stand:WaitForChild("HumanoidRootPart",2) end
+    self._pilotStarting=false
+    if Player.Character~=c or not root or not root:IsA("BasePart") then
+        return false,"Stand did not summon; no character movement was changed."
+    end
     local attach=root:FindFirstChild("StandAttach")
-    if not attach then return false,"StandAttach missing; pilot safely disabled." end
+    if not attach then return false,"StandAttach not found; pilot remains OFF." end
     local constraints={}
     for _,child in ipairs(attach:GetDescendants()) do
         if child:IsA("AlignPosition") or child:IsA("AlignOrientation") then
@@ -242,56 +297,91 @@ function Community:StartPilot()
         end
     end
     if not next(constraints) then return false,"Stand constraints not supported." end
-    for child in pairs(constraints) do child.Enabled=false end
-    local focus
-    if not c:FindFirstChild("FocusCam") then
+
+    local camera=workspace.CurrentCamera
+    if not camera then return false,"Camera not ready." end
+    local focus=c:FindFirstChild("FocusCam")
+    local createdFocus=false
+    local previousFocus=focus and focus.Value
+    if not focus then
         focus=Instance.new("ObjectValue")
         focus.Name="FocusCam"
-        focus.Value=root
         focus.Parent=c
+        createdFocus=true
     end
-    local state={char=c,stand=stand,root=root,hrp=hrp,hum=h,focus=focus,constraints=constraints}
+    local state={
+        char=c,stand=stand,root=root,hrp=hrp,hum=h,focus=focus,
+        createdFocus=createdFocus,oldFocus=previousFocus,constraints=constraints,
+        rootAnchored=root.Anchored,walkSpeed=h.WalkSpeed,
+        jumpPower=h.JumpPower,autoRotate=h.AutoRotate,
+        originalSubject=camera.CameraSubject
+    }
     pilot=state
+    -- Keep the real character safe in place; never set its CFrame below map.
+    for child in pairs(constraints) do child.Enabled=false end
+    root.Anchored=true
+    root.AssemblyLinearVelocity=Vector3.zero
+    h.WalkSpeed=0
+    h.JumpPower=0
+    h.AutoRotate=false
+    focus.Value=root
+    camera.CameraType=Enum.CameraType.Custom
+    camera.CameraSubject=root
+
     state.respawn=Player.CharacterAdded:Connect(function() self:StopPilot() end)
+    local summoned=c:FindFirstChild("SummonedStand")
+    if summoned and summoned:IsA("BoolValue") then
+        state.unsummon=summoned:GetPropertyChangedSignal("Value"):Connect(function()
+            if not summoned.Value then self:StopPilot() end
+        end)
+    end
+    state.standGone=stand.AncestryChanged:Connect(function()
+        if pilot==state and not stand:IsDescendantOf(c) then self:StopPilot() end
+    end)
     state.move=RunService.Heartbeat:Connect(function(dt)
         if pilot~=state then return end
-        if Player.Character~=c or not root.Parent or h.Health<=0 or not hrp.Parent then
+        if Player.Character~=c or not root:IsDescendantOf(c) or h.Health<=0 or not hrp.Parent
+            or (summoned and summoned:IsA("BoolValue") and not summoned.Value) then
             self:StopPilot()
             return
         end
-        if config and activeWorkers() then
+        if activeWorkers() then
             self:StopPilot()
             return
         end
-        local vec=h.MoveDirection
-        -- Keyboard fallback while humanoid is moved below the Stand.
-        if vec.Magnitude<0.05 and not UIS.TouchEnabled then
-            local look=workspace.CurrentCamera and workspace.CurrentCamera.CFrame
-            if look then
-                local f=Vector3.new(look.LookVector.X,0,look.LookVector.Z)
-                local r=Vector3.new(look.RightVector.X,0,look.RightVector.Z)
+        local direction=h.MoveDirection
+        if direction.Magnitude<0.05 and not UIS.TouchEnabled then
+            local view=workspace.CurrentCamera and workspace.CurrentCamera.CFrame
+            if view then
+                local f=Vector3.new(view.LookVector.X,0,view.LookVector.Z)
+                local r=Vector3.new(view.RightVector.X,0,view.RightVector.Z)
                 if f.Magnitude>0.05 and r.Magnitude>0.05 then
-                    f=f.Unit; r=r.Unit
-                    vec=(UIS:IsKeyDown(Enum.KeyCode.W) and f or Vector3.zero)
-                       -(UIS:IsKeyDown(Enum.KeyCode.S) and f or Vector3.zero)
-                       +(UIS:IsKeyDown(Enum.KeyCode.D) and r or Vector3.zero)
-                       -(UIS:IsKeyDown(Enum.KeyCode.A) and r or Vector3.zero)
+                    f=f.Unit;r=r.Unit
+                    direction=(UIS:IsKeyDown(Enum.KeyCode.W) and f or Vector3.zero)
+                        -(UIS:IsKeyDown(Enum.KeyCode.S) and f or Vector3.zero)
+                        +(UIS:IsKeyDown(Enum.KeyCode.D) and r or Vector3.zero)
+                        -(UIS:IsKeyDown(Enum.KeyCode.A) and r or Vector3.zero)
                 end
             end
         end
-        if vec.Magnitude>0.05 then
-            local direction=Vector3.new(vec.X,0,vec.Z)
-            if direction.Magnitude>0 then
-                local pos=root.Position+direction.Unit*math.min(dt,0.05)*28
-                root.CFrame=CFrame.lookAt(pos,pos+direction.Unit)
+        if direction.Magnitude>0.05 then
+            local vector=Vector3.new(direction.X,0,direction.Z)
+            if vector.Magnitude>0 then
+                local pos=root.Position+vector.Unit*math.min(dt,0.05)*28
+                root.CFrame=CFrame.lookAt(pos,pos+vector.Unit)
             end
         end
-        -- Character remains locally below the Stand for familiar Pilot behavior.
-        hrp.CFrame=root.CFrame*CFrame.new(0,-30,0)
+        -- Some native camera controllers change CameraSubject after summon.
+        local cam=workspace.CurrentCamera
+        if cam and cam.CameraSubject~=root then
+            cam.CameraType=Enum.CameraType.Custom
+            cam.CameraSubject=root
+        end
     end)
-    log("INFO","[Pilot] Running (beta). Character and Stand are locally repositioned.")
-    return true,"Stand Pilot ON. Move normally; STOP to return."
+    log("INFO","[Pilot] Running beta; Stand root stabilized, character stays safely on map.")
+    return true,"Stand Pilot ON. Desummon Stand or toggle OFF to restore the player camera."
 end
+
 function Community:SetAntiAFK(on)
     if config then config:Set("CommunityAntiAFK", on==true) end
     disconnect(afkConnection);afkConnection=nil
@@ -332,9 +422,24 @@ local function button(page, text, callback, UI, style, track)
     return b
 end
 function Community:Build(standPage, questPage, eventsPage, settingsPage, UI, section, style, track)
-    section(standPage, "STAND PILOT - BETA")
-    button(standPage,"START STAND PILOT",function() return self:StartPilot() end,UI,style,track)
-    button(standPage,"STOP STAND PILOT",function() return self:StopPilot() end,UI,style,track)
+    self._pilotUI=UI
+    section(questPage, "STAND PILOT - BETA")
+    self._pilotToggle=UI:AddLabel(questPage, "Camera follows Stand. Character stays on map; auto-summons when possible.")
+    self._pilotToggle.TextWrapped=true
+    UI._buildCommunityPilotToggle(questPage, "Stand Pilot", function(on)
+        if on then
+            local ok,reason=self:StartPilot()
+            if not ok then
+                if self._pilotUI then self._pilotUI:SetToggleValue("Stand Pilot", false) end
+                UI:ShowPopup(reason,5)
+            else
+                UI:ShowPopup(reason,4)
+            end
+        else
+            local ok,reason=self:StopPilot()
+            UI:ShowPopup(reason,3)
+        end
+    end)
     section(questPage, "JOTARO / DIO:OH - BETA")
     button(questPage,"SCAN JOTARO + DIO:OH",function() return self:ScanDioOH() end,UI,style,track)
     button(questPage,"START DIO:OH BOSS FARM",function() return self:StartDioOH() end,UI,style,track)
