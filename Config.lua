@@ -18,6 +18,9 @@ local Defaults = {
     Phase1Notified = false,
     Phase3Notified = false,
     FarmEnabled = true,
+    EventItemsFarmEnabled = false, -- Exclusive candy-only collection; separate from normal Item Farm.
+    HalloweenRewardCategory = "2026 Halloween Event Items",
+    HalloweenRewardTarget = "", -- Saved wishlist only; purchases are not enabled.
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
@@ -85,6 +88,13 @@ local function ApplyDefaults(data)
         end
     end
 
+    -- Old or corrupt saves must never enable two item collection modes together.
+    if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
+    if data.FarmEnabled == true and data.EventItemsFarmEnabled == true then
+        data.EventItemsFarmEnabled = false
+    end
+    if type(data.HalloweenRewardCategory) ~= "string" then data.HalloweenRewardCategory = Defaults.HalloweenRewardCategory end
+    if type(data.HalloweenRewardTarget) ~= "string" then data.HalloweenRewardTarget = "" end
     if type(data.AutoSkills) ~= "table" then data.AutoSkills = {} end
     if type(data.SellItems) ~= "table" then data.SellItems = {} end
 
