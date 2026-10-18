@@ -14,6 +14,9 @@ local Defaults = {
     AutoSell = true,
     ConsoleFollow = true, -- Keep Console follow preference across server hops via WhiteHubConfig.json.
     FastSellHidden = true,
+    FastPickupEnabled = false, -- opt-in measured timing, no extra prompt calls.
+    HalloweenFastDialogue = false, -- opt-in client-rendering suppression.
+    MerchantTeleportPosition = {}, -- explicit calibration or previously seen Merchant; numeric coords only.
     WebhookURL = "",
     Phase1Notified = false,
     Phase3Notified = false,
@@ -93,6 +96,16 @@ local function ApplyDefaults(data)
     -- Purchases never resume silently after a server change.
     data.HalloweenAutoBuy = false
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
+    if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
+    if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
+    local merchantPos=data.MerchantTeleportPosition
+    if type(merchantPos)~="table" or type(merchantPos.x)~="number"
+        or type(merchantPos.y)~="number" or type(merchantPos.z)~="number"
+        or merchantPos.x~=merchantPos.x or merchantPos.y~=merchantPos.y or merchantPos.z~=merchantPos.z
+        or math.abs(merchantPos.x)>100000 or math.abs(merchantPos.y)>100000
+        or math.abs(merchantPos.z)>100000 then
+        data.MerchantTeleportPosition={}
+    end
     -- Old or corrupt saves must never enable two item collection modes together.
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
     if data.FarmEnabled == true or data.AutoPrestige == true or data.StandFarmEnabled == true
