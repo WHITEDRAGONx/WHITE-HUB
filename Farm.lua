@@ -355,7 +355,7 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     if restockFreeze == bv then restockFreeze = nil end
     -- Event cancellation still restores the real character to the safe spot.
     -- Collection ownership remains serialized by collectBusy.
-    if hrp.Parent and (allowed() or (collectionMode == "event" and Player.Character == character)) then
+    if hrp.Parent and (allowed() or (not restockGuard and Player.Character == character and (collectionMode == "event" or eventModeEnabled()))) then
         pcall(function() _movement:Teleport(SAFE_SPOT) end)
     end
     if allowed() then task.wait(0.15) end
@@ -848,6 +848,9 @@ function Farm:PrestigeSell(ownerActive,sell)
     _config:Set("FarmEnabled",before,true)
     prestigeSaleBusy=false
     return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
+end
+function Farm:CanEnableEvent()
+    return not (restockBusy or sellBusy or prestigeSaleBusy or manualSellBusy)
 end
 -- Before Quest/NPC takeover, allow a cancelled event pickup to finish cleanup.
 function Farm:WaitForCollection(maxSeconds)
