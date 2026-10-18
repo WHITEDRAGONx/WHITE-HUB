@@ -858,6 +858,6 @@ task.spawn(function()
     end
 end)
 
-LOG("BOOT", "WHITE HUB V5 PUBLIC BETA running. All critical modules passed boot validation.")
+LOG("BOOT", "WHITE HUB V5 PRIVATE DEV + WHITE AI running. All critical modules passed boot validation.")
 -- Only a valid one-use arrival intent can authorize the opt-in exception.
 Modules.StandFarm:RecoverTransfer()
