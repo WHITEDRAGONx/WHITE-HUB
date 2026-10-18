@@ -190,5 +190,80 @@ class SettingsTests(unittest.TestCase):
         self.assertIn('{ name="Settings", page=SettingsPage }',ui)
         self.assertIn('Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y',ui)
 
+
+NATIVE_MOCK = r'''
+nativeCalls,nativeSignals=0,0
+getconnections=function(event)
+ local found={}
+ for _,c in ipairs(event.connections) do
+  local entry={Enabled=c.Enabled,Connected=c.Connected,Function=c.fn}
+  if not functionOnly then entry.Fire=function() return c.fn() end end
+  found[#found+1]=entry
+ end
+ return found
+end
+firesignal=function(event) nativeSignals=nativeSignals+1;event:Fire() end
+function nativeMenu(noHandler)
+ nativeHud=node('HUD','ScreenGui',playerGui)
+ local main=node('Main','Frame',nativeHud);local frames=node('Frames','Frame',main)
+ local menu=node('Settings','Frame',frames);nativeList=node('List','ScrollingFrame',menu)
+ nativeRow=node('ToggleLowGFX','ImageLabel',nativeList)
+ nativeButton=node('Button','TextButton',nativeRow);nativeButton.Text='TOGGLE LOW GFX'
+ nativeButton.MouseButton1Click=signal()
+ if not noHandler then nativeButton.MouseButton1Click:Connect(function()
+  nativeCalls=nativeCalls+1
+  if holdNative then task.wait() end
+  if nativeError then error('private exception must not be logged') end
+  if not keepNativeControl then nativeRow:Destroy() end
+ end) end
+end
+'''
+
+
+class NativeSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.lua=LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(MOCK+NATIVE_MOCK)
+        self.lua.globals().settings=self.lua.execute((ROOT/'Settings.lua').read_text())
+
+    def run_lua(self, script):
+        self.lua.execute(script)
+
+    def test_native_click_once_and_off_reload_does_not_claim_native_rollback(self):
+        self.run_lua("nativeMenu();settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and nativeSignals==1 and nativeRow.Parent==nil);assert(settings:GetStatus().native_low_gfx=='control_removed');settings:SetOption('SettingsLowGraphics',false);assert(quality.SavedQualityLevel==3 and settings:GetStatus().message:find('rejoin',1,true));settings:SetOption('SettingsLowGraphics',true);settings:Init(all);assert(nativeCalls==1 and nativeSignals==1)")
+
+    def test_saved_low_preference_can_request_native_once_on_init(self):
+        self.run_lua("nativeMenu();values.SettingsLowGraphics=true;settings:Init(all);assert(nativeCalls==1 and settings:GetStatus().low and settings:GetStatus().native_low_gfx=='control_removed')")
+
+    def test_already_used_control_is_not_reported_as_fresh_success(self):
+        self.run_lua("nativeMenu();nativeRow:Destroy();settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==0 and nativeSignals==0 and settings:GetStatus().native_low_gfx=='unavailable' and quality.SavedQualityLevel==1)")
+
+    def test_missing_inspection_or_handler_preserves_local_low_mode(self):
+        self.run_lua("nativeMenu(true);settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeSignals==0 and settings:GetStatus().native_low_gfx=='unsupported' and settings:GetStatus().low);settings:SetOption('SettingsLowGraphics',false);getconnections=nil;settings:SetOption('SettingsLowGraphics',true);assert(nativeSignals==0 and settings:GetStatus().native_low_gfx=='unsupported')")
+
+    def test_unexpected_native_label_is_not_invoked(self):
+        self.run_lua("nativeMenu();nativeButton.Text='TOGGLE MUSIC VOLUME';settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==0 and nativeSignals==0 and settings:GetStatus().native_low_gfx=='unavailable')")
+
+    def test_unique_callback_fallback_without_firesignal(self):
+        self.run_lua("nativeMenu();firesignal=nil;functionOnly=true;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and nativeSignals==0 and settings:GetStatus().native_low_gfx=='control_removed')")
+
+    def test_ambiguous_callbacks_without_signal_dispatch_are_not_guessed(self):
+        self.run_lua("nativeMenu();nativeButton.MouseButton1Click:Connect(function() nativeCalls=nativeCalls+100 end);firesignal=nil;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==0 and settings:GetStatus().native_low_gfx=='unsupported')")
+
+    def test_failed_callback_is_not_retried_or_logged_with_private_exception(self):
+        self.run_lua("nativeMenu();nativeError=true;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and settings:GetStatus().native_low_gfx=='failed');settings:SetOption('SettingsLowGraphics',false);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1);for _,line in ipairs(logs) do assert(not line:find('private exception',1,true)) end")
+
+    def test_unchanged_control_is_unconfirmed_and_is_not_clicked_again(self):
+        self.run_lua("nativeMenu();keepNativeControl=true;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(1);assert(nativeCalls==1 and settings:GetStatus().native_low_gfx=='unconfirmed');settings:SetOption('SettingsLowGraphics',false);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1)")
+
+    def test_delayed_ui_can_arrive_but_off_cancels_old_wait(self):
+        self.run_lua("settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(0.02);settings:SetOption('SettingsLowGraphics',false);nativeMenu();advance(1);assert(nativeCalls==0);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1)")
+
+    def test_missing_ui_wait_is_bounded(self):
+        self.run_lua("settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(1);assert(#jobs==0 and nativeCalls==0 and settings:GetStatus().native_low_gfx=='unavailable' and settings:GetStatus().low)")
+
+    def test_destroy_during_issued_callback_has_no_late_status_or_second_request(self):
+        self.run_lua("nativeMenu();holdNative=true;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and settings:GetStatus().native_low_gfx=='requested');settings:Destroy();local count=#logs;advance(1);assert(#logs==count and nativeCalls==1 and not settings:GetStatus().low)")
+
 if __name__=='__main__':
     unittest.main()

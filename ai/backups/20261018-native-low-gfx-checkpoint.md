@@ -15,7 +15,8 @@ AutoPrestige, loaders and all public files. No Render deploy.
 
 Before native dispatch: verify exact UI path/label, current runtime/low-mode token,
 and an inspectable bound click handler. At most one dispatch per native HUD.
-No guessed remotes, callback extraction, bulk scan or retry after an issued call.
+No guessed remotes, decompilation/upvalue extraction, bulk scan or retry after an issued call.
+Only the existing binding of the exact native click control may be invoked.
 Local quality/effects still work if the native API is unavailable. Native changes
 may require rejoining to undo; never claim they are restored by the hub's OFF.
 

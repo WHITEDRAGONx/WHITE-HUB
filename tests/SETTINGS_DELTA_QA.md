@@ -1,8 +1,37 @@
 # Settings — Delta validation
 
 Experimental: SILVER-V5-20261013-R4. Public: SILVER-V5-PUBLIC-BETA-20261013-R4.
-Current Settings module: SETTINGS-BLACK-20261013-R2 (visual cover only).
+Public Settings module: SETTINGS-BLACK-20261013-R2 (visual cover only).
+Dev Settings experiment: SETTINGS-YBA-20261018-R3 (native Low GFX request).
 Offline results do not validate Roblox or the executor.
+
+## Native YBA Low GFX experiment — dev only
+
+Owner R4 OFF/ON captures identify the exact native click control:
+`PlayerGui/HUD/Main/Frames/Settings/List/ToggleLowGFX/Button`, a TextButton
+labelled `TOGGLE LOW GFX`. The row and button disappear after manual activation;
+this is observed UI behaviour, not a reversible boolean flag or an FPS benchmark.
+
+1. Rejoin YBA for a fresh native button. Use only the dev loader and confirm
+   SETTINGS-YBA-20261018-R3. Keep other farms OFF for this short check.
+2. Ensure native Low GFX was not already used. Open the hub's Settings and enable
+   Low graphics once. The adapter waits up to ten seconds for the native menu,
+   verifies the exact path/label and a bound MouseButton1Click handler, and
+   issues at most one native click per HUD. It never guesses a remote.
+3. Check `[NativeLowGFX]` in Console. `control_removed` means the same native
+   List remains but its Low GFX row disappeared after our request. Verify actual
+   graphics yourself. `unconfirmed`/`failed` never trigger another input.
+4. OFF restores the hub's recorded local quality/effects only. Native YBA
+   modifications may remain until rejoining. OFF/ON or reloading the hub must
+   not issue a second click against the same HUD. Capture both results.
+5. If the native button was already removed, no native click occurs. If the
+   executor cannot inspect/fire its handler, the status explains that local
+   effects still apply. No unrelated settings, farms or dialogs are touched.
+6. OFF or reload while waiting for delayed UI must cancel the old request. An
+   already issued game callback cannot be recalled; we do not claim otherwise.
+
+Native request/visual result through Delta remains unvalidated until owner
+returns a fresh dev-runtime log. Do not promote this experiment to main yet.
 
 A tester reported delay/crash with the original Black screen. The R2 module
 removes native renderer control; the cause is not confirmed by a crash trace.
