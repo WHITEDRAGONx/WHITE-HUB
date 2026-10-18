@@ -1,16 +1,38 @@
 -- Client presentation settings only; no farm, dialogue or inventory ownership.
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
 local Settings = {}
-local BUILD = "SETTINGS-YBA-20261018-R4"
-local config, logger, ui, statusLabel
+local BUILD = "SETTINGS-YBA-20261018-R5-FPS"
+local config, logger, ui, statusLabel, fpsLabel, overlayFpsLabel
 local alive, capOn, lowOn, blackOn = false, false, false, false
 local lowEpoch, lowConnections = 0, {}
 local originals = setmetatable({}, {__mode="k"})
 local fpsSetter, fpsPrevious, fpsAssumed
-local overlay, recoveryConnection
+local overlay, recoveryConnection, fpsConnection
 local qualityApplied, effectsChanged = false, 0
 local messages = {cap="Off", low="Off", black="Off"}
+local measuredFps=nil
+local function publishFps()
+    local reading=measuredFps and string.format("%d FPS",math.floor(measuredFps+0.5)) or "Measuring FPS..."
+    if fpsLabel and fpsLabel.Parent then fpsLabel.Text="LIVE FPS: "..reading end
+    if overlayFpsLabel and overlayFpsLabel.Parent then overlayFpsLabel.Text=reading end
+end
+local function startFpsMonitor()
+    if fpsConnection then fpsConnection:Disconnect();fpsConnection=nil end
+    local frames,seconds=0,0
+    measuredFps=nil
+    fpsConnection=RunService.RenderStepped:Connect(function(dt)
+        if not alive then return end
+        if type(dt)~="number" or dt<=0 or dt>1 then return end
+        frames+=1;seconds+=dt
+        if seconds>=0.8 then
+            measuredFps=frames/seconds
+            frames,seconds=0,0
+            publishFps()
+        end
+    end)
+end
 local nativeState, nativeMessage = "idle", "Not requested"
 local nativeIssued = false
 -- The owner's R4 shows that YBA removes this control after activation. Keep an
@@ -323,6 +345,17 @@ local function makeOverlay()
     button.BackgroundColor3=Color3.fromRGB(145,163,184)
     button.TextColor3=Color3.fromRGB(10,13,18); button.BorderSizePixel=0
     Instance.new("UICorner",button).CornerRadius=UDim.new(0,8)
+    overlayFpsLabel=Instance.new("TextLabel",background)
+    overlayFpsLabel.Name="LiveFPS"
+    overlayFpsLabel.BackgroundTransparency=1
+    overlayFpsLabel.AnchorPoint=Vector2.new(0.5,0.5)
+    overlayFpsLabel.Position=UDim2.new(0.5,0,0.45,0)
+    overlayFpsLabel.Size=UDim2.new(0.9,0,0,38)
+    overlayFpsLabel.TextColor3=Color3.fromRGB(204,223,241)
+    overlayFpsLabel.TextSize=24
+    overlayFpsLabel.Font=Enum.Font.GothamBold
+    overlayFpsLabel.Text="Measuring FPS..."
+    publishFps()
     recoveryConnection=button.Activated:Connect(function()
         Settings:RestoreView()
     end)
@@ -344,6 +377,7 @@ local function setBlack(enabled)
     else
         if recoveryConnection then recoveryConnection:Disconnect(); recoveryConnection=nil end
         if overlay then overlay:Destroy(); overlay=nil end
+        overlayFpsLabel=nil
         blackOn=false; messages.black="Off"
     end
     return true
@@ -379,6 +413,12 @@ function Settings:Build(page,owner,makeToggle,theme)
             if not ok then owner:ShowPopup(reason,5) end
         end)
     end
+    fpsLabel=owner:AddLabel(page,"LIVE FPS: Measuring FPS...")
+    fpsLabel.Size=UDim2.new(1,-4,0,26)
+    fpsLabel.TextSize=15
+    fpsLabel.Font=Enum.Font.GothamBold
+    fpsLabel.TextColor3=theme.GOLD_BRIGHT or theme.WHITE
+    publishFps()
     statusLabel=owner:AddLabel(page,"")
     statusLabel.Size=UDim2.new(1,-4,0,86); statusLabel.TextWrapped=true; statusLabel.TextSize=10
     statusLabel.TextColor3=theme.MUTED
@@ -390,6 +430,7 @@ function Settings:Init(modules)
     self:Destroy()
     config,logger=modules.Config,modules.RuntimeLog
     alive=true
+    startFpsMonitor()
     if config:Get("SettingsBlackScreen")==true then
         config:Set("SettingsBlackScreen",false)
         log("INFO","Saved Black screen reset to OFF; enable the visual mode manually.")
@@ -403,7 +444,9 @@ function Settings:Init(modules)
     log("INFO","Build "..BUILD.."; Black screen is visual only and starts OFF.")
 end
 function Settings:Destroy()
-    alive=false; ui=nil; statusLabel=nil
+    alive=false; ui=nil; statusLabel=nil; fpsLabel=nil;overlayFpsLabel=nil
+    if fpsConnection then fpsConnection:Disconnect();fpsConnection=nil end
+    measuredFps=nil
     setLow(false)
     local capOk,capReason=setCap(false)
     local blackOk,blackReason=setBlack(false)
