@@ -43,10 +43,13 @@ local function log(level,message)
 end
 local function candies()
     local counts,total={},0
+    local roots={}
     local backpack=Player:FindFirstChild("Backpack")
+    if backpack then roots[#roots+1]=backpack end
+    if Player.Character then roots[#roots+1]=Player.Character end
     for _,name in ipairs(CANDIES) do
         local number=0
-        for _,root in ipairs({backpack,Player.Character}) do
+        for _,root in ipairs(roots) do
             if root then
                 for _,tool in ipairs(root:GetChildren()) do
                     if tool:IsA("Tool") and tool.Name==name then number=number+1 end
@@ -194,6 +197,9 @@ local function safeToTrade(source)
     return true
 end
 local function openJack()
+    -- The turn-in response can close asynchronously; never overlap two dialogs.
+    local deadline=tick()+3
+    while dialogue() and tick()<deadline do task.wait(0.12) end
     if dialogue() then return false,"Close any existing dialogue before starting" end
     local root=ReplicatedStorage:FindFirstChild("NewDialogue")
     local definition=root and root:FindFirstChild("Halloween Event")
@@ -235,8 +241,14 @@ function Trade:TurnInCandy(source)
                 local pointsNote=(beforePoints and points)
                     and ("; points "..tostring(beforePoints).." -> "..tostring(points))
                     or "; point counter not exposed"
+                local credited=(beforePoints and points and points>beforePoints)
+                if beforePoints and points and not credited then
+                    blockedUntilReload=true
+                    log("WARN","[TurnIn] Candy decreased, but the event point balance did not increase.")
+                    return false,"Candy count decreased but points did not increase; result unresolved"
+                end
                 log("INFO",("[TurnIn] Confirmed inventory decrease: %d candy%s"):format(delta,pointsNote))
-                return true,"Jack accepted "..delta.." candy (inventory confirmed)"..pointsNote
+                return true,"Candy count decreased by "..delta..pointsNote
             end
             task.wait(0.16)
         end
@@ -282,7 +294,10 @@ function Trade:BuySelectedReward(source)
         -- unknown confirmation screens and never retry an uncertain transaction.
         boughtThisRuntime=true
         selected,route=clickOnce(itemChoice)
-        if not selected then return false,route end
+        if not selected then
+            blockedUntilReload=true
+            return false,"Purchase callback failed; retry locked for this runtime"
+        end
         log("INFO",("[Buy] Requested once: %s for %d points via %s"):format(label,price,route))
         local deadline=tick()+6
         while tick()<deadline do
