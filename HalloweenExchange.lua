@@ -63,21 +63,59 @@ local function candies()
 end
 function Trade:GetCandyTotal() return candies() end
 -- Only explicitly named event/candy point balances qualify; generic skill points do not.
-function Trade:GetPoints()
-    local stats=Player:FindFirstChild("PlayerStats")
-    if not stats then return nil end
-    for _,entry in ipairs(stats:GetDescendants()) do
-        if entry:IsA("IntValue") or entry:IsA("NumberValue") then
-            local name=entry.Name:lower():gsub("[^%a]","")
-            if (name:find("halloween",1,true) or name:find("candy",1,true)
-                or name:find("event",1,true)) and
-                (name:find("point",1,true) or name:find("currency",1,true)) then
-                local value=tonumber(entry.Value)
-                if value and value>=0 then return value,entry:GetFullName() end
+-- Prefer a real event-specific numeric value; never confuse combat or skill points.
+local function observedPoints()
+    for _,root in ipairs({Player:FindFirstChild("PlayerStats"),Player:FindFirstChild("leaderstats")}) do
+        if root then
+            for _,entry in ipairs(root:GetDescendants()) do
+                local name=entry.Name:lower():gsub("[^%a]","")
+                local p=entry.Parent
+                local parentName=p and p.Name:lower():gsub("[^%a]","") or ""
+                local eventNamed=name:find("halloween",1,true) or name:find("candy",1,true)
+                    or name:find("event",1,true) or parentName:find("halloween",1,true)
+                    or parentName:find("candy",1,true) or parentName:find("event",1,true)
+                local currencyNamed=name:find("point",1,true) or name:find("currency",1,true)
+                    or (name=="points" and eventNamed)
+                if eventNamed and currencyNamed and
+                    (entry:IsA("IntValue") or entry:IsA("NumberValue") or entry:IsA("StringValue")) then
+                    local value=tonumber(entry.Value)
+                    if value and value>=0 and value==math.floor(value) then
+                        return value,entry:GetFullName()
+                    end
+                end
             end
         end
     end
     return nil
+end
+function Trade:GetPoints()
+    return observedPoints()
+end
+function Trade:InspectPoints()
+    local found,path=self:GetPoints()
+    if found then
+        log("INFO","[Balance] Event points="..tostring(found).." source="..tostring(path))
+        return true,("Verified event point balance: %d"):format(found)
+    end
+    local hints={}
+    for _,root in ipairs({Player:FindFirstChild("PlayerStats"),Player:FindFirstChild("leaderstats")}) do
+        if root then
+            local checked=0
+            for _,entry in ipairs(root:GetDescendants()) do
+                checked=checked+1
+                if checked>300 then break end
+                local n=tostring(entry.Name):lower()
+                if (n:find("halloween",1,true) or n:find("candy",1,true)
+                    or n:find("event",1,true) or n:find("point",1,true)) and
+                    #hints<12 and (entry:IsA("ValueBase") or entry:IsA("Folder")) then
+                    hints[#hints+1]=entry.Name.." ("..entry.ClassName..")"
+                end
+            end
+        end
+    end
+    log("WARN","[Balance] No verified event-specific numeric points. Candidate stat labels: "..
+        (#hints>0 and table.concat(hints,", ") or "none visible"))
+    return false,"Event-point balance not verified (details in Console)"
 end
 local function clean(t)
     return tostring(t or ""):lower():gsub("[%c%p]"," "):gsub("%s+"," "):match("^%s*(.-)%s*$") or ""
@@ -113,8 +151,11 @@ local function findOption(wantedOption,wantedText)
                     fragments[#fragments+1]=d.Text
                 end
             end
-            local label=clean(table.concat(fragments," "))
-            if label==clean(wantedText) then
+            local matches=false
+            for _,fragment in ipairs(fragments) do
+                if clean(fragment)==clean(wantedText) then matches=true; break end
+            end
+            if matches then
                 local button=node:IsA("GuiButton") and node
                     or node:FindFirstChildWhichIsA("GuiButton",true)
                 if button and actualVisible(button,gui) then return button end
@@ -196,18 +237,88 @@ local function safeToTrade(source)
         and modules.AutoPrestigeRuntime:IsBusy() then return false,"Prestige action pending" end
     return true
 end
+local JACK_NAMES={
+    ["jack, the cauldron specter"]=true,
+    ["halloween event"]=true,
+}
+local function jackPrompt()
+    local root=workspace:FindFirstChild("Dialogues")
+    if not root then return nil,"Workspace.Dialogues missing" end
+    local best,count=nil,0
+    -- Only prompts physically parented under a verified Jack/Halloween NPC.
+    for _,obj in ipairs(root:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            local parent=obj.Parent
+            local isJack=false
+            while parent and parent~=root do
+                if JACK_NAMES[parent.Name:lower()] then isJack=true;break end
+                parent=parent.Parent
+            end
+            if isJack then
+                count=count+1
+                best=obj
+            end
+        end
+    end
+    if count==1 then return best,best:GetFullName() end
+    return nil,count>1 and ("ambiguous Jack prompts: "..tostring(count))
+        or "Jack ProximityPrompt not currently streamed"
+end
+local function findDefinition()
+    for _,rootName in ipairs({"NewDialogue","Dialogue"}) do
+        local root=ReplicatedStorage:FindFirstChild(rootName)
+        if root then
+            for _,npcName in ipairs({"Jack, The Cauldron Specter","Halloween Event"}) do
+                local target=root:FindFirstChild(npcName)
+                if target then return target,target:GetFullName() end
+            end
+        end
+    end
+    return nil
+end
+local function waitForJackOptions(timeout)
+    local deadline=tick()+timeout
+    while tick()<deadline do
+        if findOption("Option2","I want to turn in my candy.")
+            and findOption("Option3","I want to use my points!") then
+            return true
+        end
+        task.wait(0.12)
+    end
+    return false
+end
 local function openJack()
-    -- The turn-in response can close asynchronously; never overlap two dialogs.
+    -- Wait until previous dialogues finish, but do not overwrite other NPC conversations.
     local deadline=tick()+3
     while dialogue() and tick()<deadline do task.wait(0.12) end
-    if dialogue() then return false,"Close any existing dialogue before starting" end
-    local root=ReplicatedStorage:FindFirstChild("NewDialogue")
-    local definition=root and root:FindFirstChild("Halloween Event")
-    local character=Player.Character
-    local remote=character and character:FindFirstChild("RemoteEvent")
-    if not definition or not remote then return false,"Halloween Jack not available in this server" end
-    local ok=pcall(function() remote:FireServer("PromptTriggered",definition) end)
-    return ok,ok and "Jack dialogue requested" or "Jack dialogue request rejected"
+    if dialogue() then return false,"Close any existing dialogue before using Jack" end
+    local prompt,path=jackPrompt()
+    if prompt and type(fireproximityprompt)=="function" then
+        log("INFO","[Jack] Opening via live ProximityPrompt: "..path)
+        local ok,err=pcall(fireproximityprompt,prompt)
+        if ok and waitForJackOptions(4.5) then
+            return true,"Live Jack prompt confirmed"
+        end
+        -- A prompt that failed to open might be out of streaming/range.
+        log("WARN","[Jack] Live prompt did not reveal expected options; checking exact dialogue definition")
+        if dialogue() then return false,"Jack dialogue opened with unexpected options; no action sent" end
+    end
+    local definition,definitionPath=findDefinition()
+    local char=Player.Character
+    local remote=char and char:FindFirstChild("RemoteEvent")
+    if not definition or not remote then
+        local reason=not definition and "matching Jack definition missing" or "character RemoteEvent missing"
+        log("WARN","[Jack] "..tostring(path or "no live prompt").."; "..reason)
+        return false,"Jack dialogue not opened ("..reason.."); no candy spent"
+    end
+    log("INFO","[Jack] Opening via exact definition: "..definitionPath)
+    local ok,err=pcall(function() remote:FireServer("PromptTriggered",definition) end)
+    if not ok then
+        log("WARN","[Jack] PromptTriggered failed: "..tostring(err))
+        return false,"Jack dialogue request failed"
+    end
+    if waitForJackOptions(5) then return true,"Jack dialogue confirmed" end
+    return false,"Jack did not show verified Turn-In/Shop options; no candy spent"
 end
 local function action(source,job)
     if busy then return false,"Another Halloween transaction is pending" end
