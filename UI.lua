@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-EVENTFARM-R1"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-HALLOWEEN-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -101,6 +101,7 @@ local _prestigeRuntime = nil
 local _compactUI = nil
 local _settings = nil
 local _community = nil
+local _halloween = nil
 local _catalog, _choices = nil, nil
 local _serverHop   = nil
 local _runtimeLog   = nil
@@ -131,6 +132,7 @@ function UI:Init(Modules)
     _compactUI = Modules.UICompact
     _settings = Modules.Settings
     _community = Modules.CommunityFeatures
+    _halloween = Modules.HalloweenExchange
     _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
     _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
@@ -1405,7 +1407,7 @@ function UI:Create()
 
     -- Read-only reward wishlist based on 39 captured dialogue states from Jack.
     -- User can choose target; no purchase/candy action until server behavior is proven.
-    MakeSection(EventsPage, "HALLOWEEN REWARDS - PREVIEW")
+    MakeSection(EventsPage, "HALLOWEEN REWARDS - BETA")
     local rewards={
         ["2026 Halloween Event Items"]={
             {"Boxing Blobs (Boxing Gloves Skin)",60},
@@ -1453,14 +1455,81 @@ function UI:Create()
     local rewardBtn
     rewardBtn,refreshRewards=MakeStyledDropdown(EventsPage,"Reward",choices,function(selection)
         _config:Set("HalloweenRewardTarget",selection=="Choose reward..." and "" or selection)
-        UI:ShowPopup("Reward saved for future Auto Buy. No purchase made.",4)
+        UI:ShowPopup("Reward saved; no purchase yet. Use opt-in controls below.",4)
     end)
     local savedReward=_config:Get("HalloweenRewardTarget")
     if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
     local rewardHint=UI:AddLabel(EventsPage,
-        "Prices verified in Jack's dialogue. Auto Turn-In and Auto Buy remain locked until candy exchange and purchase confirmation are captured.")
+        "Observed Jack prices. Turn-In beta checks candy loss; Buy beta needs a verified event-point balance and makes one attempt without blindly confirming.")
     rewardHint.TextWrapped=true
     rewardHint.Size=UDim2.new(1,-4,0,55)
+
+    -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
+    -- Saved reward is not permission to spend. Buy permission is per-runtime.
+    MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
+    MakeToggle(EventsPage, "Auto Turn-In Candy",
+        _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
+            if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
+            runtimeLog("INFO", "[Halloween] Auto Turn-In "..(on and "ON" or "OFF"))
+            UI:ShowPopup(on and "Candy conversion enabled at next dry-server checkpoint."
+                or "Auto Turn-In disabled.",5)
+        end)
+    MakeToggle(EventsPage, "Auto Buy Selected Reward (once)",
+        false, function(on)
+            if not _config or not _halloween then return end
+            if on then
+                if (_config:Get("HalloweenRewardTarget") or "")=="" then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Select a reward first. No points spent.",5)
+                    return
+                end
+                local points=_halloween:GetPoints()
+                if not points then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Halloween points are not exposed; Auto Buy is locked.",5)
+                    return
+                end
+                if _config:Get("EventItemsFarmEnabled")~=true then
+                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+                    UI:ShowPopup("Enable Events Items Farm for automatic one-shot buy.",5)
+                    return
+                end
+            end
+            _config:Set("HalloweenAutoBuy",on==true)
+            runtimeLog("INFO","[Halloween] Auto Buy (one attempt) "..(on and "ON" or "OFF"))
+        end)
+    local function eventAction(text,handler)
+        local b=Instance.new("TextButton")
+        b.Name="HalloweenAction"
+        b.Size=UDim2.new(1,-4,0,34)
+        b.Text=text
+        b.TextSize=12
+        b.Font=Enum.Font.GothamBold
+        b.Parent=EventsPage
+        styleActionButton(b,false)
+        local running=false
+        trackConnection(b.MouseButton1Click:Connect(function()
+            if running then return end
+            running=true
+            b.Text="WORKING..."
+            task.spawn(function()
+                local ok,success,message=pcall(handler)
+                local report=ok and tostring(message) or "Unexpected Halloween error; inspect Console."
+                runtimeLog(ok and success and "INFO" or "WARN", "[Halloween] "..report)
+                UI:ShowPopup(report,6)
+                if b.Parent then b.Text=text end
+                running=false
+            end)
+        end))
+    end
+    eventAction("TURN IN CANDY NOW (ONCE)",function()
+        if not _halloween then return false,"Exchange module unavailable" end
+        return _halloween:TurnInCandy("manual")
+    end)
+    eventAction("BUY SELECTED REWARD NOW (ONCE)",function()
+        if not _halloween then return false,"Exchange module unavailable" end
+        return _halloween:BuySelectedReward("manual")
+    end)
 
     -- Community features are separate opt-in tools; do not modify core workers.
     -- Reflow all affected pages after inserting buttons/sections.
