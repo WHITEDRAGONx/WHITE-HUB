@@ -129,6 +129,19 @@ local function validEndpoint(url)
         and not url:find("//", 9, true)
 end
 
+-- All report, pairing, job, and session routes use this one canonical origin.
+-- A bare Render service URL previously passed validation but pairing silently
+-- failed because authRequest only recognized endpoints ending in /reports.
+local function canonicalEndpoint(url)
+    if not validEndpoint(url) then return nil end
+    local host,suffix=url:match("^(https://[%w%.%-]+)(.*)$")
+    if not host then return nil end
+    if suffix=="" or suffix=="/" or suffix=="/reports" or suffix=="/reports/" then
+        return host.."/reports"
+    end
+    return nil
+end
+
 local function sessionHeaders(key)
     if #_ownerSession > 0 then return { ["X-WhiteAI-Session"] = _ownerSession } end
     return { ["X-WhiteAI-Key"] = key }
@@ -420,18 +433,26 @@ end
 
 local function authRequest(endpoint, path, method, headers)
     local requestFn = (syn and syn.request) or http_request or request or (http and http.request)
-    if type(requestFn) ~= "function" then return nil end
-    local base = endpoint:match("^(https://[%w%.%-]+)/reports$")
-    if not base then return nil end
-    local ok, response = pcall(requestFn, { Url = base .. path, Method = method,
-        Headers = headers, Body = method == "POST" and "{}" or nil })
-    if not ok or type(response) ~= "table" then return nil end
-    local status = tonumber(response.StatusCode or response.Status)
-    if status ~= 200 and status ~= 202 then return nil end
-    local body = response.Body or response.body
-    if type(body) ~= "string" or #body > 8000 then return nil end
-    local decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
-    return decoded and type(data) == "table" and data or nil
+    if type(requestFn) ~= "function" then return nil,"Executor HTTP request API unavailable" end
+    local canonical=canonicalEndpoint(endpoint)
+    local base=canonical and canonical:match("^(https://[%w%.%-]+)/reports$")
+    if not base then return nil,"Save a valid HTTPS /reports endpoint first" end
+    local ok,response=pcall(requestFn,{Url=base..path,Method=method,
+        Headers=headers,Body=method=="POST" and "{}" or nil})
+    if not ok or type(response)~="table" then return nil,"Network/HTTP request failed" end
+    local status=tonumber(response.StatusCode or response.Status)
+    if status==403 then return nil,"Owner authorization rejected (HTTP 403): check WHITEAI_ADMIN_KEY in Render" end
+    if status==404 then return nil,"Endpoint unavailable (HTTP 404): verify Render deployment and /auth/pair route" end
+    if status==503 then return nil,"Backend unavailable or Owner Key not configured (HTTP 503)" end
+    if status==429 then return nil,"Pairing rate limited (HTTP 429): wait before retrying" end
+    if status~=200 and status~=202 then
+        return nil,"Backend HTTP "..tostring(status or "unknown")
+    end
+    local body=response.Body or response.body
+    if type(body)~="string" or #body>8000 then return nil,"Unexpected backend response body" end
+    local decoded,data=pcall(HttpService.JSONDecode,HttpService,body)
+    if not decoded or type(data)~="table" then return nil,"Backend returned invalid JSON" end
+    return data,nil
 end
 
 function WhiteAI:RecoverSavedIncidents()
@@ -490,12 +511,12 @@ function WhiteAI:PairDevice(masterKey)
     if type(masterKey) ~= "string" or #masterKey < 32 or #masterKey > 128 then
         return false, "Enter your private owner key to pair once"
     end
-    local endpoint = _config and _config:Get("WhiteAIEndpoint")
-    if not validEndpoint(endpoint) then return false, "Save an HTTPS /reports endpoint first" end
+    local endpoint = _config and canonicalEndpoint(_config:Get("WhiteAIEndpoint"))
+    if not endpoint then return false, "Save an HTTPS /reports endpoint first" end
     _pairing = true
     local epoch = _epoch
     task.spawn(function()
-        local data = authRequest(endpoint, "/auth/pair", "POST", {
+        local data,authError = authRequest(endpoint, "/auth/pair", "POST", {
             ["X-WhiteAI-Admin-Key"] = masterKey, ["Content-Type"] = "application/json" })
         masterKey = nil
         if epoch ~= _epoch then return end
@@ -503,7 +524,8 @@ function WhiteAI:PairDevice(masterKey)
         if _config:Get("WhiteAIEndpoint") ~= endpoint then return end
         if not data or type(data.session_token) ~= "string" or #data.session_token > 256
             or type(data.expires_at) ~= "number" or data.expires_at <= os.time() then
-            _lastStatus = "Pairing failed; check owner key and backend settings"
+            -- Do not include a request body, key, or session token in logs/UI.
+            _lastStatus = "Pairing failed: "..tostring(authError or "invalid session reply")
             return
         end
         _ownerSession = data.session_token
@@ -549,14 +571,15 @@ function WhiteAI:RecoverSession()
 end
 
 function WhiteAI:SetEndpoint(url)
-    if not validEndpoint(url) then return false, "HTTPS URL required" end
-    if _config:Get("WhiteAIEndpoint") ~= url then
+    local canonical=canonicalEndpoint(url)
+    if not canonical then return false,"Enter a valid Render HTTPS URL (with or without /reports)" end
+    if _config:Get("WhiteAIEndpoint") ~= canonical then
         _ownerSession = ""
         _sessionExpires = 0
     end
-    _config:Set("WhiteAIEndpoint", url)
+    _config:Set("WhiteAIEndpoint",canonical)
     self:RecoverSession()
-    return true
+    return true,"HTTPS /reports endpoint saved"
 end
 
 function WhiteAI:SetIngestKey(token)
@@ -609,6 +632,13 @@ end
 
 function WhiteAI:Init(modules)
     _config = modules.Config
+    -- Repair previously saved bare Render service URLs before attempting
+    -- session restoration or sending any reports.
+    local oldUrl=_config and _config:Get("WhiteAIEndpoint")
+    local fixedUrl=canonicalEndpoint(oldUrl)
+    if fixedUrl and fixedUrl~=oldUrl then
+        _config:Set("WhiteAIEndpoint",fixedUrl)
+    end
     _log = modules.RuntimeLog
     _combat = modules.CombatFarm
     if _subscription then pcall(function() _subscription:Disconnect() end) end
