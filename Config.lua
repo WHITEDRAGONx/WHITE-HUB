@@ -24,6 +24,7 @@ local Defaults = {
     SettingsCapFPS30 = false,
     SettingsLowGraphics = false,
     SettingsBlackScreen = false,
+    CommunityAntiAFK = false, -- Explicit opt-in; no kick/ban immunity claimed.
     -- Stand Farm V1 is opt-in and never auto-starts after reload.
     StandFarmEnabled = false,
     StandFarmTarget = "",
