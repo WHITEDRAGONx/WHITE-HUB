@@ -68,6 +68,16 @@ Low graphics requests quality level 1, disables shadows and reduces local
 particles, trails, beams and post effects. Disabling it restores the values
 changed by the hub, preserving values subsequently changed elsewhere.
 
+Low graphics also attempts the native YBA **TOGGLE LOW GFX** action once per HUD,
+using the exact known control and an inspectable click handler. This is an
+experimental integration (`SETTINGS-YBA-20261018-R3`), published at the owner's
+request before live activation validation. Missing/unsupported native input
+keeps the local quality/effect options available. A request is never retried
+automatically after dispatch. The native control disappeared after manual use
+in the owner's test; a removed control is UI acknowledgement, not an FPS result.
+Native YBA changes may require rejoining to undo. OFF restores only the hub's
+recorded local properties. Check `[NativeLowGFX]` in Console and report results.
+
 Black screen draws a visual cover and keeps 3D rendering running. Native renderer
 control was removed after a tester reported delay/crash; the cause is not confirmed
 by a crash trace. WHITE HUB controls and **SHOW GAME** stay accessible. A saved

@@ -66,14 +66,15 @@ Black screen now uses only a visual cover and must be enabled manually each load
 Hub controls and **SHOW GAME** stay accessible. Disabling/reloading restores the values owned
 by Settings. RAM/temperature savings and actual Delta compatibility are unverified.
 
-Dev-only Settings experiment (`SETTINGS-YBA-20261018-R3`): enabling Low graphics
+Settings beta (`SETTINGS-YBA-20261018-R3`): enabling Low graphics
 also requests the existing native YBA **TOGGLE LOW GFX** click once per HUD,
 when the exact known control and an inspectable handler are available. Local
 quality/effects still apply when native input is unavailable. The owner's manual
 test removes this control after use; native changes may require a rejoin to undo.
 OFF restores only local properties owned by the hub. A removed native control is
 UI acknowledgement, not proof of graphics improvement. Live activation by the
-dev loader is pending; main retains the existing local-only option.
+loader is pending; the owner authorized publishing this experimental option to
+main before live activation validation. See `[NativeLowGFX]` in Console.
 
 ## Beta testing
 
