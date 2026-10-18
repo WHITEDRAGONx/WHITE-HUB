@@ -1,5 +1,20 @@
 # Changelog
 
+## Halloween Jack live dialogue fix — 2026-10-18 (V5 SILVER R2)
+
+- Turn-In first resolves a real Jack ProximityPrompt under Workspace.Dialogues,
+  then verifies the captured Option2/Option3 page. It no longer assumes
+  ReplicatedStorage.NewDialogue["Halloween Event"] must exist.
+- If a live prompt is absent/unusable, fallback only to an exact, observed
+  Jack/Halloween dialogue definition in NewDialogue/Dialogue.
+- Events Items Farm can travel to the real Jack with the existing raycast-validated
+  landmark teleport during a serialized trade, then return to its original position.
+- Selected dialogue option text matches one visible text fragment exactly instead
+  of concatenating duplicated TextLabels / buttons.
+- Missing event-point balances stay fail-closed. Console now lists candidate
+  event/point statistic names for later verification; no blind purchase occurs.
+- Main and private dev remain separate; real Delta/YBA behavior needs new logs.
+
 ## Halloween Exchange opt-in beta — 2026-10-18 (V5 Silver R2)
 
 - User confirmed that Jack's "I want to turn in my candy." converts collected
