@@ -1460,16 +1460,19 @@ function UI:Create()
     local refreshRewards=nil
     local categoryBtn=MakeStyledDropdown(EventsPage,"Category",categoryNames,function(category)
         currentCategory=category
-        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget=""})
+        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget="",HalloweenAutoBuy=false})
+        UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
         if refreshRewards then refreshRewards(labelsFor(category)) end
-        UI:ShowPopup("Category saved. Auto Buy is not enabled.",4)
+        UI:ShowPopup("Category saved. Re-arm Auto Buy after choosing the reward.",5)
     end)
     categoryBtn.Text=currentCategory
     local choices=labelsFor(currentCategory)
     local rewardBtn
     rewardBtn,refreshRewards=MakeStyledDropdown(EventsPage,"Reward",choices,function(selection)
-        _config:Set("HalloweenRewardTarget",selection=="Choose reward..." and "" or selection)
-        UI:ShowPopup("Reward saved; no purchase yet. Use opt-in controls below.",4)
+        _config:SetMany({HalloweenRewardTarget=selection=="Choose reward..." and "" or selection,
+            HalloweenAutoBuy=false})
+        UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+        UI:ShowPopup("Reward updated. Arm Auto Buy again to authorize one purchase.",5)
     end)
     local savedReward=_config:Get("HalloweenRewardTarget")
     if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
@@ -1499,7 +1502,7 @@ function UI:Create()
                 end
                 local ready,why=_halloween:AutoBuyReadiness()
                 UI:ShowPopup(ready and
-                    "Auto Buy armed: one purchase at next safe checkpoint." or
+                    "Auto Buy armed for this session: one purchase at the next safe checkpoint." or
                     ("Auto Buy armed but pending: "..tostring(why)..". No points spent."),7)
             end
             _config:Set("HalloweenAutoBuy",on==true)
