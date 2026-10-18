@@ -587,6 +587,41 @@ local function liveLandmarkPosition(landmark)
     end
     return nil
 end
+local function savedMerchantLocation()
+    local v=config and config:Get("MerchantTeleportPosition")
+    if type(v)~="table" or type(v.x)~="number" or type(v.y)~="number" or type(v.z)~="number" then return nil end
+    if v.x~=v.x or v.y~=v.y or v.z~=v.z or math.max(math.abs(v.x),math.abs(v.y),math.abs(v.z))>100000 then return nil end
+    return Vector3.new(v.x,v.y,v.z)
+end
+local function rememberMerchant(pos, origin)
+    if not config or typeof(pos)~="Vector3" then return end
+    local previous=savedMerchantLocation()
+    if previous and (previous-pos).Magnitude<2 then return end
+    config:Set("MerchantTeleportPosition",{x=pos.X,y=pos.Y,z=pos.Z})
+    log("INFO","[Teleport] Saved Merchant position ("..tostring(origin)..")")
+end
+function Community:SaveMerchantTeleportHere()
+    if game.PlaceId~=2809202155 then return false,"Only supported in YBA main map" end
+    local working=activeWorkers()
+    if working or pilot or self._pilotStarting then return false,"Stop farms/Pilot before calibrating Merchant" end
+    local c,h,root=charParts()
+    if not root or not h or h.Health<=0 then return false,"Character unavailable" end
+    local pos,path=liveLandmarkPosition("merchant")
+    if pos then
+        if (pos-root.Position).Magnitude>35 then return false,"Approach Merchant to calibrate the saved point" end
+        rememberMerchant(pos,"real NPC: "..tostring(path))
+    else
+        local rayParams=RaycastParams.new()
+        rayParams.FilterType=Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances={c}
+        local ground=workspace:Raycast(root.Position+Vector3.new(0,3,0),Vector3.new(0,-16,0),rayParams)
+        if not ground or ground.Normal.Y<0.5 or ground.Material==Enum.Material.Water then
+            return false,"Stand on safe ground in front of Merchant"
+        end
+        rememberMerchant(root.Position,"manual calibration")
+    end
+    return true,"Merchant position saved. Teleport will work without a streamed NPC next time."
+end
 function Community:TeleportToLandmark(landmark, allowEventTrade)
     if landmark=="arcade" then
         local live,path=liveLandmarkPosition("arcade")
@@ -600,11 +635,21 @@ function Community:TeleportToLandmark(landmark, allowEventTrade)
     end
     local label=landmark=="jack" and "Jack, The Cauldron Specter" or "Merchant"
     local position,path=liveLandmarkPosition(landmark)
-    if not position then
-        log("WARN","[Teleport] "..label.." has no current physical NPC position (StreamingEnabled or map changes).")
-        return false,label.." not found nearby. Approach its area and retry."
+    local fromCache=false
+    if landmark=="merchant" then
+        if position then rememberMerchant(position,"live NPC: "..tostring(path)) end
+        if not position then
+            position=savedMerchantLocation()
+            fromCache=position~=nil
+        end
     end
-    log("INFO","[Teleport] Resolved live NPC: "..tostring(path))
+    if not position then
+        log("WARN","[Teleport] "..label.." has no streamed position or calibrated destination.")
+        return false,landmark=="merchant"
+            and "Use SAVE MERCHANT POSITION once while standing at Merchant"
+            or "Jack not streamed; visit its area and try again"
+    end
+    log("INFO","[Teleport] "..(fromCache and "Saved location" or "Live NPC").." for "..label..": "..tostring(path or "cached"))
     return self:TeleportTo(position+Vector3.new(4,0,0),label,landmark=="jack" and allowEventTrade)
 end
 -- StreamingEnabled can leave only 2-3 physical quest NPCs in Workspace.
@@ -748,6 +793,9 @@ function Community:BuildTeleports(page,UI,section,style,track,dropdown)
     UI:AddLabel(page,"Merchant and Halloween Jack use live NPC positions; Arcade has a validated map fallback.").TextWrapped=true
     button(page,"TELEPORT TO MERCHANT",function()
         return self:TeleportToLandmark("merchant")
+    end,UI,style,track)
+    button(page,"SAVE MERCHANT POSITION",function()
+        return self:SaveMerchantTeleportHere()
     end,UI,style,track)
     button(page,"TELEPORT TO ARCADE",function()
         return self:TeleportToLandmark("arcade")
