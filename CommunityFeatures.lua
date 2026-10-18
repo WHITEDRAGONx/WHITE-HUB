@@ -20,7 +20,7 @@ local function disconnect(connection)
 end
 local function activeWorkers()
     if not config then return true end
-    for _, name in ipairs({"FarmEnabled", "StandFarmEnabled", "QuestFarmEnabled", "NPCFarmEnabled", "AutoPrestige"}) do
+    for _, name in ipairs({"FarmEnabled", "EventItemsFarmEnabled", "StandFarmEnabled", "QuestFarmEnabled", "NPCFarmEnabled", "AutoPrestige"}) do
         if config:Get(name) == true then return true, name end
     end
     if modules and modules.Farm and modules.Farm.IsBusy and modules.Farm:IsBusy() then
