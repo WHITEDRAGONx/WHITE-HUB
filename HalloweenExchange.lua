@@ -12,6 +12,8 @@ local blockedUntilReload=false
 local hiddenDialogue=nil
 local hiddenConn=nil
 local hiddenOriginallyEnabled=nil
+-- The exact GUI opened through verified Jack options; do not close other NPC dialogues.
+local activeJackGui=nil
 local function restoreJackRendering()
     if hiddenConn then pcall(function() hiddenConn:Disconnect() end);hiddenConn=nil end
     if hiddenDialogue and hiddenDialogue.Parent and hiddenDialogue:IsA("ScreenGui") then
@@ -382,6 +384,7 @@ local function openJack()
         log("INFO","[Jack] Opening via live ProximityPrompt: "..path)
         local ok,err=pcall(fireproximityprompt,prompt)
         if ok and waitForJackOptions(4.5) then
+            activeJackGui=dialogue()
             hideJackRendering()
             return true,"Live Jack prompt confirmed"
         end
@@ -404,16 +407,91 @@ local function openJack()
         return false,"Jack dialogue request failed"
     end
     if waitForJackOptions(5) then
+        activeJackGui=dialogue()
         hideJackRendering()
         return true,"Jack dialogue confirmed"
     end
     return false,"Jack did not show verified Turn-In/Shop options; no candy spent"
 end
-local function action(source,job)
+-- Jack's post-turn-in message is an ordinary CLICK TO CONTINUE page,
+-- not an OptionN. The candy deduction is already confirmed at this point.
+-- Only advance the exact GUI that our own openJack() recognized, and only on
+-- the verified "You now have N points" result. No speculative purchases or
+-- remote actions; bounded attempts prevent a stuck hidden dialogue.
+local function closeConfirmedJackTurnInResult()
+    local owned=activeJackGui
+    if not owned then return false,"Jack dialogue identity missing" end
+    local pg=Player:FindFirstChild("PlayerGui")
+    local deadline=tick()+4.5
+    local attempts=0
+    local resultSeen=false
+    while tick()<deadline do
+        local current=pg and pg:FindFirstChild("DialogueGui")
+        if not current or not owned.Parent then
+            log("INFO","[TurnIn][Close] Jack dialogue closed, attempts="..tostring(attempts))
+            return true,"closed"
+        end
+        if current~=owned then
+            -- Do not drive a replacement GUI whose dialogue ownership is unknown.
+            return false,"Jack dialogue replaced before cleanup"
+        end
+        local terminal=false
+        for _,node in ipairs(owned:GetDescendants()) do
+            if (node:IsA("TextLabel") or node:IsA("TextButton"))
+                and actualVisible(node,owned) and type(node.Text)=="string" then
+                local t=clean(node.Text)
+                if t:find("you now have",1,true) and t:find("point",1,true) then
+                    terminal=true
+                    break
+                end
+            end
+        end
+        if terminal then
+            resultSeen=true
+            if attempts>=3 then break end
+            local control=owned:FindFirstChild("ClickContinue",true)
+            local button=control and (control:IsA("GuiButton") and control
+                or control:FindFirstChildWhichIsA("GuiButton",true))
+            if button then
+                local clicked,route=clickOnce(button)
+                if clicked then
+                    attempts=attempts+1
+                    log("INFO",("[TurnIn][Close] Final Continue dispatched via %s (%d/3)"):format(
+                        tostring(route),attempts))
+                    local untilTime=math.min(deadline,tick()+0.75)
+                    while tick()<untilTime do
+                        if not owned.Parent or not pg or pg:FindFirstChild("DialogueGui")~=owned then
+                            log("INFO","[TurnIn][Close] Final result dismissed")
+                            return true,"closed"
+                        end
+                        task.wait(0.08)
+                    end
+                else
+                    log("WARN","[TurnIn][Close] Continue unavailable: "..tostring(route))
+                    break
+                end
+            else
+                log("WARN","[TurnIn][Close] Exact ClickContinue button not found")
+                break
+            end
+        else
+            if resultSeen then
+                -- A different page appeared. Never click an unknown choice.
+                return false,"Jack result changed without closing"
+            end
+            task.wait(0.10)
+        end
+    end
+    return false,resultSeen and "Jack result screen stayed open after bounded Continue"
+        or "Jack final points page not verified"
+end
+
+local function action(source,job,operation)
     if busy then return false,"Another Halloween transaction is pending" end
     local allowed,reason=safeToTrade(source)
     if not allowed then return false,reason end
     busy=true
+    activeJackGui=nil
     local original,character,hrp=nil,nil,nil
     if source=="event-farm" or source=="farm-checkpoint" or source=="auto-idle" then
         character=Player.Character
@@ -430,8 +508,22 @@ local function action(source,job)
         task.wait(0.35)
     end
     local ok,success,message=pcall(job)
+    local stuckResult=false
+    if ok and success and operation=="turn-in" then
+        local closed,why=closeConfirmedJackTurnInResult()
+        if not closed then
+            blockedUntilReload=true
+            stuckResult=true
+            log("WARN","[TurnIn][Close] "..tostring(why)..
+                "; candy delivery confirmed, further Jack automation blocked")
+            message=tostring(message).."; final Jack dialogue still open: close it manually"
+        end
+    end
+    -- Restore rendering only after attempting the verified final Continue.
+    -- If cleanup fails, show the GUI so the user can manually dismiss it.
     restoreJackRendering()
-    if original then
+    activeJackGui=nil
+    if original and not stuckResult then
         local restored=Player.Character==character and hrp and hrp.Parent
             and modules.Movement and modules.Movement:Teleport(original)
         if not restored then
@@ -442,6 +534,9 @@ local function action(source,job)
         else
             log("INFO","[Jack] Character restored to previous Event Farm position.")
         end
+    end
+    if stuckResult then
+        log("WARN","[TurnIn][Close] Stayed near Jack for manual dialogue recovery")
     end
     busy=false
     if not ok then log("WARN","[Trade] "..tostring(success));return false,"Halloween transaction failed; check Console" end
@@ -483,7 +578,7 @@ function Trade:TurnInCandy(source)
         blockedUntilReload=true
         log("WARN","[TurnIn] Option2 submitted but inventory not reduced; retry blocked.")
         return false,"Turn-In result unresolved; no automatic retry this runtime"
-    end)
+    end,"turn-in")
 end
 function Trade:BuySelectedReward(source)
     return action(source,function()
@@ -549,6 +644,7 @@ function Trade:Init(all)
 end
 function Trade:Destroy()
     restoreJackRendering()
+    activeJackGui=nil
     blockedUntilReload=true
     config=nil
 end
