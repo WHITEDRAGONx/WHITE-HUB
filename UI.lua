@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-COMMUNITY-R1"
+local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-EVENTFARM-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -780,6 +780,7 @@ function UI:Create()
 
     local tabDefs = {
         { name="Farm",    page=FarmPage    },
+        { name="Events",  page=EventsPage  },
         { name="Stand",   page=StandPage   },
         { name="Items",   page=ItemsPage   },
         { name="Combat", page=QuestPage },
@@ -787,7 +788,6 @@ function UI:Create()
         { name="Webhook", page=WebhookPage },
         { name="Console", page=ConsolePage },
         { name="Settings", page=SettingsPage },
-        { name="Events", page=EventsPage },
         { name="Credits", page=CreditsPage },
     }
     local tabButtons = {}
@@ -875,7 +875,14 @@ function UI:Create()
             _standFarm:Stop()
             UI:SetToggleValue("Stand Farm (BETA)", false)
         end
-        if _config then _config:Set("FarmEnabled", v) end
+        if _config then
+            if v then
+                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false})
+                UI:SetToggleValue("Events Items Farm", false)
+            else
+                _config:Set("FarmEnabled", false)
+            end
+        end
         if not v then
             print("[UI] Farm disabled by user.")
             runtimeLog("INFO", "Farm disabled by user.")
@@ -934,10 +941,10 @@ function UI:Create()
     MakeToggle(FarmPage, "Auto Prestige", _config and _config:Get("AutoPrestige"), function(v)
         if _prestigeRuntime then
             if not v then _prestigeRuntime:Stop(); return end
-            _config:SetMany({FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
+            _config:SetMany({FarmEnabled=false,EventItemsFarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false,AutoPrestige=false})
             if _standFarm then _standFarm:Stop() end
             if _combatFarm then _combatFarm:Stop() end
-            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
+            UI:SetToggleValue("Enable Farm",false); UI:SetToggleValue("Events Items Farm",false); UI:SetToggleValue("Stand Farm (BETA)",false)
             UI:SetToggleValue("Quest Farm",false); UI:SetToggleValue("NPC Farm",false)
             local ok,reason=_prestigeRuntime:Start()
             if not ok then UI:SetToggleValue("Auto Prestige",false); UI:ShowPopup(tostring(reason),6) end
@@ -945,7 +952,7 @@ function UI:Create()
         end
         if _config then
             if v then
-                _config:SetMany({ AutoPrestige = true, QuestFarmEnabled = false, NPCFarmEnabled = false })
+                _config:SetMany({ AutoPrestige = true, EventItemsFarmEnabled = false, QuestFarmEnabled = false, NPCFarmEnabled = false })
             else
                 _config:Set("AutoPrestige", false)
             end
@@ -958,6 +965,7 @@ function UI:Create()
             end
             UI:SetToggleValue("Quest Farm", false)
             UI:SetToggleValue("NPC Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             if _combatFarm then _combatFarm:Stop() end
             print("[UI] Auto Prestige enabled.")
             runtimeLog("INFO", "Auto Prestige enabled.")
@@ -1084,6 +1092,11 @@ function UI:Create()
     end))
 
     MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+        if enabled and _config and _config:Get("EventItemsFarmEnabled") then
+            UI:SetToggleValue("Stand Farm (BETA)", false)
+            UI:ShowPopup("Disable Events Items Farm before starting Stand Farm.", 5)
+            return
+        end
         if enabled and not stopPrestigeForSwitch("Stand Farm (BETA)") then return end
         if not _standFarm then
             UI:SetToggleValue("Stand Farm (BETA)", false)
@@ -1219,7 +1232,7 @@ function UI:Create()
         if v and not stopPrestigeForSwitch("Quest Farm") then return end
         if _config then
             if v then
-                _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, AutoPrestige = false })
+                _config:SetMany({ QuestFarmEnabled = true, NPCFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
             else
                 _config:Set("QuestFarmEnabled", false)
             end
@@ -1231,6 +1244,7 @@ function UI:Create()
             end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("NPC Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
             runtimeLog("INFO", "Quest Farm enabled.")
             if _combatFarm then _combatFarm:StartQuest() end
@@ -1259,7 +1273,7 @@ function UI:Create()
         if v and not stopPrestigeForSwitch("NPC Farm") then return end
         if _config then
             if v then
-                _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, AutoPrestige = false })
+                _config:SetMany({ NPCFarmEnabled = true, QuestFarmEnabled = false, EventItemsFarmEnabled = false, AutoPrestige = false })
             else
                 _config:Set("NPCFarmEnabled", false)
             end
@@ -1271,6 +1285,7 @@ function UI:Create()
             end
             getgenv().AutoPrestigeEnabled = false
             UI:SetToggleValue("Quest Farm", false)
+            UI:SetToggleValue("Events Items Farm", false)
             UI:SetToggleValue("Auto Prestige", false)
             runtimeLog("INFO", "NPC Farm enabled.")
             if _combatFarm then _combatFarm:StartNPC() end
