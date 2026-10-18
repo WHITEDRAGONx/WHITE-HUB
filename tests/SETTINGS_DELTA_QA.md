@@ -1,7 +1,7 @@
 # Settings — Delta validation
 
 Experimental: SILVER-V5-20261013-R4. Public: SILVER-V5-PUBLIC-BETA-20261013-R4.
-Current Settings beta: SETTINGS-YBA-20261018-R3 (native Low GFX request).
+Current Settings beta: SETTINGS-YBA-20261018-R4 (native Low GFX request).
 Black screen retains the visual-only behaviour of SETTINGS-BLACK-20261013-R2.
 Offline results do not validate Roblox or the executor.
 
@@ -13,7 +13,7 @@ labelled `TOGGLE LOW GFX`. The row and button disappear after manual activation;
 this is observed UI behaviour, not a reversible boolean flag or an FPS benchmark.
 
 1. Rejoin YBA for a fresh native button. Use the public or dev loader and confirm
-   SETTINGS-YBA-20261018-R3. Keep other farms OFF for this short check.
+   SETTINGS-YBA-20261018-R4. Keep other farms OFF for this short check.
 2. Ensure native Low GFX was not already used. Open the hub's Settings and enable
    Low graphics once. The adapter waits up to ten seconds for the native menu,
    verifies the exact path/label and a bound MouseButton1Click handler, and
@@ -34,6 +34,18 @@ Native request/visual result through Delta remains unvalidated until owner
 returns a fresh runtime log. On 2026-10-18 the owner explicitly requested main
 publication before live activation validation. The identical module passed
 37 Settings and 9 public-packaging checks offline; these do not replace Delta QA.
+
+R4 follow-up: the owner loaded R3 but its saved-ON attempt was unconfirmed;
+OFF/ON then showed only the issued-request guard. R4 logs its dispatch route
+immediately and prefers a unique connection:Fire/Function over firesignal.
+An offline no-op firesignal case fails against R3 and passes against R4; it is
+a reproduced possible failure mode, not proof of the executor's actual cause.
+Rejoin for a fresh HUD/request guard, enable Low graphics once, wait ten seconds
+without toggling OFF/ON and copy Console. Expect a route/handler log and either
+control-removed acknowledgement or a specific unsupported/failed/unconfirmed
+result. Full module redownload on the same HUD must not repeat an issued call.
+R4 offline verification: 42 Settings plus 9 packaging checks passed. No live
+success claim follows from these checks.
 
 A tester reported delay/crash with the original Black screen. The R2 module
 removes native renderer control; the cause is not confirmed by a crash trace.

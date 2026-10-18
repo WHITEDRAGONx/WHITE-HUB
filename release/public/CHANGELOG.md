@@ -1,5 +1,18 @@
 # Changelog
 
+## Native Low GFX input compatibility — 2026-10-18 (Settings R4)
+
+- Prefers one bound connection:Fire or Function input over firesignal for the
+  known native button. Multiple handlers still require one signal dispatch.
+- Reproduced offline: a no-op firesignal shadows a working bound connection in
+  R3. This is compatible with the owner's symptom, not proof of Delta's cause.
+- Logs route/handler count before the native request and prior state when a
+  repeated request is blocked. Issued guards also survive module redownload for
+  the same HUD. No automatic retry after a dispatched call.
+- Native Delta activation remains unconfirmed. Only Settings runtime changed;
+  Merchant, farms, combat and backend remain unchanged.
+- 42 Settings and 9 public-packaging checks passed offline; live retest pending.
+
 ## Native YBA Low GFX beta — 2026-10-18 (Settings R3)
 
 - Low graphics retains local quality/effect reduction and attempts the observed

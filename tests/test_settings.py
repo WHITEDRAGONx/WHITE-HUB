@@ -230,7 +230,24 @@ class NativeSettingsTests(unittest.TestCase):
         self.lua.execute(script)
 
     def test_native_click_once_and_off_reload_does_not_claim_native_rollback(self):
-        self.run_lua("nativeMenu();settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and nativeSignals==1 and nativeRow.Parent==nil);assert(settings:GetStatus().native_low_gfx=='control_removed');settings:SetOption('SettingsLowGraphics',false);assert(quality.SavedQualityLevel==3 and settings:GetStatus().message:find('rejoin',1,true));settings:SetOption('SettingsLowGraphics',true);settings:Init(all);assert(nativeCalls==1 and nativeSignals==1)")
+        self.run_lua("nativeMenu();settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeCalls==1 and nativeSignals==0 and nativeRow.Parent==nil);assert(settings:GetStatus().native_low_gfx=='control_removed');settings:SetOption('SettingsLowGraphics',false);assert(quality.SavedQualityLevel==3 and settings:GetStatus().message:find('rejoin',1,true));settings:SetOption('SettingsLowGraphics',true);settings:Init(all);assert(nativeCalls==1 and nativeSignals==0)")
+
+    def test_noop_firesignal_does_not_shadow_working_connection_fire(self):
+        self.run_lua("nativeMenu();firesignal=function() nativeSignals=nativeSignals+1 end;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(1);assert(nativeCalls==1 and nativeSignals==0 and settings:GetStatus().native_low_gfx=='control_removed')")
+
+    def test_noop_firesignal_does_not_shadow_unique_function_fallback(self):
+        self.run_lua("nativeMenu();functionOnly=true;firesignal=function() nativeSignals=nativeSignals+1 end;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(1);assert(nativeCalls==1 and nativeSignals==0 and settings:GetStatus().native_low_gfx=='control_removed')")
+
+    def test_multiple_handlers_still_use_one_signal_dispatch(self):
+        self.run_lua("nativeMenu();nativeButton.MouseButton1Click:Connect(function() extraNativeHandler=true end);settings:Init(all);settings:SetOption('SettingsLowGraphics',true);assert(nativeSignals==1 and nativeCalls==1 and extraNativeHandler)")
+
+    def test_dispatch_route_and_prior_state_are_visible_without_private_errors(self):
+        self.run_lua("nativeMenu();values.SettingsLowGraphics=true;keepNativeControl=true;settings:Init(all);advance(1);settings:SetOption('SettingsLowGraphics',false);settings:SetOption('SettingsLowGraphics',true);local text=table.concat(logs,' ');assert(text:find('Dispatch route=connection-fire; handlers=1',1,true));assert(text:find('Prior state=unconfirmed; route=connection-fire',1,true));assert(nativeCalls==1)")
+
+    def test_redownloaded_module_keeps_guard_for_same_hud(self):
+        self.run_lua("nativeMenu();keepNativeControl=true;settings:Init(all);settings:SetOption('SettingsLowGraphics',true);advance(1);settings:Destroy();assert(nativeCalls==1)")
+        self.lua.globals().replacement=self.lua.execute((ROOT/'Settings.lua').read_text())
+        self.run_lua("replacement:Init(all);assert(nativeCalls==1 and replacement:GetStatus().native_low_gfx=='unconfirmed');replacement:SetOption('SettingsLowGraphics',false);assert(replacement:GetStatus().message:find('rejoin',1,true))")
 
     def test_saved_low_preference_can_request_native_once_on_init(self):
         self.run_lua("nativeMenu();values.SettingsLowGraphics=true;settings:Init(all);assert(nativeCalls==1 and settings:GetStatus().low and settings:GetStatus().native_low_gfx=='control_removed')")
