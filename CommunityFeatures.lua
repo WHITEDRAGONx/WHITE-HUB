@@ -280,6 +280,10 @@ function Community:StopPilot()
     return true, "Stand Pilot OFF. Camera returned to player."
 end
 
+function Community:IsPiloting()
+    return pilot ~= nil or self._pilotStarting == true
+end
+
 function Community:StartPilot()
     if pilot or self._pilotStarting then return false, "Stand Pilot is already starting or active" end
     local busy, name=activeWorkers()
