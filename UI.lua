@@ -1402,11 +1402,6 @@ function UI:Create()
             runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
         end
     end)
-    local eventFarmHint=UI:AddLabel(EventsPage,
-        "Collect only 4 confirmed candy colors. Existing pickup verification and safe spot; no automatic selling/buying.")
-    eventFarmHint.TextWrapped=true
-    eventFarmHint.Size=UDim2.new(1,-4,0,43)
-
     -- Read-only reward wishlist based on 39 captured dialogue states from Jack.
     -- User can choose target; no purchase/candy action until server behavior is proven.
     MakeSection(EventsPage, "HALLOWEEN REWARDS - BETA")
@@ -1461,11 +1456,6 @@ function UI:Create()
     end)
     local savedReward=_config:Get("HalloweenRewardTarget")
     if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
-    local rewardHint=UI:AddLabel(EventsPage,
-        "Observed Jack prices. Turn-In beta checks candy loss; Buy beta needs a verified event-point balance and makes one attempt without blindly confirming.")
-    rewardHint.TextWrapped=true
-    rewardHint.Size=UDim2.new(1,-4,0,55)
-
     -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
     -- Saved reward is not permission to spend. Buy permission is per-runtime.
     MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
@@ -1524,6 +1514,10 @@ function UI:Create()
             end)
         end))
     end
+    eventAction("GO TO HALLOWEEN JACK",function()
+        if not _community then return false,"Jack teleport unavailable" end
+        return _community:TeleportToLandmark("jack")
+    end)
     eventAction("TURN IN CANDY NOW (ONCE)",function()
         if not _halloween then return false,"Exchange module unavailable" end
         return _halloween:TurnInCandy("manual")
