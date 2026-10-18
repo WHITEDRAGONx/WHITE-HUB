@@ -19,6 +19,8 @@ local Defaults = {
     Phase3Notified = false,
     FarmEnabled = true,
     EventItemsFarmEnabled = false, -- Exclusive candy-only collection; separate from normal Item Farm.
+    HalloweenAutoTurnIn = false, -- Opt-in conversion before event hop.
+    HalloweenAutoBuy = false, -- Explicit opt-in per runtime, never resumed after hop.
     HalloweenRewardCategory = "2026 Halloween Event Items",
     HalloweenRewardTarget = "", -- Saved wishlist only; purchases are not enabled.
     AutoPrestige = false,
@@ -88,6 +90,9 @@ local function ApplyDefaults(data)
         end
     end
 
+    -- Purchases never resume silently after a server change.
+    data.HalloweenAutoBuy = false
+    if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
     -- Old or corrupt saves must never enable two item collection modes together.
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
     if data.FarmEnabled == true or data.AutoPrestige == true or data.StandFarmEnabled == true
