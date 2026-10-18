@@ -1380,6 +1380,9 @@ function UI:Create()
                 local combatRunning = _combatFarm:IsRunning()
                 if combatRunning then blocked = true end
             end
+            if _community and _community.IsPiloting and _community:IsPiloting() then
+                blocked = true
+            end
             if _farm and _farm.CanEnableEvent and not _farm:CanEnableEvent() then blocked = true end
             if blocked then
                 UI:SetToggleValue("Events Items Farm",false)
