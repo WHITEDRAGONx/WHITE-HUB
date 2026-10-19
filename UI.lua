@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-BETA-20261018-MERCHANT-FPS-R4"
+local UI_BUILD = "SILVER-V5-PUBLIC-20261018-DEV-SYNC-R5"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -879,9 +879,8 @@ function UI:Create()
         end
         if _config then
             if v then
-                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false, HalloweenAutoBuy=false})
+                _config:SetMany({FarmEnabled=true, EventItemsFarmEnabled=false})
                 UI:SetToggleValue("Events Items Farm", false)
-                UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
             else
                 _config:Set("FarmEnabled", false)
             end
@@ -914,6 +913,14 @@ function UI:Create()
         if _config then _config:Set("StayInPrivateServer", v) end
         print("[UI] Stay in Private Server set to " .. tostring(v))
         runtimeLog("INFO", "Stay in Private Server = " .. tostring(v))
+    end)
+    MakeToggle(FarmPage, "Clean Hop (BETA)",
+        _config and _config:Get("CleanHopBeta")==true, function(v)
+        if _config then _config:Set("CleanHopBeta",v==true) end
+        runtimeLog("INFO",("[CleanHop] Different-server transfer with safe cleanup %s"):format(v and "ON" or "OFF"))
+        UI:ShowPopup(v and
+            "Clean Hop enabled: selects a different public server and cleans the old runtime during transfer. Does NOT restart Roblox/Delta." or
+            "Clean Hop disabled: original server-instance hop restored.",7)
     end)
 
     -- Manual Server Hop uses the existing ServerHop.lua logic. No automatic
@@ -1105,7 +1112,8 @@ function UI:Create()
         pityInput.Text = "Stop at pity: " .. tostring(num)
     end))
 
-    MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+    MakeToggle(FarmPage, "Stand Farm (BETA)",
+        _config and _config:Get("StandFarmEnabled")==true, function(enabled)
         if enabled and _config and _config:Get("EventItemsFarmEnabled") then
             UI:SetToggleValue("Stand Farm (BETA)", false)
             UI:ShowPopup("Disable Events Items Farm before starting Stand Farm.", 5)
@@ -1141,7 +1149,10 @@ function UI:Create()
                 standStatus.Text = ("%s | %s | Pity %s | Rolls %d\n%s"):format(
                     tostring(state.mode or "stand"), tostring(state.stand or "?"), tostring(state.pity or "?"),
                     tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
-                if not state.running then
+                -- Keep the user's saved ON state visible while the loader is
+                -- verifying Stand/pity on arrival. The resume worker will switch
+                -- it OFF and log the reason if safe startup cannot be confirmed.
+                if not state.running and not (_config and _config:Get("StandFarmEnabled")==true) then
                     UI:SetToggleValue("Stand Farm (BETA)", false)
                 end
             end
@@ -1158,6 +1169,7 @@ function UI:Create()
     -- ITEMS PAGE
     -- =====================
     MakeSection(ItemsPage, "SELL ITEMS")
+
     MakeToggle(ItemsPage, "Merchant Callback Pacing (BETA)",
         _config and _config:Get("MerchantPacingBeta")==true, function(v)
             if _config then _config:Set("MerchantPacingBeta",v==true) end
@@ -1409,8 +1421,7 @@ function UI:Create()
             runtimeLog("INFO", "[EventFarm] Candy-only mode enabled.")
             UI:ShowPopup("Event Farm ON: only Yellow, Blue, Green and Red Candy.",5)
         else
-            _config:SetMany({EventItemsFarmEnabled=false,HalloweenAutoBuy=false})
-            UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+            _config:Set("EventItemsFarmEnabled",false)
             runtimeLog("INFO", "[EventFarm] Disabled; normal farm remains OFF.")
         end
     end)
@@ -1455,20 +1466,23 @@ function UI:Create()
     local refreshRewards=nil
     local categoryBtn=MakeStyledDropdown(EventsPage,"Category",categoryNames,function(category)
         currentCategory=category
-        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget=""})
+        _config:SetMany({HalloweenRewardCategory=category,HalloweenRewardTarget="",HalloweenAutoBuy=false})
+        UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
         if refreshRewards then refreshRewards(labelsFor(category)) end
-        UI:ShowPopup("Category saved. Auto Buy is not enabled.",4)
+        UI:ShowPopup("Category saved. Re-arm Auto Buy after choosing the reward.",5)
     end)
     categoryBtn.Text=currentCategory
     local choices=labelsFor(currentCategory)
     local rewardBtn
     rewardBtn,refreshRewards=MakeStyledDropdown(EventsPage,"Reward",choices,function(selection)
-        _config:Set("HalloweenRewardTarget",selection=="Choose reward..." and "" or selection)
-        UI:ShowPopup("Reward saved; no purchase yet. Use opt-in controls below.",4)
+        _config:SetMany({HalloweenRewardTarget=selection=="Choose reward..." and "" or selection,
+            HalloweenAutoBuy=false})
+        UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
+        UI:ShowPopup("Reward updated. Arm Auto Buy again to authorize one purchase.",5)
     end)
     local savedReward=_config:Get("HalloweenRewardTarget")
     if table.find(choices,savedReward) then rewardBtn.Text=savedReward end
-    -- Autotrade executes only at a dry-server checkpoint in Events Items Farm.
+    -- Jack automatic exchange uses safe checkpoints in normal Farm, Event Farm or idle.
     -- Saved reward is not permission to spend. Buy permission is per-runtime.
     MakeSection(EventsPage, "JACK EXCHANGE - OPT IN BETA")
     MakeToggle(EventsPage,"Invisible Jack Dialogue (BETA)",
@@ -1480,8 +1494,8 @@ function UI:Create()
         _config and _config:Get("HalloweenAutoTurnIn")==true, function(on)
             if _config then _config:Set("HalloweenAutoTurnIn",on==true) end
             runtimeLog("INFO", "[Halloween] Auto Turn-In "..(on and "ON" or "OFF"))
-            UI:ShowPopup(on and "Candy conversion enabled at next dry-server checkpoint."
-                or "Auto Turn-In disabled.",5)
+            UI:ShowPopup(on and "Candy turn-in armed for Item Farm, Event Farm or idle. Runs only at a safe checkpoint."
+                or "Auto Turn-In disabled.",6)
         end)
     MakeToggle(EventsPage, "Auto Buy Selected Reward (once)",
         false, function(on)
@@ -1492,20 +1506,13 @@ function UI:Create()
                     UI:ShowPopup("Select a reward first. No points spent.",5)
                     return
                 end
-                local points=_halloween:GetPoints()
-                if not points then
-                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
-                    UI:ShowPopup("Halloween points are not exposed; Auto Buy is locked.",5)
-                    return
-                end
-                if _config:Get("EventItemsFarmEnabled")~=true then
-                    UI:SetToggleValue("Auto Buy Selected Reward (once)",false)
-                    UI:ShowPopup("Enable Events Items Farm for automatic one-shot buy.",5)
-                    return
-                end
+                local ready,why=_halloween:AutoBuyReadiness()
+                UI:ShowPopup(ready and
+                    "Auto Buy armed for this session: one purchase at the next safe checkpoint." or
+                    ("Auto Buy armed but pending: "..tostring(why)..". No points spent."),7)
             end
             _config:Set("HalloweenAutoBuy",on==true)
-            runtimeLog("INFO","[Halloween] Auto Buy (one attempt) "..(on and "ON" or "OFF"))
+            runtimeLog("INFO","[Halloween] Independent Auto Buy (one attempt) "..(on and "ON" or "OFF"))
         end)
     local function eventAction(text,handler)
         local b=Instance.new("TextButton")
