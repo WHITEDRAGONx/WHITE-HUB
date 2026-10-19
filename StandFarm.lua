@@ -981,10 +981,11 @@ function StandFarm:Init(modules)
     activeConsumable = "Mysterious Arrow"
     log("INFO", "Build SF-WEBHOOK-20261013-R11; terminal notifications, Roblox validation pending")
     status = "Idle"
-    -- Never resume potentially destructive item consumption after reload.
-    -- The owner must re-enable the beta manually in the current session.
+    -- StandFarmEnabled is the user's existing persisted toggle. Never reset it
+    -- in Init: a normal Server Hop/rejoin recreates all modules. The loader will
+    -- try a guarded resume AFTER initialization and arrival state verification.
     if config:Get("StandFarmEnabled") == true then
-        config:Set("StandFarmEnabled", false)
+        log("INFO", "[SessionResume] Saved Stand Farm ON; waiting for guarded startup")
     end
     local waitingItem = config:Get("StandFarmRestockPendingItem")
     if waitingItem == "Rokakaka" or waitingItem == "Mysterious Arrow" or waitingItem == "Rib Cage of The Saint's Corpse" then
@@ -1135,6 +1136,67 @@ function StandFarm:RecoverTransfer()
         recovering=false
         claimedResume=nil
         if not ok and runToken==token then log("WARN","Arrival recovery failed safely; enable beta manually") end
+    end)
+    return true
+end
+
+-- No second toggle: restore the existing Stand Farm switch after a regular
+-- hop, kick/rejoin, or a loader restart if the saved choice is still ON.
+-- Only Start() is allowed to consume items; its normal skin/stand/ownership
+-- checks are NOT bypassed. This method is called once by the loader.
+function StandFarm:ResumeSavedSession()
+    if not config or config:Get("StandFarmEnabled") ~= true
+        or running or recovering or awaitingTransfer then return false end
+    local token = runToken
+    recovering = true
+    log("INFO", "[SessionResume] Restoring saved Stand Farm after player state is ready")
+    task.spawn(function()
+        local deadline = os.clock() + 30
+        local failedReason = nil
+        local resumed = false
+        while runToken == token and config:Get("StandFarmEnabled") == true
+            and not running and os.clock() < deadline do
+            -- Never overtake another farm or an unresolved prestige operation.
+            if config:Get("FarmEnabled") or config:Get("EventItemsFarmEnabled")
+                or config:Get("QuestFarmEnabled") or config:Get("NPCFarmEnabled")
+                or config:Get("AutoPrestige") then
+                failedReason = "Conflicting farm mode enabled in saved settings"
+                break
+            end
+            local char = getCharacter()
+            local pity = readPity()
+            local stand = readStand()
+            local backpack = player:FindFirstChildOfClass("Backpack")
+            if char and char:FindFirstChild("HumanoidRootPart")
+                and char:FindFirstChild("RemoteFunction") and backpack
+                and stand and pity ~= nil and not dialogueGui()
+                and not itemFarmBusy() and not pending and not interactionBusy
+                and callbackInFlight == 0 and skillInFlight == 0 then
+                local limit = tonumber(config:Get("StandFarmPityLimit")) or 0
+                if limit > 0 and pity >= limit then
+                    failedReason = ("Pity protection reached before resume: %d/%d"):format(pity, limit)
+                    break
+                end
+                local ok, reason = self:Start()
+                if ok then
+                    resumed = true
+                    log("INFO", "[SessionResume] Stand Farm resumed; pity=" ..
+                        tostring(readPity()) .. " stand=" .. tostring(readStand()))
+                else
+                    failedReason = "Start safety check: " .. tostring(reason)
+                end
+                break
+            end
+            task.wait(0.2)
+        end
+        -- A user Stop, settings edit, or a newer runtime invalidates token.
+        if not resumed and runToken == token
+            and config:Get("StandFarmEnabled") == true then
+            config:Set("StandFarmEnabled", false)
+            stoppedOn = failedReason or "Player state not confirmed within 30s; no auto-resume"
+            log("WARN", "[SessionResume] " .. stoppedOn .. "; switch OFF for safety")
+        end
+        recovering = false
     end)
     return true
 end
