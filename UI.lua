@@ -127,13 +127,13 @@ function UI:Init(Modules)
     _webhook     = Modules.Webhook
     _combatFarm  = Modules.CombatFarm
     _standFarm   = Modules.StandFarm
-    _standV2UI = Modules.StandV2UI
+    _standV2UI = Modules.UIComponents.Stand
     _prestigeRuntime = Modules.AutoPrestigeRuntime
-    _compactUI = Modules.UICompact
+    _compactUI = Modules.UIComponents.Compact
     _settings = Modules.Settings
     _community = Modules.CommunityFeatures
     _halloween = Modules.HalloweenExchange
-    _catalog, _choices = Modules.GameCatalog, Modules.ChoiceUI
+    _catalog, _choices = Modules.GameCatalog, Modules.UIComponents.Choice
     _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
 end

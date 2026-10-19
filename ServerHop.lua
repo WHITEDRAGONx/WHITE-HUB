@@ -234,8 +234,8 @@ local function cleanHopShutdown(epoch)
     -- Main will reload modules and check the retained hook marker.
     for _,name in ipairs({
         "Farm","HalloweenExchange","CommunityFeatures",
-        "AutoPrestigeRuntime","StandFarm","CatalogRefresh","Settings",
-        "UICompact","ChoiceUI","UI","Movement"
+        "AutoPrestigeRuntime","StandFarm","GameCatalog","Settings",
+        "UIComponents","UI","Movement"
     }) do
         local m=modules[name]
         if m then
