@@ -19,7 +19,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HU
 ```
 
 Start in a fresh YBA session. Check Credits/Console for
-`SILVER-V5-PUBLIC-BETA-20261013-R4`. Open the WHITE HUB launcher to configure modes.
+`SILVER-V5-PUBLIC-20261018-DEV-SYNC-R5`. Open the WHITE HUB launcher to configure modes.
 Settings persist in WhiteHubConfig.json when filesystem APIs are available.
 
 Tap Stands or Skins, search and check/uncheck names to edit your selection.
@@ -54,14 +54,18 @@ at a time; Auto Sell can remain ON while Stand Farm runs with Item Farm OFF.
   Event mode does not trigger Merchant sales or Lucky purchases; a dry server can
   hop without selling/buying unless Stay in Private Server is enabled.
 - Halloween reward preview/wishlist based on observed Jack menus, with prices.
-  Auto Turn-In is available as a new opt-in beta at a dry-server event checkpoint.
+  Auto Turn-In is opt-in and runs at serialized farm/event checkpoints or while
+  both item farms are OFF, provided no competing worker owns the character.
   Auto Buy is a single explicit purchase attempt only with readable event points
   and the exact item/category selected; unknown confirmations cause a safe stop.
   Buy authorization is not persisted across reloads. Live YBA verification pending.
 - Quest/NPC Farm, manual or automatic quest selection and configurable skills.
 - Stand/Shiny/Rib beta: searchable touch selection for Stands and skins, skin
   preservation, pity limit and session stats.
-- Bounded consumable restock and optional owned-hop continuation.
+- Consumable restock bounded to 25 seconds/eight attempts, with optional owned-hop
+  continuation and preserved skin, pity and inventory checks.
+- Classic server hop by default; optional Clean Hop selects a distinct server
+  and releases old-runtime workers after transfer begins.
 - Auto Prestige beta: updated dialogue and character lifecycle handling.
 - Webhook notifications, manual server hop and runtime diagnostics.
 - Stand/Shiny/Rib terminal webhook: target found, any detected skin preserved,
@@ -136,9 +140,10 @@ Item Farm action or sale must complete before Stand Farm can start.
 
 Stand/Shiny mode protects detected skins and stops when
 skin identification is inconclusive. Configure obtainable targets, sufficient
-Worthiness and a pity limit. Restock/hop/resume are optional; ordinary reload does
-not automatically restart Stand consumption. The optional resume requires the
-supported executor APIs and a valid one-use transfer from this hub.
+Worthiness and a pity limit. An explicitly saved ON Stand Farm choice is restored
+after player readiness through the normal guarded startup; Stop clears it.
+Owned restock-hop continuation additionally requires supported executor APIs,
+the resume option and a valid one-use transfer from this hub.
 
 For Auto Prestige, turn off the other farms and enable **Auto prestige (BETA)**.
 Observe level, prestige and current quest. Test on a disposable account with
@@ -150,6 +155,7 @@ Report build, executor, chosen mode, steps, expected/actual behavior and counts
 before/after. Record a short video if possible. Never send secret keys, webhook
 URLs or device session files. Do not repeatedly re-enable a pending consumable.
 
-See [CHANGELOG.md](CHANGELOG.md) for changes and current limitations.
+See [CHANGELOG.md](CHANGELOG.md) and [RELEASE_AUDIT.md](RELEASE_AUDIT.md) for changes,
+source comparison and current validation limits.
 
 Discord: https://discord.gg/j3C4Xa6DzN

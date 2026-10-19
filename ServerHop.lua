@@ -231,7 +231,7 @@ local function cleanHopShutdown(epoch)
     if not modules then return end
     -- Leave installed native metamethod hooks alone. Unhooking them or blindly
     -- rehooking on destination can corrupt the Delta environment; the new
-    -- DevMain will reload modules and check the retained hook marker.
+    -- Main will reload modules and check the retained hook marker.
     for _,name in ipairs({
         "Farm","HalloweenExchange","CommunityFeatures",
         "AutoPrestigeRuntime","StandFarm","CatalogRefresh","Settings",

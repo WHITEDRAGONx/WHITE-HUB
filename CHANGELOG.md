@@ -1,5 +1,20 @@
 # Changelog
 
+## Public synchronization audit — 2026-10-19
+
+- Confirmed the existing Item Farm/Fast Pickup, Stand/Shiny/Rib restock,
+  Halloween exchange and community compatibility changes against development.
+- Retained guarded saved Stand Farm startup and one-use owned-hop continuation.
+- Restock remains bounded to 25 seconds and eight attempts; skin, pity,
+  inventory, cancellation and movement ownership checks remain intact.
+- Classic server hop remains the default; Clean Hop is opt-in.
+- Auto Turn-In can run with Item Farm OFF at serialized idle checkpoints.
+  Terminal Jack dialogue recovery and one-shot verified-balance purchases remain.
+- Removed development-only documentation references. No Merchant code or fallback,
+  pickup timing, loader, combat or native graphics behavior changed in this audit.
+- Static and offline simulation validation is recorded in RELEASE_AUDIT.md.
+  Live Roblox/Delta validation and the separate sale-latency investigation remain pending.
+
 ## Arcade calibration failure & Merchant latency diagnostics — 2026-10-18
 
 - Fix `canCalibrateHere` referencing nil `self._pilotStarting`.
@@ -14,7 +29,7 @@
 - Runtime validation in Delta is still required; diagnostics do not
   imply faster selling or bypass game enforcement.
 
-## Floor-accurate Merchant / Arcade teleport & private DEV UI — 2026-10-18
+## Floor-accurate Merchant / Arcade teleport — 2026-10-18
 
 - Merchant: SAVE MERCHANT POSITION records the player's root at the actual
   standing floor, even when StreamingEnabled hides the NPC. The teleport
@@ -28,8 +43,6 @@
   above or floors up to 28 studs away.
 - Stand Pilot, Event Jack trading and combat teleports retain existing
   ground rules. No changes to Merchant Zero Delay/Inventory.
-- The AI DEBUG UI is PRIVATE-DEV ONLY (DevMain.lua), not the public Main.lua;
-  public boot logs / public screenshots cannot verify a missing dev tab.
 
 ## FPS unlock & Merchant callback pacing diagnostics — 2026-10-18 (V5 Silver R4)
 
@@ -46,7 +59,7 @@
 - Benchmark logs on 2026-10-18 showed 0.543s versus 1.498s mean per type
   for two separate manual sales; this comparison DOES NOT prove the cause.
   Re-test both settings on the same server and with similar inventories.
-- Does not change XenonLock, StandFarm, WhiteAI or Merchant item selection.
+- Does not change XenonLock, StandFarm or Merchant item selection.
 
 ## Pickup timing, Merchant calibration, Jack hidden mode & FPS — 2026-10-18 (V5 R3)
 
@@ -115,7 +128,7 @@
 - Candy exchange and post-purchase confirmation remain unverified; Auto Turn-In and
   Auto Buy are deliberately not activated.
 - Preserves Inventory.lua Merchant Zero Delay, CombatFarm XenonLock, Settings Low GFX,
-  StandFarm, and private WHITE AI separation. Requires Delta/YBA runtime validation.
+  StandFarm, and public package isolation. Requires Delta/YBA runtime validation.
 
 ## Native Low GFX input compatibility — 2026-10-18 (Settings R4)
 
@@ -140,7 +153,7 @@
 - Native changes may persist after OFF and may require a rejoin to undo. A
   disappearing control acknowledges the UI action; it does not prove FPS gains.
 - Runtime change is isolated to Settings.lua. Merchant, pickup, combat, Stand
-  Farm, Auto Prestige, loaders and private WHITE AI distribution are unchanged.
+  Farm, Auto Prestige, loaders and public package distribution are unchanged.
 - 46 offline Settings/packaging checks passed on the identical module. Native
   activation through Delta is still pending; owner authorized this public beta.
 

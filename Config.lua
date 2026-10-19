@@ -24,7 +24,7 @@ local Defaults = {
     Phase3Notified = false,
     FarmEnabled = true,
     EventItemsFarmEnabled = false, -- Exclusive candy-only collection; separate from normal Item Farm.
-    HalloweenAutoTurnIn = false, -- Opt-in conversion before event hop.
+    HalloweenAutoTurnIn = false, -- Opt-in conversion at serialized farm or idle checkpoints.
     HalloweenAutoBuy = false, -- Explicit opt-in per runtime, never resumed after hop.
     HalloweenRewardCategory = "2026 Halloween Event Items",
     HalloweenRewardTarget = "", -- Saved wishlist only; purchases are not enabled.
@@ -37,14 +37,14 @@ local Defaults = {
     SettingsLowGraphics = false,
     SettingsBlackScreen = false,
     CommunityAntiAFK = false, -- Explicit opt-in; no kick/ban immunity claimed.
-    -- Stand Farm V1 is opt-in and never auto-starts after reload.
+    -- Stand Farm starts OFF; an explicitly saved ON choice resumes through guarded startup.
     StandFarmEnabled = false,
     StandFarmTarget = "",
     StandFarmTargets = {}, -- Empty list keeps the existing single-target mode.
     StandFarmMode = "stand", -- Opt-in "shiny" ignores common Stand targets.
     StandFarmConsumable = "Mysterious Arrow",
     StandFarmAutoRestock = false, -- Local collection; optional transfer configured separately.
-    StandFarmRestockHop = false, -- One guarded transfer, then manual beta restart.
+    StandFarmRestockHop = false, -- Guarded restock transfer; continuation requires the resume option.
     StandFarmResumeAfterHop = false, -- Explicit opt-in exception for owned transfer only.
     StandFarmMaxHops = 3,
     StandFarmSkinTargets = {}, -- Exact wishlist; every skin is still protected.
