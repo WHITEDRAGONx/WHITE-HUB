@@ -21,7 +21,7 @@ local _ui = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 90s limit.
+local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 25s limit.
 local detectionEpoch = 0
 local lastItemTime    = tick()
 
@@ -34,6 +34,9 @@ local restockBusy, cycleBusy, startupBusy = false, false, false
 local prestigeSaleBusy=false
 -- One manual sale at a time; park normal collection while a sale runs.
 local manualSellBusy, sellBusy, collectBusy = false, false, false
+local halloweenTradeBusy=false
+local lastHalloweenAttemptAt=0
+local runAutoHalloween -- Defined below; called only at serialized worker checkpoints.
 local restockFreeze, restockEpoch = nil, 0
 
 local function prestigePending()
@@ -119,6 +122,8 @@ local EVENT_CANDY = {
 }
 local fastPickupFailed=0
 local lastPromptAt=0
+local pickupDiagLastLogAt=0
+local pickupDiagFirstLog=true
 local function pickupFastEnabled(restockGuard)
     return not restockGuard and _config and _config:Get("FastPickupEnabled")==true
 end
@@ -188,6 +193,17 @@ end
 -- Hooks & bypasses
 local function ApplyHooks()
     local env = getgenv and getgenv() or _G
+    local currentJob=tostring(game.JobId)
+    local priorJob=tostring(env.__WhiteHubFarmDiagJobId or "none")
+    local hookFlag=env.__WhiteHubFarmHooksApplied==true
+    moduleLog("INFO",("[Farm][HopDiag] job=%s priorJob=%s hookFlagAtBoot=%s fastPickup=%s runtime=%s"):format(
+        currentJob,priorJob,tostring(hookFlag),
+        tostring(_config and _config:Get("FastPickupEnabled")==true),
+        tostring(env.__WhiteHubRuntimeId or "unknown")))
+    if priorJob~="none" and priorJob~=currentJob and hookFlag then
+        moduleLog("WARN","[Farm][HopDiag] Hook marker survived a server change; hook validity is UNVERIFIED in this game instance")
+    end
+    env.__WhiteHubFarmDiagJobId=currentJob
     if env.__WhiteHubFarmHooksApplied then return end
     env.__WhiteHubFarmHooksApplied = true
 
@@ -349,29 +365,45 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     local beforeCount = _inventory:Count(itemInfo.Name)
     local model = itemInfo.Model or index
     local started, bv, requests = tick(), nil, 0
+    -- Lightweight passive timings, only logged occasionally in Fast Pickup mode.
+    local timing={setupMs=0,settleMs=0,gapMs=0,dispatchMs=0,verifyMs=0,
+        cleanupMs=0,dispatchResult="not-attempted"}
     local ok, collected = pcall(function()
+        local setupAt=tick()
         bv = _movement:Freeze()
         if restockGuard then restockFreeze = bv end
         _movement:SetNoclip(true)
         _movement:Teleport(CFrame.new(itemInfo.Position.X, itemInfo.Position.Y - 25, itemInfo.Position.Z))
+        timing.setupMs=math.floor((tick()-setupAt)*1000+0.5)
+        local settlingAt=tick()
         task.wait(fast and 0.26 or 0.35)
+        timing.settleMs=math.floor((tick()-settlingAt)*1000+0.5)
         local function fire()
             if not allowed() or not model.Parent or not itemInfo.ProximityPrompt.Parent then return false end
             -- Never fire twice; even the fast preset has a minimum dispatch gap.
             if fast then
+                local gapAt=tick()
                 local remaining=0.75-(tick()-lastPromptAt)
                 if remaining>0 then task.wait(remaining) end
+                timing.gapMs=math.floor((tick()-gapAt)*1000+0.5)
                 if not allowed() or not model.Parent then return false end
             end
             requests = requests + 1
             lastPromptAt=tick()
+            local firedAt=tick()
             local fired, result = pcall(fireproximityprompt, itemInfo.ProximityPrompt)
+            timing.dispatchMs=math.floor((tick()-firedAt)*1000+0.5)
+            timing.dispatchResult=fired and (result~=false and "ok" or "false") or "exception"
             return fired and result ~= false
         end
         if not fire() then return false end
+        local verifyAt=tick()
         local deadline, disappeared = tick() + 1.5, nil
         while tick() < deadline and allowed() do
-            if _inventory:Count(itemInfo.Name) > beforeCount then return true end
+            if _inventory:Count(itemInfo.Name) > beforeCount then
+                timing.verifyMs=math.floor((tick()-verifyAt)*1000+0.5)
+                return true
+            end
             if not model.Parent then
                 disappeared = disappeared or tick()
                 -- Give a removed spawn a replication grace, but never call a
@@ -380,8 +412,10 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
             end
             task.wait(fast and 0.075 or 0.1)
         end
+        timing.verifyMs=math.floor((tick()-verifyAt)*1000+0.5)
         return _inventory:Count(itemInfo.Name) > beforeCount
     end)
+    local cleanupAt=tick()
     if bv then pcall(function() _movement:Unfreeze(bv) end) end
     if restockFreeze == bv then restockFreeze = nil end
     -- Event cancellation still restores the real character to the safe spot.
@@ -391,6 +425,16 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     end
     if allowed() then task.wait(fast and 0.10 or 0.15) end
     pcall(function() _movement:SetNoclip(false) end)
+    timing.cleanupMs=math.floor((tick()-cleanupAt)*1000+0.5)
+    if fast and (pickupDiagFirstLog or tick()-pickupDiagLastLogAt>=12) then
+        pickupDiagFirstLog=false
+        pickupDiagLastLogAt=tick()
+        moduleLog("INFO",("[Farm][PickupDiag] job=%s item=%s confirmed=%s fast=%s totalMs=%d setupMs=%d settleMs=%d gapMs=%d dispatchMs=%d dispatch=%s verifyMs=%d cleanupMs=%d prompts=%d"):format(
+            tostring(game.JobId),tostring(itemInfo.Name),tostring(ok and collected),
+            tostring(fast),math.floor((tick()-started)*1000+0.5),
+            timing.setupMs,timing.settleMs,timing.gapMs,timing.dispatchMs,
+            timing.dispatchResult,timing.verifyMs,timing.cleanupMs,requests))
+    end
     if not allowed() then return false end
     if not ok then error("Item collection operation failed after cleanup", 0) end
 
@@ -448,6 +492,10 @@ local function DoHop()
     SellAllWithDiagnostics("server-hop")
     if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _inventory:BuyLucky()
+    if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
+    -- Do not hop immediately after Jack: allow a later safe checkpoint to
+    -- observe updated candy/point state and process a separately armed reward.
+    if runAutoHalloween and runAutoHalloween("farm-checkpoint") then return end
     if manualSellBusy or stopRequested or not _config:Get("FarmEnabled") then return end
     _serverHop:Hop(function()
         return not stopRequested and not manualSellBusy and _config:Get("FarmEnabled")
@@ -515,7 +563,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     required=prestige and math.min(tonumber(required) or 1,_inventory:GetMax(name) or 1) or 1
     if required<1 or required>50 or required%1~=0 then return false,"Invalid restock amount" end
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
-    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or stopRequested then return false, "Item Farm unavailable/busy" end
+    if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or halloweenTradeBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
@@ -528,7 +576,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
     end
     local ok, success, reason = pcall(function()
-        local deadline, attempts, nextScan = tick() + 90, 0, 0
+        local deadline, attempts, nextScan = tick() + 25, 0, 0
         while permitted() and tick() < deadline and attempts < 8 do
             if _inventory:Count(name) >= required then return true, "Stock confirmed" end
             if not cycleBusy and not startupBusy then
@@ -558,13 +606,68 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             task.wait(0.2)
         end
         if not permitted() then return false, "Restock cancelled/character changed" end
-        return false, "Restock limit reached (90s/8 attempts); missing " .. name
+        return false, "Restock limit reached (25s/8 attempts); missing " .. name
     end)
     if restockFreeze then pcall(function() _movement:Unfreeze(restockFreeze) end) end
     if movementUsed then pcall(function() _movement:SetNoclip(false) end) end
     restockFreeze, restockBusy = nil, false
     if not ok then return false, "Restock collection failed; nothing consumed" end
     return success, reason
+end
+
+-- Jack exchange toggles are independent of which item-collection mode is
+-- active. Only the Farm worker may own this automatic teleport; no parallel
+-- movement thread is launched while collecting or selling.
+runAutoHalloween=function(source)
+    if not (_halloween and _config) or halloweenTradeBusy or collectBusy or manualSellBusy
+        or sellBusy or restockBusy or prestigeSaleBusy or startupBusy or stopRequested
+        or prestigePending() then return false end
+    if _config:Get("StandFarmEnabled") or _config:Get("QuestFarmEnabled")
+        or _config:Get("NPCFarmEnabled") or _config:Get("AutoPrestige") then return false end
+    if source=="event-farm" and not eventModeReady() then return false end
+    if source=="farm-checkpoint" and
+        (_config:Get("FarmEnabled")~=true or eventModeEnabled()) then return false end
+    if source=="auto-idle" and
+        (_config:Get("FarmEnabled")==true or eventModeEnabled()) then return false end
+    if tick()-lastHalloweenAttemptAt<35 then return false end
+
+    local turnIn=_config:Get("HalloweenAutoTurnIn")==true
+        and (_halloween:GetCandyTotal() or 0)>0
+    local canBuy=false
+    if not turnIn and _config:Get("HalloweenAutoBuy")==true
+        and type(_halloween.AutoBuyReadiness)=="function" then
+        canBuy=_halloween:AutoBuyReadiness()==true
+    end
+    if not turnIn and not canBuy then return false end
+
+    halloweenTradeBusy=true
+    lastHalloweenAttemptAt=tick()
+    moduleLog("INFO","[JackAuto] Starting guarded "..(turnIn and "candy turn-in" or "one-shot reward").." from "..source)
+    local ok,success,message
+    if turnIn then
+        ok,success,message=pcall(_halloween.TurnInCandy,_halloween,source)
+        moduleLog(ok and success and "INFO" or "WARN",
+            "[JackAuto][TurnIn] "..tostring(ok and message or "Trade exception; inspect Halloween Console"))
+        -- If a reward was explicitly armed, permit the NEXT checkpoint to
+        -- attempt it after a 10s cooldown instead of hopping while armed.
+        -- Do not click the next shop page in the same dialogue transaction.
+        if ok and success and _config:Get("HalloweenAutoBuy")==true then
+            lastHalloweenAttemptAt=tick()-25
+        end
+    else
+        -- Consume exactly one buy authorization BEFORE any network/UI action.
+        -- An uncertain purchase must never be retried automatically.
+        _config:Set("HalloweenAutoBuy",false)
+        if _ui and _ui.SetToggleValue then
+            _ui:SetToggleValue("Auto Buy Selected Reward (once)",false)
+        end
+        ok,success,message=pcall(_halloween.BuySelectedReward,_halloween,source)
+        moduleLog(ok and success and "INFO" or "WARN",
+            "[JackAuto][Buy] "..tostring(ok and message or "Purchase exception; no retry"))
+    end
+    halloweenTradeBusy=false
+    lastItemTime=tick()
+    return true
 end
 
 -- An independent MODE of this worker, not a second competing movement loop.
@@ -616,34 +719,14 @@ local function runEventCycle()
         if tick() - lastItemTime > NO_ITEM_TIMEOUT then
             -- Event trade is serialized on this same worker, after all pickups.
             -- No Merchant sale or normal Farm phases are called here.
+            local jackTradeAttempted=false
             if _halloween and eventModeReady() then
-                if _config:Get("HalloweenAutoTurnIn") == true then
-                    local count = _halloween:GetCandyTotal()
-                    if count and count > 0 then
-                        local ok, message = _halloween:TurnInCandy("event-farm")
-                        moduleLog(ok and "INFO" or "WARN", "[EventFarm][TurnIn] "..tostring(message))
-                        if not ok then
-                            _config:SetMany({HalloweenAutoTurnIn=false, EventItemsFarmEnabled=false,
-                                HalloweenAutoBuy=false})
-                            if _ui and _ui.SetToggleValue then
-                                _ui:SetToggleValue("Auto Turn-In Candy",false)
-                                _ui:SetToggleValue("Events Items Farm",false)
-                                _ui:SetToggleValue("Auto Buy Selected Reward (once)",false)
-                            end
-                            moduleLog("WARN", "[EventFarm] Trade unresolved: event worker stopped before hopping.")
-                        end
-                    end
-                end
-                if eventModeReady() and _config:Get("HalloweenAutoBuy") == true then
-                    local ok, message = _halloween:BuySelectedReward("event-farm")
-                    moduleLog(ok and "INFO" or "WARN", "[EventFarm][Buy] "..tostring(message))
-                    -- One explicit authorization covers at most one attempt.
-                    _config:Set("HalloweenAutoBuy", false)
-                    if _ui and _ui.SetToggleValue then _ui:SetToggleValue("Auto Buy Selected Reward (once)",false) end
-                end
+                jackTradeAttempted=runAutoHalloween("event-farm")
             end
             if not eventModeReady() then break end
-            if shouldSkipHop() then
+            if jackTradeAttempted then
+                moduleLog("INFO","[EventFarm][JackAuto] Checkpoint processed; deferring server hop.")
+            elseif shouldSkipHop() then
                 if not lastWaiting then
                     moduleLog("INFO", "[EventFarm] No confirmed candy for 20s; staying in private server.")
                     lastWaiting = true
@@ -682,6 +765,10 @@ local function runCycle()
             CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
 
+        if shouldPauseCycle() then return end
+        -- Normal Item Farm can turn in candy or buy a selected reward at a
+        -- safe point between completed pickups, without Event Items Farm.
+        runAutoHalloween("farm-checkpoint")
         if shouldPauseCycle() then return end
 
         local elapsed = tick() - lastItemTime
@@ -728,6 +815,8 @@ local function runCycle()
                 CollectItemFromCycle(entry.ItemInfo, entry.Index)
             end
 
+            if shouldPauseCycle() then return end
+            runAutoHalloween("farm-checkpoint")
             if shouldPauseCycle() then return end
 
             local elapsed = tick() - lastItemTime
@@ -788,6 +877,9 @@ local function runCycle()
             if shouldPauseCycle() then return end
             CollectItemFromCycle(entry.ItemInfo, entry.Index)
         end
+        if shouldPauseCycle() then return end
+        runAutoHalloween("farm-checkpoint")
+        if shouldPauseCycle() then return end
         task.wait(1)
     end
 end
@@ -817,8 +909,11 @@ function Farm:Start()
     moduleLog("INFO", "[Farm] Farm loop started.")
 
     while not stopRequested do
-        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy or prestigePending()
-            or (not _config:Get("FarmEnabled") and not eventModeEnabled())
+        while not stopRequested and (restockBusy or prestigeSaleBusy or manualSellBusy
+            or halloweenTradeBusy or prestigePending()
+            or (not _config:Get("FarmEnabled") and not eventModeEnabled()
+                and _config:Get("HalloweenAutoTurnIn")~=true
+                and _config:Get("HalloweenAutoBuy")~=true)
             or (eventModeEnabled() and not eventModeReady())) do
             task.wait(0.5)
         end
@@ -827,12 +922,19 @@ function Farm:Start()
         end
         if stopRequested then break end
 
-        cycleBusy = true
-        local ok, err = pcall(eventModeEnabled() and runEventCycle or runCycle)
-        cycleBusy = false
-        if not ok then
-            moduleLog("WARN", "[Farm] Cycle error: " .. tostring(err))
+        if not _config:Get("FarmEnabled") and not eventModeEnabled() then
+            -- Idle Jack automation: allows Turn-In/Buy without either farm on.
+            local ok,err=pcall(runAutoHalloween,"auto-idle")
+            if not ok then moduleLog("WARN","[JackAuto] Idle check failed: "..tostring(err)) end
             task.wait(2)
+        else
+            cycleBusy = true
+            local ok, err = pcall(eventModeEnabled() and runEventCycle or runCycle)
+            cycleBusy = false
+            if not ok then
+                moduleLog("WARN", "[Farm] Cycle error: " .. tostring(err))
+                task.wait(2)
+            end
         end
     end
 
@@ -853,6 +955,7 @@ end
 function Farm:SellNow()
     if not (_config and _inventory) then return false, "Farm modules not initialized" end
     if eventModeEnabled() then return false, "Disable Events Items Farm before using SELL NOW" end
+    if halloweenTradeBusy then return false,"Jack transaction in progress; wait before SELL NOW" end
     if manualSellBusy or sellBusy then return false, "A Merchant sale is already running" end
     if stopRequested or restockBusy or startupBusy or prestigeSaleBusy or prestigePending()
         or _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
@@ -899,7 +1002,7 @@ end
 
 -- Exclusive delegation to existing Merchant; normal Item Farm remains paused.
 function Farm:PrestigeSell(ownerActive,sell)
-    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy or stopRequested
+    if restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy or halloweenTradeBusy or stopRequested
         or type(ownerActive)~="function" or not ownerActive() or type(sell)~="function"
         or not _config:Get("AutoPrestige") or _config:Get("StandFarmEnabled")
         or _config:Get("QuestFarmEnabled") or _config:Get("NPCFarmEnabled") then return false,"Sale ownership unavailable" end
@@ -912,15 +1015,16 @@ function Farm:PrestigeSell(ownerActive,sell)
     return ok and result~=false,ok and "Merchant returned" or "Merchant failed"
 end
 function Farm:CanEnableEvent()
-    return not (restockBusy or sellBusy or prestigeSaleBusy or manualSellBusy)
+    return not (restockBusy or sellBusy or prestigeSaleBusy or manualSellBusy or halloweenTradeBusy)
 end
+function Farm:IsHalloweenTradeActive() return halloweenTradeBusy end
 -- Before Quest/NPC takeover, allow a cancelled event pickup to finish cleanup.
 function Farm:WaitForCollection(maxSeconds)
     local deadline=tick()+math.clamp(tonumber(maxSeconds) or 3,0,5)
     while collectBusy and tick()<deadline do task.wait(0.05) end
     return not collectBusy
 end
-function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy end
+function Farm:IsBusy() return restockBusy or cycleBusy or startupBusy or prestigeSaleBusy or manualSellBusy or sellBusy or halloweenTradeBusy end
 
 function Farm:IsRunning()
     return isRunning
