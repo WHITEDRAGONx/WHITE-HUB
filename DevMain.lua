@@ -657,7 +657,7 @@ local moduleRequirements = {
     ServerHop  = {"Init"},
     Inventory  = {"Init"},
     CombatFarm = {"Init"},
-    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
+    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "ResumeSavedSession", "GetResumeSupport", "ResetStatistics"},
     StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
     StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
     CatalogRefresh = {"Init", "GetNames", "GetState", "Refresh", "Destroy"},
@@ -859,5 +859,10 @@ task.spawn(function()
 end)
 
 LOG("BOOT", "WHITE HUB V5 PRIVATE DEV + WHITE AI running. All critical modules passed boot validation.")
--- Only a valid one-use arrival intent can authorize the opt-in exception.
-Modules.StandFarm:RecoverTransfer()
+-- Priority: preserve the existing one-use, destination-bound restock resume.
+-- Otherwise, the user's saved Stand Farm switch resumes via normal safety
+-- checks after a regular hop/rejoin. No additional resume toggle is required.
+local ownedTransferRecovery = Modules.StandFarm:RecoverTransfer()
+if not ownedTransferRecovery then
+    Modules.StandFarm:ResumeSavedSession()
+end
