@@ -1,5 +1,5 @@
 -- WHITE HUB V5 SILVER - community features (opt-in / fail closed)
--- Independent of Inventory, Merchant Zero Delay, XenonLock and White AI.
+-- Independent of Inventory, Merchant Zero Delay, XenonLock and external diagnostic modules.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
@@ -784,10 +784,16 @@ function Community:TeleportTo(position, label, allowEventTrade, groundMode)
     end
     local busy,why=activeWorkers()
     local isOwnedEventTrade=allowEventTrade==true and label=="Jack, The Cauldron Specter"
-        and why=="EventItemsFarmEnabled" and modules and modules.HalloweenExchange
+        and modules and modules.HalloweenExchange and modules.Farm
         and modules.HalloweenExchange:IsBusy()==true
-        and config and config:Get("EventItemsFarmEnabled")==true
-        and config:Get("FarmEnabled")~=true
+        and modules.Farm.IsHalloweenTradeActive and modules.Farm:IsHalloweenTradeActive()
+        and config and (why=="EventItemsFarmEnabled" or why=="FarmEnabled" or why=="Farm busy")
+        and ((why=="EventItemsFarmEnabled" and config:Get("EventItemsFarmEnabled")==true
+            and config:Get("FarmEnabled")~=true)
+          or (why=="FarmEnabled" and config:Get("FarmEnabled")==true
+            and config:Get("EventItemsFarmEnabled")~=true)
+          or (why=="Farm busy" and config:Get("FarmEnabled")~=true
+            and config:Get("EventItemsFarmEnabled")~=true))
         and config:Get("AutoPrestige")~=true
         and config:Get("StandFarmEnabled")~=true
         and config:Get("QuestFarmEnabled")~=true
