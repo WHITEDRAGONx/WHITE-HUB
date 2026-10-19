@@ -31,6 +31,7 @@ local Defaults = {
     AutoPrestige = false,
     PrestigeMaxNotified = false,
     StayInPrivateServer = false,
+    CleanHopBeta = false, -- opt-in distinct-server transfer; classic hop remains default.
     SettingsCapFPS30 = false,
     SettingsUncapFPS = false,
     SettingsLowGraphics = false,
@@ -104,6 +105,7 @@ local function ApplyDefaults(data)
     end
     if type(data.HalloweenAutoTurnIn) ~= "boolean" then data.HalloweenAutoTurnIn = false end
     if type(data.FastPickupEnabled) ~= "boolean" then data.FastPickupEnabled = false end
+    if type(data.CleanHopBeta) ~= "boolean" then data.CleanHopBeta = false end
     if type(data.MerchantPacingBeta) ~= "boolean" then data.MerchantPacingBeta = false end
     if type(data.HalloweenFastDialogue) ~= "boolean" then data.HalloweenFastDialogue = false end
     local merchantPos=data.MerchantTeleportPosition
