@@ -559,7 +559,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"HalloweenExchange", "CommunityFeatures", "AutoPrestigeRuntime", "Settings", "CatalogRefresh", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"HalloweenExchange", "CommunityFeatures", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -658,14 +658,10 @@ local moduleRequirements = {
     CombatFarm = {"Init"},
     StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
     StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
-    StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
-    CatalogRefresh = {"Init", "GetNames", "GetState", "Refresh", "Destroy"},
-    GameCatalog = {"Init", "Names", "GetSkins", "GetQuests", "IsInfo"},
-    ChoiceUI = {"Init", "Build", "Toggle", "Filter", "Close", "Destroy"},
-    UICompact = {"Init", "Caption", "Arrange", "Observe", "Responsive", "ScaleFor"},
+    GameCatalog = {"Init", "Names", "GetSkins", "GetQuests", "IsInfo", "Destroy"},
+    UIComponents = {"Init", "Destroy"},
     Settings = {"Init", "SetOption", "GetStatus", "Build", "Destroy"},
     AutoPrestigeRuntime = {"Init", "Start", "Stop", "IsBusy", "Register", "Watch", "GetStatus", "BuildStatus"},
-    PrestigeDialogue = {"Init", "Run", "Drive", "Restore"},
     CommunityFeatures = {"Init", "Build", "ScanEvent", "StartPilot", "StopPilot", "Destroy"},
     HalloweenExchange = {"Init", "TurnInCandy", "BuySelectedReward", "GetCandyTotal", "GetPoints", "IsBusy", "Destroy"},
     Farm       = {"Init", "Start"},
@@ -746,13 +742,9 @@ local moduleFiles = {
     { key = "CombatFarm", file = "CombatFarm.lua" },
     { key = "StandFarm",  file = "StandFarm.lua" },
     { key = "StandTransfer", file = "StandTransfer.lua" },
-    { key = "StandV2UI", file = "StandV2UI.lua" },
-    { key = "CatalogRefresh", file = "CatalogRefresh.lua" },
     { key = "GameCatalog", file = "GameCatalog.lua" },
-    { key = "ChoiceUI", file = "ChoiceUI.lua" },
-    { key = "UICompact", file = "UICompact.lua" },
+    { key = "UIComponents", file = "UIComponents.lua" },
     { key = "Settings", file = "Settings.lua" },
-    { key = "PrestigeDialogue", file = "PrestigeDialogue.lua" },
     { key = "AutoPrestigeRuntime", file = "AutoPrestigeRuntime.lua" },
     { key = "CommunityFeatures", file = "CommunityFeatures.lua" },
     { key = "HalloweenExchange", file = "HalloweenExchange.lua" },
@@ -802,7 +794,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandV2UI", "StandFarm", "Farm", "PrestigeDialogue", "AutoPrestigeRuntime", "Settings", "UICompact", "CatalogRefresh", "GameCatalog", "ChoiceUI", "CommunityFeatures", "HalloweenExchange", "UI"}
+local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandFarm", "Farm", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "CommunityFeatures", "HalloweenExchange", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()

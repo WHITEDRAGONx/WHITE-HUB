@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Names-only refresh/cache/cancellation tests. No YBA schema guarantee."""
 from pathlib import Path
 import unittest
@@ -26,7 +27,7 @@ all={Config=config,RuntimeLog=logger}
 class RefreshTests(unittest.TestCase):
  def setUp(self):
   self.lua=LuaRuntime(unpack_returned_tuples=True);self.lua.execute(dialogue.MOCK+NETWORK)
-  self.lua.globals().refresh=self.lua.execute((ROOT/'CatalogRefresh.lua').read_text())
+  self.lua.globals().refresh=self.lua.execute((ROOT/"GameCatalog.lua").read_text()).Online
  def run_lua(self,s):self.lua.execute(s)
  def test_only_skin_cards_imported_cached_and_returned_by_copy(self):
   self.run_lua("refresh:Init(all); assert(calls==2 and writes==1 and refresh:GetState()=='trello'); local names=refresh:GetNames(); assert(#names==1 and names[1]=='Brand New Skin'); names[1]='edited'; assert(refresh:GetNames()[1]=='Brand New Skin' and cachedKey=='SkinCatalogCache')")
@@ -51,7 +52,7 @@ class RefreshTests(unittest.TestCase):
  def test_no_network_retry_storm_or_duplicate_worker(self):
   self.run_lua("httpDelay=2; refresh:Init(all); for i=1,30 do assert(not refresh:Refresh()) end; advance(5); assert(calls==2); advance(300); assert(calls==2)")
  def test_refresh_has_only_fixed_public_endpoint_and_no_code_execution(self):
-  source=(ROOT/'CatalogRefresh.lua').read_text()
+  source=module_source(ROOT,"CatalogRefresh.lua")
   self.assertIn('https://api.trello.com/1/boards/ROfFdASc/',source)
   self.assertNotRegex(source,r'loadstring|require\(|getgc|InvokeServer|FireServer|Bearer|GITHUB_TOKEN|WhiteAI')
 
@@ -65,4 +66,4 @@ class LiveAdditions(unittest.TestCase):
  def test_server_confirmed_observed_skin_added_without_new_rpc(self):
   self.run_lua("catalog:Init({StandFarm={GetStatus=function() return {metrics={lastSkin='New confirmed skin'}} end}}); assert(table.find(catalog:GetSkins(),'New confirmed skin'))")
  def test_online_names_and_client_stringvalue_are_added(self):
-  self.run_lua("local value=tree('InternalId','StringValue'); value.Value='New client skin'; rs.children={tree('SkinNames','Folder',{value})}; catalog:Init({CatalogRefresh={GetNames=function() return {'New online skin'} end}}); local names=catalog:GetSkins(); assert(table.find(names,'New online skin') and table.find(names,'New client skin') and not table.find(names,'InternalId'))")
+  self.run_lua("local value=tree('InternalId','StringValue'); value.Value='New client skin'; rs.children={tree('SkinNames','Folder',{value})}; catalog:Init({}); catalog.Online.GetNames=function() return {'New online skin'} end; local names=catalog:GetSkins(); assert(table.find(names,'New online skin') and table.find(names,'New client skin') and not table.find(names,'InternalId'))")

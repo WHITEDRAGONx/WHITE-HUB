@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Presentation helpers and wiring; native Roblox rendering still needs Delta QA."""
 from pathlib import Path
 import re,subprocess,unittest
@@ -33,7 +34,7 @@ workspace={CurrentCamera={ViewportSize={X=1108,Y=512},GetPropertyChangedSignal=f
 class SilverHelperTests(unittest.TestCase):
  def setUp(self):
   self.lua=LuaRuntime(unpack_returned_tuples=True);self.lua.execute(MOCK)
-  self.lua.globals().compact=self.lua.execute((ROOT/'UICompact.lua').read_text())
+  self.lua.globals().compact=self.lua.execute((ROOT/"UIComponents.lua").read_text()).Compact
  def run_lua(self,s):self.lua.execute(s)
  def test_groups_types_and_retains_callback_objects(self):
   self.run_lua('''
@@ -73,7 +74,7 @@ class SilverWiringTests(unittest.TestCase):
   self.assertIn('toggleObjects[labelText]',src)
   for key in ['StandFarmResumeAfterHop','StandFarmMode','StandFarmTargets','QuestFarmEnabled','NPCFarmEnabled','WhiteAIEnabled']:
    # Resume key lives in the existing helper.
-   self.assertIn(key,src+(ROOT/'StandV2UI.lua').read_text())
+   self.assertIn(key,src+module_source(ROOT,"StandV2UI.lua"))
  def test_no_scaled_text_or_explanatory_blocks(self):
   src=(ROOT/'UI.lua').read_text()
   self.assertNotRegex(src,r'TextScaled\s*=\s*true')

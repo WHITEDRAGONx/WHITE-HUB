@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Real AP scope/driver with simulated Roblox. Not YBA or Delta validation."""
 from pathlib import Path
 import unittest,subprocess
@@ -38,9 +39,9 @@ class PrestigeTests(unittest.TestCase):
   items={IsBusy=function() return itemBusy==true end,Restock=function() restockCalls=(restockCalls or 0)+1; return false,'not mocked' end}
   hop={Hop=function(_,guard) if beforeHopReturn then beforeHopReturn() end; return guard() end}
   ''')
-  self.lua.globals().driver=self.lua.execute((ROOT/'PrestigeDialogue.lua').read_text())
   self.lua.globals().support=self.lua.execute((ROOT/'AutoPrestigeRuntime.lua').read_text())
   self.run_lua('''
+  driver=support.Dialogue
   all={Config=config,RuntimeLog=logger,Movement=movement,StandFarm=farm,Farm=items,CombatFarm=combat,
     PrestigeDialogue=driver,Inventory=inventory,ServerHop=hop}
   driver:Init(); support:Init(all)
@@ -181,8 +182,8 @@ class PrestigeTests(unittest.TestCase):
   for path in ['SmartFarmEngine.lua','SmartFarmAdapters.lua','SmartFarmUI.lua','tests/test_smart_engine.py']: self.assertFalse((ROOT/path).exists())
   self.assertNotIn('{ key = "SmartFarmEngine"',(ROOT/'DevMain.lua').read_text())
   self.assertNotIn('Modules.SmartFarmEngine:Start()', (ROOT/'DevMain.lua').read_text())
-  for path in ['Inventory.lua','Main.lua']:
-   expected=subprocess.check_output(['git','show','333ad75:'+path],cwd=ROOT)
+  for path in ['Inventory.lua','CombatFarm.lua','Farm.lua','AutoPrestige.lua']:
+   expected=subprocess.check_output(['git','show','d259980:'+path],cwd=ROOT)
    if path=='Main.lua': expected=expected.replace(b'WHITEDRAGONx/WHITE-HUB-V3',b'WHITEDRAGONx/WHITE-HUB')
    self.assertEqual((ROOT/path).read_bytes(),expected)
   base=subprocess.check_output(['git','show','333ad75:CombatFarm.lua'],cwd=ROOT).decode()
@@ -190,7 +191,7 @@ class PrestigeTests(unittest.TestCase):
   self.assertIn(core,(ROOT/'CombatFarm.lua').read_text())
  def test_sources_parse_and_no_legacy_dialogue_requests(self):
   for name in ['AutoPrestige.lua','AutoPrestigeRuntime.lua','PrestigeDialogue.lua']:
-   self.assertTrue(check_luau((ROOT/name).read_text()),name)
+   self.assertTrue(check_luau(module_source(ROOT,name)),name)
   self.assertNotIn('"EndDialogue"',(ROOT/'AutoPrestige.lua').read_text())
 
 class DelegationTests(unittest.TestCase):

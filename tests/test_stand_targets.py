@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Actual Lua target matching/UI callbacks in mocks; no Delta/YBA claim."""
 import unittest
 from pathlib import Path
@@ -108,7 +109,7 @@ class StandTargetTests(unittest.TestCase):
         ''')
         root=Path(__file__).resolve().parents[1]
         self.lua.globals()._catalog=self.lua.execute((root/'GameCatalog.lua').read_text())
-        self.lua.globals().choiceLogic=self.lua.execute((root/'ChoiceUI.lua').read_text())
+        self.lua.globals().choiceLogic=self.lua.execute((root/"UIComponents.lua").read_text()).Choice
         self.run_lua('''
         choiceLogic:Init({GameCatalog=_catalog}); selectors={}
         _choices={Build=function(_,parent,label,options,get,set,before)

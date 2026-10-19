@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Actual Lua transfer/skin/metric paths with mocked executor, not Delta QA."""
 import json
 import unittest
@@ -250,7 +251,7 @@ class StandV2Tests(unittest.TestCase):
 
     def install_v2_ui(self):
         targets.StandTargetTests.build_ui(self)
-        source=(ROOT/'StandV2UI.lua').read_text()
+        source=module_source(ROOT,"StandV2UI.lua")
         self.assertTrue(check_luau(source))
         self.lua.globals().v2ui=self.lua.execute(source)
         self.run_lua('''

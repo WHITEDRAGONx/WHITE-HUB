@@ -1,5 +1,13 @@
 # Changelog
 
+## Module consolidation — 2026-10-19
+
+- Reduced the public package from 24 to 18 Lua files and boot downloads from 21 to 17.
+- Grouped UI helpers, integrated catalog refresh and scoped prestige dialogues.
+- Removed unused legacy combat modules; preserved current gameplay and Merchant code.
+- Updated loader initialization and transfer/reload cleanup for the new owners.
+- See MODULE_CONSOLIDATION.md for checkpoint and live validation limits.
+
 ## Arcade calibration failure & Merchant latency diagnostics — 2026-10-18
 
 - Fix `canCalibrateHere` referencing nil `self._pilotStarting`.

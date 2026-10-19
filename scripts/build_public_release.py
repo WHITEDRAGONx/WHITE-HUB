@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_PREVIOUS = '652db568857e2c58c9fa3978ac0925db782e429d'
 PUBLIC_DEV_BASE = 'e25ea522deec85758c1c641d55654e37414ec04d'
 FILES = ('Webhook.lua', 'Movement.lua', 'ServerHop.lua', 'CombatFarm.lua',
-         'StandFarm.lua', 'StandTransfer.lua', 'StandV2UI.lua', 'UICompact.lua',
-         'GameCatalog.lua', 'ChoiceUI.lua', 'CatalogRefresh.lua', 'Settings.lua',
-         'PrestigeDialogue.lua', 'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
+         'StandFarm.lua', 'StandTransfer.lua', 'UIComponents.lua',
+         'GameCatalog.lua', 'Settings.lua',
+         'AutoPrestigeRuntime.lua', 'Farm.lua', 'AutoPrestige.lua')
 
 
 def existing_public(path):
@@ -59,10 +59,10 @@ def build():
     config = (ROOT / 'Config.lua').read_text()
     config = re.sub(r'^    WhiteAI(?:Enabled|Endpoint) = .*\n', '', config, flags=re.M)
     result['Config.lua'] = preserve_public_additions('Config.lua', config)
-    result['UICompact.lua'] = result['UICompact.lua'].replace(
+    result['UIComponents.lua'] = result['UIComponents.lua'].replace(
         "local captions={", "local captions={\n ['Auto Prestige']='Auto prestige (BETA)',")
     for caption in (" ['COPY LATEST PROPOSAL LINK']='COPY PROPOSAL',", " ['SAVE HTTPS ENDPOINT']='SAVE ENDPOINT',", " ['WHITE AI V1 - DIAGNOSTICS']='AI DIAGNOSTICS',"):
-        result['UICompact.lua'] = result['UICompact.lua'].replace(caption, '')
+        result['UIComponents.lua'] = result['UIComponents.lua'].replace(caption, '')
     result['StandTransfer.lua'] = result['StandTransfer.lua'].replace(
         'dev/2026-10-10-autosell-compat/DevMain.lua', 'main/Main.lua').replace(
         'Only our dev loader is queued.', 'Only our public loader is queued.')

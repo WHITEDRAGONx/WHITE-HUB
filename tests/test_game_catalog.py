@@ -1,3 +1,4 @@
+from module_sources import module_source
 """Actual catalog/selector Lua in offline mocks; no native Delta or server proof."""
 import re
 import subprocess
@@ -18,6 +19,7 @@ function tree(name,class,children)
  return n
 end
 rs=tree('ReplicatedStorage'); workspace=tree('Workspace')
+task={delay=function() end,spawn=function(fn) fn() end}
 game={GetService=function(_,name) if name=='ReplicatedStorage' then return rs end end}
 table.find=function(t,x) for i,v in ipairs(t) do if v==x then return i end end end
 '''
@@ -26,7 +28,7 @@ class CatalogTests(unittest.TestCase):
  def setUp(self):
   self.lua=LuaRuntime(unpack_returned_tuples=True); self.lua.execute(TREE)
   self.lua.globals().catalog=self.lua.execute((ROOT/'GameCatalog.lua').read_text())
-  self.lua.globals().choice=self.lua.execute((ROOT/'ChoiceUI.lua').read_text())
+  self.lua.globals().choice=self.lua.execute((ROOT/"UIComponents.lua").read_text()).Choice
   self.lua.execute('choice:Init({GameCatalog=catalog})')
  def run_lua(self,s):self.lua.execute(s)
  def test_facts_snapshot_is_unique_and_only_stand_skins(self):
@@ -82,7 +84,7 @@ class NativeChoiceTests(unittest.TestCase):
  def setUp(self):
   self.lua=LuaRuntime(unpack_returned_tuples=True);self.lua.execute(silver.MOCK+NATIVE)
   self.lua.globals().catalog=self.lua.execute((ROOT/'GameCatalog.lua').read_text())
-  self.lua.globals().choice=self.lua.execute((ROOT/'ChoiceUI.lua').read_text())
+  self.lua.globals().choice=self.lua.execute((ROOT/"UIComponents.lua").read_text()).Choice
   self.lua.execute("choice:Init({GameCatalog=catalog}); parent=Instance.new('Frame'); button,refresh=choice:Build(parent,'Stands',function() return {'Cream','Aerosmith'} end,function() return selected end,function(names) selected=names end,function() beforeCount=beforeCount+1 end,ui,theme,track)")
  def run_lua(self,s):self.lua.execute(s)
  def test_actual_multi_select_marks_selection_and_calls_stop_before_edit(self):
@@ -100,12 +102,12 @@ class NativeChoiceTests(unittest.TestCase):
 
 class CatalogWiringTests(unittest.TestCase):
  def test_no_legacy_buttons_or_skin_name_entry_remain(self):
-  ui=(ROOT/'UI.lua').read_text();helper=(ROOT/'StandV2UI.lua').read_text()
+  ui=(ROOT/'UI.lua').read_text();helper=module_source(ROOT,"StandV2UI.lua")
   for old in ('targetListButton','clearTargetsButton','resetStats','Desired skins separated by semicolons'):
    self.assertNotIn(old,ui+helper)
   self.assertIn('choices:Build(FarmPage,"Skins"',helper)
  def test_runtime_has_no_external_code_loads_or_heavy_heap_scan(self):
-  src=(ROOT/'GameCatalog.lua').read_text()+(ROOT/'ChoiceUI.lua').read_text()
+  src=(ROOT/'GameCatalog.lua').read_text()+module_source(ROOT,"ChoiceUI.lua")
   self.assertNotRegex(src,r'HttpGet|loadstring|require\(|getgc|InvokeServer|FireServer|webhook')
  def test_loader_and_public_builder_include_new_dependencies(self):
   loader=(ROOT/'DevMain.lua').read_text();builder=(ROOT/'scripts/build_public_release.py').read_text()

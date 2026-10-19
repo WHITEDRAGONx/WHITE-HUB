@@ -129,3 +129,12 @@ Discord: https://discord.gg/j3C4Xa6DzN
 
 Use DevMain.lua on dev/2026-10-10-autosell-compat for owner testing. Private
 development diagnostics remain outside the public module package.
+
+## Module organization
+
+UIComponents.lua groups layout, searchable selectors and Stand controls.
+GameCatalog.lua owns local names, online refresh and cache lifecycle.
+AutoPrestigeRuntime.lua owns execution and the scoped prestige dialogue driver;
+AutoPrestige.lua retains progression. Combat remains in CombatFarm.lua.
+The public package now has 18 Lua files and 17 boot downloads. Gameplay and
+Merchant behavior are unchanged by this packaging update. See MODULE_CONSOLIDATION.md.
