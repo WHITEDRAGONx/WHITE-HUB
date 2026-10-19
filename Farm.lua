@@ -21,7 +21,7 @@ local _ui = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 90s limit.
+local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 25s limit.
 local detectionEpoch = 0
 local lastItemTime    = tick()
 
@@ -576,7 +576,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
     end
     local ok, success, reason = pcall(function()
-        local deadline, attempts, nextScan = tick() + 90, 0, 0
+        local deadline, attempts, nextScan = tick() + 25, 0, 0
         while permitted() and tick() < deadline and attempts < 8 do
             if _inventory:Count(name) >= required then return true, "Stock confirmed" end
             if not cycleBusy and not startupBusy then
@@ -606,7 +606,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             task.wait(0.2)
         end
         if not permitted() then return false, "Restock cancelled/character changed" end
-        return false, "Restock limit reached (90s/8 attempts); missing " .. name
+        return false, "Restock limit reached (25s/8 attempts); missing " .. name
     end)
     if restockFreeze then pcall(function() _movement:Unfreeze(restockFreeze) end) end
     if movementUsed then pcall(function() _movement:SetNoclip(false) end) end
