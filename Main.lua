@@ -656,7 +656,7 @@ local moduleRequirements = {
     ServerHop  = {"Init"},
     Inventory  = {"Init"},
     CombatFarm = {"Init"},
-    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "GetResumeSupport", "ResetStatistics"},
+    StandFarm  = {"Init", "Start", "Stop", "GetStatus", "RecoverTransfer", "ResumeSavedSession", "GetResumeSupport", "ResetStatistics"},
     StandTransfer = {"Init", "Issue", "Claim", "Invalidate"},
     StandV2UI = {"Init", "BuildResume", "BuildSkins", "BuildStats"},
     CatalogRefresh = {"Init", "GetNames", "GetState", "Refresh", "Destroy"},
@@ -856,5 +856,8 @@ task.spawn(function()
 end)
 
 LOG("BOOT", "WHITE HUB V5 PUBLIC BETA running. All critical modules passed boot validation.")
--- Only a valid one-use arrival intent can authorize the opt-in exception.
-Modules.StandFarm:RecoverTransfer()
+-- Preserve an owned restock transfer first; otherwise honor the saved Stand Farm switch.
+local recoveredOwnedTransfer = Modules.StandFarm:RecoverTransfer()
+if not recoveredOwnedTransfer then
+    Modules.StandFarm:ResumeSavedSession()
+end
