@@ -1118,7 +1118,8 @@ function UI:Create()
         pityInput.Text = "Stop at pity: " .. tostring(num)
     end))
 
-    MakeToggle(FarmPage, "Stand Farm (BETA)", false, function(enabled)
+    MakeToggle(FarmPage, "Stand Farm (BETA)",
+        _config and _config:Get("StandFarmEnabled")==true, function(enabled)
         if enabled and _config and _config:Get("EventItemsFarmEnabled") then
             UI:SetToggleValue("Stand Farm (BETA)", false)
             UI:ShowPopup("Disable Events Items Farm before starting Stand Farm.", 5)
@@ -1154,7 +1155,10 @@ function UI:Create()
                 standStatus.Text = ("%s | %s | Pity %s | Rolls %d\n%s"):format(
                     tostring(state.mode or "stand"), tostring(state.stand or "?"), tostring(state.pity or "?"),
                     tonumber(state.rolls) or 0, tostring(state.message or "Idle"))
-                if not state.running then
+                -- Keep the user's saved ON state visible while the loader is
+                -- verifying Stand/pity on arrival. The resume worker will switch
+                -- it OFF and log the reason if safe startup cannot be confirmed.
+                if not state.running and not (_config and _config:Get("StandFarmEnabled")==true) then
                     UI:SetToggleValue("Stand Farm (BETA)", false)
                 end
             end
