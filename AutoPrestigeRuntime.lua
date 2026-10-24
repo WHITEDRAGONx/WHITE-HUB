@@ -382,9 +382,36 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         local root=ReplicatedStorage:FindFirstChild("NewDialogue")
         local target=root and root:FindFirstChild(npc)
         if not target and npc=="Storyline #1" then target=root and root:FindFirstChild("Giorno Giovanna") end
-        if not target then ctx.pending=nil; return false,"NPC prompt/definition not found: "..npc end
-        local char=player.Character
-        ctx:Fire(char and char:FindFirstChild("RemoteEvent"),"PromptTriggered",target)
+        if target then
+            local char=player.Character
+            ctx:Fire(char and char:FindFirstChild("RemoteEvent"),"PromptTriggered",target)
+        elseif npc=="Storyline #1" then
+            -- Fresh accounts may not replicate Giorno's prompt/definition into the
+            -- folders scanned above. Quest Farm's local DialogueGui driver is still
+            -- used below; this one-shot compatibility request only opens/advances
+            -- the first storyline page using YBA's known EndDialogue payload.
+            local char=player.Character
+            local remote=char and char:FindFirstChild("RemoteEvent")
+            if not remote then
+                ctx.pending=nil
+                return false,"Storyline #1 has no prompt/definition and Character.RemoteEvent is missing"
+            end
+            ctx:Log("WARN","Storyline #1 prompt/definition unavailable; trying one guarded EndDialogue bootstrap")
+            local okFire,fireErr=pcall(function()
+                ctx:Fire(remote,"EndDialogue",{
+                    NPC="Storyline #1",
+                    Dialogue="Dialogue2",
+                    Option="Option1",
+                })
+            end)
+            if not okFire then
+                ctx.pending=nil
+                return false,"Storyline #1 EndDialogue bootstrap failed: "..tostring(fireErr)
+            end
+        else
+            ctx.pending=nil
+            return false,"NPC prompt/definition not found: "..npc
+        end
     end
     local ok,info=self:Drive(ctx,confirmed,label or npc,12)
     if ok then ctx.pending=nil end
