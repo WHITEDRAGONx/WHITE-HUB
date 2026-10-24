@@ -996,6 +996,42 @@ function UI:Create()
         end
     end)
 
+    -- Read-only Story Analyzer, placed directly below Auto Prestige.
+    local storyAnalyzerBusy = false
+    local storyAnalyzerButton = Instance.new("TextButton")
+    storyAnalyzerButton.Size = UDim2.new(1, -4, 0, 34)
+    storyAnalyzerButton.Font = Enum.Font.GothamBold
+    storyAnalyzerButton.TextSize = 12
+    storyAnalyzerButton.Text = "RECORD STORY / NPC / DIALOGUE (30s)"
+    storyAnalyzerButton.Parent = FarmPage
+    styleActionButton(storyAnalyzerButton, false)
+    trackConnection(storyAnalyzerButton.MouseButton1Click:Connect(function()
+        if storyAnalyzerBusy then return end
+        if not _community or type(_community.WatchStoryAnalyzer) ~= "function" then
+            UI:ShowPopup("Story Analyzer unavailable.", 5)
+            return
+        end
+        storyAnalyzerBusy = true
+        storyAnalyzerButton.Text = "RECORDING STORY DATA..."
+        task.spawn(function()
+            local ok, result = pcall(function()
+                return _community:WatchStoryAnalyzer(30)
+            end)
+            if not ok then
+                runtimeLog("WARN", "Story Analyzer failed: " .. tostring(result))
+                UI:ShowPopup("Story Analyzer failed; check Console.", 5)
+            elseif result ~= true then
+                UI:ShowPopup(tostring(result), 5)
+            else
+                UI:ShowPopup("Story capture finished. Copy [StoryAnalyzer] lines from Console.", 6)
+            end
+            storyAnalyzerBusy = false
+            if storyAnalyzerButton.Parent then
+                storyAnalyzerButton.Text = "RECORD STORY / NPC / DIALOGUE (30s)"
+            end
+        end)
+    end))
+
     if _prestigeRuntime then _prestigeRuntime:BuildStatus(FarmPage,UI) end
 
     do
