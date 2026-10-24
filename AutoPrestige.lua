@@ -109,7 +109,14 @@ end
 local function storyDialogue()
     local source=ctx:StorySource()
     local before=ctx:QuestFingerprint()
-    return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
+    local result=ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
+    -- The generic Patch quest panel is not evidence by itself. Arm its
+    -- compatibility combat path only after this run observed a story-state change.
+    if source=="Storyline #1" then
+        ctx.storyFallbackReady=true
+        moduleLog("INFO","[AutoPrestige] Storyline #1 state changed; one guarded Security Guard fallback is armed")
+    end
+    return result
 end
 
 -- Auto Prestige's own controller; CombatFarm/XenonLock is not modified.
@@ -275,10 +282,14 @@ local function autoStoryStep()
         ctx:Wait(0.2)
     end
 
-    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards")
-        or (onlyPlaceholder and ctx.storySource == "Storyline #1") then
+    local useStoryFallback=onlyPlaceholder and ctx.storySource=="Storyline #1"
+        and ctx.storyFallbackReady==true
+    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") or useStoryFallback then
+        -- Consume the fallback before combat. It can only be re-armed by a later
+        -- Giorno dialogue whose observable quest/player fingerprint changes.
+        if useStoryFallback then ctx.storyFallbackReady=false end
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard" ..
-            (onlyPlaceholder and " (Patch-panel fallback)" or ""))
+            (useStoryFallback and " (one-shot Patch-panel fallback)" or ""))
         for guardIndex = 1, 5 do
             ctx:Check()
             moduleLog("INFO", "[AutoPrestige] Security Guard progress: " .. tostring(guardIndex) .. "/5")
