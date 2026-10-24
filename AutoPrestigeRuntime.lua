@@ -269,11 +269,19 @@ function Driver:Drive(ctx,confirmed,label,timeout)
                 local stage=stageSignature(gui,kind)
                 if stage~=signature then signature=stage; attempts=0; lastAt=0 end
                 if callbackInFlight==0 and (attempts==0 or os.clock()-lastAt>=0.8) then
-                    if attempts>=2 or clicks>=12 then cleanupDialogue(true); return false,"dialogue stalled" end
+                    -- Continue pages may be repeated while the game types/updates the
+                    -- dialogue body without changing the button identity. Give those
+                    -- pages a bounded retry budget; choices remain capped at two.
+                    local attemptCap=(kind=="ClickContinue") and 12 or 2
+                    if attempts>=attemptCap or clicks>=12 then
+                        cleanupDialogue(true)
+                        ctx:Log("WARN",label.." stalled at "..kind.." after "..tostring(attempts).." attempts; no confirmed state change")
+                        return false,"dialogue stalled:"..kind
+                    end
                     local ok,method=advanceDialogue(ctx,button,gui,kind,attempts,true)
                     if ok then
                         clicks=clicks+1; attempts=attempts+1; lastAt=os.clock()
-                        ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending")
+                        ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending (attempt "..tostring(attempts).."/"..tostring(attemptCap)..")")
                     end
                 end
             end
