@@ -282,6 +282,48 @@ function Driver:Drive(ctx,confirmed,label,timeout)
     cleanupDialogue(true)
     return false,ctx:Active() and "result timeout" or "cancelled"
 end
+-- Diagnostic-only Giorno analyzer. It logs names/paths of likely NPC prompts
+-- and dialogue definitions; it does not trigger or interact with any dialogue.
+local function analyzeGiorno()
+    local findings={}
+    local function add(kind,path,detail)
+        if #findings>=30 then return end
+        findings[#findings+1]=kind.." "..path..(detail and (" ["..detail.."]") or "")
+    end
+    local roots={}
+    local dialogues=workspace:FindFirstChild("Dialogues")
+    if dialogues then roots[#roots+1]=dialogues end
+    roots[#roots+1]=workspace
+    for _,name in ipairs({"Dialogue","NewDialogue"}) do
+        local root=ReplicatedStorage:FindFirstChild(name)
+        if root then roots[#roots+1]=root end
+    end
+    local seen={}
+    for _,root in ipairs(roots) do
+        if not seen[root] then
+            seen[root]=true
+            for _,obj in ipairs(root:GetDescendants()) do
+                local name=tostring(obj.Name or "")
+                local objectText=""
+                if obj:IsA("ProximityPrompt") then objectText=tostring(obj.ObjectText or "") end
+                local haystack=(name.." "..objectText):lower()
+                if haystack:find("giorno",1,true) or haystack:find("storyline",1,true) then
+                    local path=obj:GetFullName()
+                    add(obj.ClassName,path,objectText~="" and ("ObjectText="..objectText) or nil)
+                end
+            end
+            local rootName=tostring(root.Name or "")
+            if rootName:lower():find("giorno",1,true) or rootName:lower():find("storyline",1,true) then
+                add(root.ClassName,root:GetFullName())
+            end
+        end
+    end
+    if #findings==0 then
+        return "GiornoAnalyzer: no Giorno/Storyline names found in workspace or ReplicatedStorage"
+    end
+    return "GiornoAnalyzer: "..table.concat(findings," | ")
+end
+
 local promptCache={}
 local function findPrompt(npc)
     if promptCache[npc] and promptCache[npc].Parent then return promptCache[npc] end
@@ -327,6 +369,9 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         if option~="Option1" then return false,"unknown option sequence" end
     end
     if confirmed() then return true,"already reflected in player state" end
+    if npc=="Storyline #1" then
+        ctx:Log("INFO",analyzeGiorno())
+    end
     local prompt,reason=findPrompt(npc)
     if reason then return false,reason end
     currentContext=ctx; ctx:Check()
