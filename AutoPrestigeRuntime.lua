@@ -289,14 +289,24 @@ local function findPrompt(npc)
     local roots={workspace:FindFirstChild("Dialogues") or workspace}
     local definition=ReplicatedStorage:FindFirstChild("Dialogue") or ReplicatedStorage:FindFirstChild("NewDialogue")
     if definition then roots[#roots+1]=definition end
+
+    -- Storyline #1 is the story-dialogue key used by AutoPrestige, not the
+    -- physical NPC prompt name on a fresh YBA account. Resolve it to Giorno.
+    local names={npc}
+    if npc=="Storyline #1" then names[#names+1]="Giorno Giovanna" end
+    local function matches(value)
+        for _,name in ipairs(names) do if value==name then return true end end
+        return false
+    end
+
     for _,root in ipairs(roots) do
         for _,object in ipairs(root:GetDescendants()) do
             if object:IsA("ProximityPrompt") then
                 local text=tostring(object.ObjectText or "")
                 local parent=object.Parent
-                local matched=text==npc
+                local matched=matches(text)
                 while parent and parent~=root do
-                    if parent.Name==npc then matched=true; break end
+                    if matches(parent.Name) then matched=true; break end
                     parent=parent.Parent
                 end
                 if matched then
@@ -326,6 +336,7 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     else
         local root=ReplicatedStorage:FindFirstChild("NewDialogue")
         local target=root and root:FindFirstChild(npc)
+        if not target and npc=="Storyline #1" then target=root and root:FindFirstChild("Giorno Giovanna") end
         if not target then ctx.pending=nil; return false,"NPC prompt/definition not found: "..npc end
         local char=player.Character
         ctx:Fire(char and char:FindFirstChild("RemoteEvent"),"PromptTriggered",target)
