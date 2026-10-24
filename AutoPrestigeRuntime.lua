@@ -254,7 +254,10 @@ function Driver:Drive(ctx,confirmed,label,timeout)
     while ctx:Active() and os.clock()<deadline do
         local gui=dialogueGui()
         local result=confirmed()
-        if result and not gui and callbackInFlight==0 then cleanupDialogue(true); return true end
+        -- A quest/player-state confirmation is authoritative even if the game's
+        -- DialogueGui instance remains present but disabled after a fast callback.
+        -- Do not keep clicking through a completed quest dialogue until timeout.
+        if result and callbackInFlight==0 then cleanupDialogue(true); return true end
         if gui then
             if ownedGui and ownedGui~=gui then cleanupDialogue(true); return false,"dialogue replaced; result unresolved" end
             ownedGui=gui; seen=true
