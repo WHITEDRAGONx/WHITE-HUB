@@ -337,7 +337,15 @@ local function findPrompt(npc)
     local names={npc}
     if npc=="Storyline #1" then names[#names+1]="Giorno Giovanna" end
     local function matches(value)
-        for _,name in ipairs(names) do if value==name then return true end end
+        for _,name in ipairs(names) do
+            if value==name then return true end
+        end
+        -- Live story NPC models use display names such as
+        -- "Storyline #1 (Giorno)", while the quest key is "Storyline #1".
+        if npc=="Storyline #1" and type(value)=="string"
+            and value:match("^Storyline #1 %([^%)]+%)$") then
+            return true
+        end
         return false
     end
 
@@ -387,7 +395,19 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         -- live model as PromptTriggered's target before attempting any remote fallback.
         if not target and npc=="Storyline #1" then
             local liveDialogues=workspace:FindFirstChild("Dialogues")
-            target=liveDialogues and liveDialogues:FindFirstChild("Storyline #1")
+            if liveDialogues then
+                target=liveDialogues:FindFirstChild("Storyline #1")
+                    or liveDialogues:FindFirstChild("Storyline #1 (Giorno)")
+                -- Prefer the exact storyline index, not any Giorno NPC.
+                if not target then
+                    for _,candidate in ipairs(liveDialogues:GetChildren()) do
+                        if candidate.Name:match("^Storyline #1 %([^%)]+%)$") then
+                            target=candidate
+                            break
+                        end
+                    end
+                end
+            end
         end
         if target then
             local char=player.Character
