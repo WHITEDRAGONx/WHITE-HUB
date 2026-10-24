@@ -427,10 +427,16 @@ function Context:QuestFingerprint()
 end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
-    local candidates={}; local any=false; local questNames={}
+    local candidates={}; local any=false; local questNames={}; local hasGiornoFirstQuest=false
     for _,quest in ipairs(panel and panel:GetChildren() or {}) do
         if not quest:IsA('UIListLayout') and not quest:IsA('UIPadding') then
             any=true; questNames[#questNames+1]=quest.Name:sub(1,100)
+            -- The first YBA Storyline objective is the Giorno security-guard quest.
+            -- Its UI entry may not expose NPC/source attributes, so map only this
+            -- exact known objective to the existing Storyline #1 dialogue definition.
+            if quest.Name=='Help Giorno by Defeating Security Guards' then
+                hasGiornoFirstQuest=true
+            end
             for _,key in ipairs({'NPC','NPCName','QuestGiver','DialogueNPC','Source'}) do
                 local attr=quest.GetAttribute and quest:GetAttribute(key)
                 local object=quest:FindFirstChild(key,true); local stored
@@ -448,6 +454,7 @@ function Context:StorySource()
         source=name
     end
     if source then return source end
+    if hasGiornoFirstQuest then return 'Storyline #1' end
     if not any then return 'Storyline #1' end
     if self.storySource then return self.storySource end
     self:Log('WARN','Story quest source not identified; active quests: '..table.concat(questNames,' | '):sub(1,500))
