@@ -130,6 +130,116 @@ function Community:InspectEventDialogue()
     end
     return true, "Event dialogue inspected (labels logged); no options clicked."
 end
+-- Read-only Story/NPC analyzer for Auto Prestige diagnosis.
+-- Captures streamed quest NPCs, prompts, dialogue definitions and live UI changes.
+-- It never fires remotes, clicks options, or changes quest state.
+function Community:WatchStoryAnalyzer(seconds)
+    if self._storyWatchActive then return false, "Story Analyzer capture is already running." end
+    self._storyWatchActive = true
+    local duration = math.clamp(tonumber(seconds) or 30, 5, 60)
+    local expires = tick() + duration
+    local function safePath(obj)
+        local ok, path = pcall(function() return obj:GetFullName() end)
+        return (ok and path or tostring(obj.Name)):sub(1, 180)
+    end
+    local function logTree(root, tag, predicate, limit)
+        if not root then
+            log("INFO", "[StoryAnalyzer]["..tag.."] root missing")
+            return
+        end
+        local count = 0
+        for _, obj in ipairs(root:GetDescendants()) do
+            if predicate(obj) then
+                local detail = obj.ClassName.." "..safePath(obj)
+                if obj:IsA("ProximityPrompt") then
+                    detail = detail .. (" enabled=%s action=%s object=%s distance=%s"):format(
+                        tostring(obj.Enabled), tostring(obj.ActionText), tostring(obj.ObjectText),
+                        tostring(obj.MaxActivationDistance))
+                end
+                local attrs = {}
+                for key, value in pairs(obj:GetAttributes()) do
+                    attrs[#attrs+1] = tostring(key).."="..tostring(value):sub(1,100)
+                    if #attrs >= 8 then break end
+                end
+                if #attrs > 0 then detail = detail.." attrs={"..table.concat(attrs,",").."}" end
+                log("INFO", "[StoryAnalyzer]["..tag.."] "..detail)
+                count = count + 1
+                if count >= limit then break end
+            end
+        end
+        log("INFO", "[StoryAnalyzer]["..tag.."] listed="..tostring(count))
+    end
+    log("INFO", "[StoryAnalyzer] Started "..tostring(duration).."s read-only capture. Walk near/interact with Giorno and click dialogue choices normally.")
+    local worldDialogues = workspace:FindFirstChild("Dialogues")
+    logTree(worldDialogues, "WorldNPC", function(obj)
+        return obj:IsA("Model") or obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector")
+            or obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")
+    end, 100)
+    for _, rootName in ipairs({"NewDialogue", "Dialogue"}) do
+        local root = ReplicatedStorage:FindFirstChild(rootName)
+        logTree(root, "Definition", function(obj)
+            local n = obj.Name:lower()
+            return n:find("giorno",1,true) or n:find("storyline",1,true)
+                or n:find("dialogue",1,true) or n:find("security",1,true)
+                or obj:IsA("ProximityPrompt")
+        end, 80)
+    end
+    local pg = Player:FindFirstChild("PlayerGui")
+    local questPanel = pg and pg:FindFirstChild("Quests", true)
+    logTree(questPanel, "QuestUI", function(obj)
+        return obj:IsA("GuiObject") or obj:IsA("UIListLayout")
+            or obj:IsA("StringValue") or obj:IsA("ObjectValue")
+    end, 70)
+    local lastSignature, captured = nil, 0
+    while self._storyWatchActive and enabled and tick() < expires do
+        pg = Player:FindFirstChild("PlayerGui")
+        local gui = pg and pg:FindFirstChild("DialogueGui")
+        local entries = {}
+        if gui then
+            entries[#entries+1] = "guiEnabled="..tostring(gui:IsA("ScreenGui") and gui.Enabled)
+            for _, obj in ipairs(gui:GetDescendants()) do
+                if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
+                    local textValue = tostring(obj.Text or ""):gsub("[%c]", " "):sub(1,180)
+                    if textValue ~= "" then
+                        entries[#entries+1] = obj.ClassName..":"..obj.Name
+                            ..":visible="..tostring(obj:IsA("GuiObject") and obj.Visible)
+                            ..":text="..textValue
+                    end
+                elseif obj.Name:match("^Option%d+$") and obj:IsA("GuiObject") then
+                    entries[#entries+1] = "OPTION:"..obj.Name..":visible="..tostring(obj.Visible)
+                end
+                if #entries >= 45 then break end
+            end
+        else
+            entries[1] = "DialogueGui closed"
+        end
+        local currentQuestPanel = pg and pg:FindFirstChild("Quests", true)
+        for _, obj in ipairs(currentQuestPanel and currentQuestPanel:GetChildren() or {}) do
+            if not obj:IsA("UIListLayout") and not obj:IsA("UIPadding") then
+                entries[#entries+1] = "QuestEntry:"..obj.Name
+                for _, child in ipairs(obj:GetDescendants()) do
+                    if child:IsA("TextLabel") or child:IsA("TextButton") then
+                        local t = tostring(child.Text or ""):gsub("[%c]", " "):sub(1,140)
+                        if t ~= "" then entries[#entries+1] = "QuestText:"..child.Name.."="..t end
+                        if #entries >= 60 then break end
+                    end
+                end
+            end
+            if #entries >= 60 then break end
+        end
+        local signature = table.concat(entries, " | ")
+        if signature ~= lastSignature then
+            captured = captured + 1
+            log("INFO", "[StoryAnalyzer][State "..captured.."] "..signature:sub(1,5000))
+            lastSignature = signature
+        end
+        task.wait(0.25)
+    end
+    self._storyWatchActive = false
+    log("INFO", "[StoryAnalyzer] Finished. Distinct UI states captured="..tostring(captured).."; no remotes fired and no options clicked.")
+    return true, "Story capture finished; copy [StoryAnalyzer] lines from Console."
+end
+
 -- Timed, read-only discovery recorder. The user clicks Jack's options
 -- normally while this watches *only* YBA's DialogueGui; no remote arguments,
 -- purchases, or callbacks are fired by this feature.
