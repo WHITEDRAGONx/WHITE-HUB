@@ -263,20 +263,35 @@ local function autoStoryStep()
         end
     end
 
-    if #questPanel:GetChildren()<2 then
+    local questChildren = questPanel:GetChildren()
+    local onlyPlaceholder = #questChildren == 1 and questChildren[1].Name:lower() == "patch"
+
+    -- The live YBA quest UI can keep a generic "Patch" child even after
+    -- Giorno accepts the first objective. Once the Storyline #1 dialogue has
+    -- been confirmed, do not reopen it every tick: run the Security Guard
+    -- combat step and then return to Giorno for the next objective.
+    if #questChildren < 2 and not (onlyPlaceholder and ctx.storySource == "Storyline #1") then
         storyDialogue()
         ctx:Wait(0.2)
     end
 
-    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
-        moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
-        if killNPC("Security Guard", 15) then
-            task.wait(1)
-            storyDialogue()
-            return true
-        else
-            return true
+    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards")
+        or (onlyPlaceholder and ctx.storySource == "Storyline #1") then
+        moduleLog("INFO", "[AutoPrestige] Quest: Security Guard" ..
+            (onlyPlaceholder and " (Patch-panel fallback)" or ""))
+        for guardIndex = 1, 5 do
+            ctx:Check()
+            moduleLog("INFO", "[AutoPrestige] Security Guard progress: " .. tostring(guardIndex) .. "/5")
+            if not killNPC("Security Guard", 15) then
+                moduleLog("WARN", "[AutoPrestige] Security Guard target disappeared before confirmed defeat; retrying next cycle")
+                return true
+            end
+            if guardIndex < 5 then ctx:Wait(0.75) end
         end
+        moduleLog("INFO", "[AutoPrestige] Security Guard objective loop finished; returning to Giorno")
+        ctx:Wait(1)
+        storyDialogue()
+        return true
 
     elseif not getgenv().standList[LocalPlayer.PlayerStats.Stand.Value]
     and LocalPlayer.PlayerStats.Level.Value >= 3 and dontTPOnDeath then
