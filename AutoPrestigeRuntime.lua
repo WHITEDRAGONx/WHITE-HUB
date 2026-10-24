@@ -546,14 +546,15 @@ function Context:StorySource()
     if not any then return 'Storyline #1' end
     if self.storySource then return self.storySource end
 
-    -- Fresh YBA accounts can expose a single placeholder child named "Patch"
-    -- under PlayerGui.Quests before the first Giorno story quest exists.
-    -- Treat that exact empty-state shape as no active quest, so the first
-    -- Storyline dialogue can start. Do not generalize this to unknown quests.
-    local onlyQuestEntriesArePlaceholders=#questNames==1
-        and questNames[1]:lower()=='patch'
+    -- Fresh YBA accounts can expose a single placeholder child under
+    -- PlayerGui.Quests before the first Giorno story quest exists. Observed
+    -- empty-state labels include "Patch" and "Sample"; accept only this exact
+    -- one-entry shape, never a panel with multiple/unknown quest entries.
+    local placeholderName=#questNames==1 and questNames[1]:lower() or nil
+    local onlyQuestEntriesArePlaceholders=placeholderName=='patch'
+        or placeholderName=='sample'
     if onlyQuestEntriesArePlaceholders then
-        self:Log('INFO','Quest panel contains only the Patch placeholder; starting Storyline #1 for a fresh account')
+        self:Log('INFO','Quest panel contains only the '..questNames[1]..' placeholder; starting Storyline #1 for a fresh account')
         return 'Storyline #1'
     end
 
