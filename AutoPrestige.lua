@@ -188,6 +188,21 @@ local function allocateSkills()
     end
 end
 
+local function hasQuest(panel, questName)
+    if not panel then return false end
+    if panel:FindFirstChild(questName) then return true end
+    -- Some live quest panels use a generic child name (observed: "Patch")
+    -- and store the actual quest title in a descendant TextLabel/TextButton.
+    local wanted = tostring(questName):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    for _, object in ipairs(panel:GetDescendants()) do
+        if object:IsA("TextLabel") or object:IsA("TextButton") then
+            local text = tostring(object.Text or ""):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            if text == wanted then return true end
+        end
+    end
+    return false
+end
+
 local function autoStoryStep()
     if not autoPrestigeActive() then
         moduleLog("INFO", "[AutoPrestige] Disabled — autoStoryStep() returning.")
@@ -253,7 +268,7 @@ local function autoStoryStep()
         ctx:Wait(0.2)
     end
 
-    if questPanel:FindFirstChild("Help Giorno by Defeating Security Guards") then
+    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
         if killNPC("Security Guard", 15) then
             task.wait(1)
@@ -270,7 +285,7 @@ local function autoStoryStep()
         dontTPOnDeath = true
         return true
 
-    elseif questPanel:FindFirstChild("Defeat Leaky Eye Luca") and getgenv().standList[LocalPlayer.PlayerStats.Stand.Value] then
+    elseif hasQuest(questPanel, "Defeat Leaky Eye Luca") and getgenv().standList[LocalPlayer.PlayerStats.Stand.Value] then
         moduleLog("INFO", "[AutoPrestige] Quest: Leaky Eye Luca")
         if killNPC("Leaky Eye Luca", 15) then
             task.wait(1)
@@ -280,7 +295,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif questPanel:FindFirstChild("Defeat Bucciarati") then
+    elseif hasQuest(questPanel, "Defeat Bucciarati") then
         moduleLog("INFO", "[AutoPrestige] Quest: Bucciarati")
         if killNPC("Bucciarati", 15) then
             task.wait(1)
@@ -290,7 +305,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif questPanel:FindFirstChild("Collect $5,000 To Cover For Popo's Real Fortune") then
+    elseif hasQuest(questPanel, "Collect $5,000 To Cover For Popo's Real Fortune") then
         moduleLog("INFO", "[AutoPrestige] Quest: Collect $5,000")
         if LocalPlayer.PlayerStats.Money.Value < 5000 then
             local function collectAndSell(toolName, amount)
@@ -317,7 +332,7 @@ local function autoStoryStep()
         end
         return true
 
-    elseif questPanel:FindFirstChild("Defeat Fugo And His Purple Haze") then
+    elseif hasQuest(questPanel, "Defeat Fugo And His Purple Haze") then
         moduleLog("INFO", "[AutoPrestige] Quest: Fugo")
         if killNPC("Fugo", 15) then
             task.wait(1)
@@ -327,7 +342,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif questPanel:FindFirstChild("Defeat Pesci") then
+    elseif hasQuest(questPanel, "Defeat Pesci") then
         moduleLog("INFO", "[AutoPrestige] Quest: Pesci")
         if killNPC("Pesci", 15) then
             task.wait(1)
@@ -337,7 +352,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif questPanel:FindFirstChild("Defeat Ghiaccio") then
+    elseif hasQuest(questPanel, "Defeat Ghiaccio") then
         moduleLog("INFO", "[AutoPrestige] Quest: Ghiaccio")
         if killNPC("Ghiaccio", 15) then
             task.wait(1)
@@ -347,7 +362,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif questPanel:FindFirstChild("Defeat Diavolo") then
+    elseif hasQuest(questPanel, "Defeat Diavolo") then
         moduleLog("INFO", "[AutoPrestige] Quest: Diavolo")
         killNPC("Diavolo", 15)
         endDialogue("Storyline #14", "Dialogue7", "Option1")
@@ -377,7 +392,7 @@ local function autoStoryStep()
             return
         end
 
-    elseif questPanel:FindFirstChild("Take down 3 vampires")
+    elseif hasQuest(questPanel, "Take down 3 vampires")
     and LocalPlayer.PlayerStats.Spec.Value ~= "None"
     and LocalPlayer.PlayerStats.Level.Value >= 25
     and LocalPlayer.PlayerStats.Level.Value ~= 50 then
@@ -385,7 +400,7 @@ local function autoStoryStep()
         getgenv().HamonCharge = 10
         local function vampire()
             LocalPlayer.Character.PrimaryPart.CFrame = workspace.Living:FindFirstChild("Vampire").HumanoidRootPart.CFrame - Vector3.new(0, 15, 0)
-            if not questPanel:FindFirstChild("Take down 3 vampires") then
+            if not hasQuest(questPanel, "Take down 3 vampires") then
                 if (tick() - lastTick) >= 5 then lastTick = tick() end
                 endDialogue("William Zeppeli", "Dialogue4", "Option1")
             end
