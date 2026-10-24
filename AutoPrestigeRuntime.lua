@@ -382,9 +382,21 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         local root=ReplicatedStorage:FindFirstChild("NewDialogue")
         local target=root and root:FindFirstChild(npc)
         if not target and npc=="Storyline #1" then target=root and root:FindFirstChild("Giorno Giovanna") end
+        -- YBA can replicate the physical storyline NPC under Workspace.Dialogues
+        -- without a ProximityPrompt or a ReplicatedStorage definition. Prefer that
+        -- live model as PromptTriggered's target before attempting any remote fallback.
+        if not target and npc=="Storyline #1" then
+            local liveDialogues=workspace:FindFirstChild("Dialogues")
+            target=liveDialogues and liveDialogues:FindFirstChild("Storyline #1")
+        end
         if target then
             local char=player.Character
-            ctx:Fire(char and char:FindFirstChild("RemoteEvent"),"PromptTriggered",target)
+            local remote=char and char:FindFirstChild("RemoteEvent")
+            if not remote then
+                ctx.pending=nil
+                return false,"dialogue target found but Character.RemoteEvent is missing"
+            end
+            ctx:Fire(remote,"PromptTriggered",target)
         elseif npc=="Storyline #1" then
             -- Fresh accounts may not replicate Giorno's prompt/definition into the
             -- folders scanned above. Quest Farm's local DialogueGui driver is still
