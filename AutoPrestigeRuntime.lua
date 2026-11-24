@@ -543,22 +543,32 @@ function Context:QuestFingerprint()
     end
     table.sort(parts); return table.concat(parts,'|')
 end
+function Context:QuestEntries(panel)
+    local entries = {}
+    for _, child in ipairs(panel and panel:GetChildren() or {}) do
+        if not child:IsA('UIListLayout') and not child:IsA('UIPadding') then
+            entries[#entries + 1] = child
+        end
+    end
+    if #entries == 1 and entries[1].Name:lower() == 'patch' then
+        error('Quest status unknown. Check the in-game quest tracker.', 0)
+    end
+    return entries
+end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
     local candidates={}; local any=false; local questNames={}
-    for _,quest in ipairs(panel and panel:GetChildren() or {}) do
-        if not quest:IsA('UIListLayout') and not quest:IsA('UIPadding') then
-            any=true; questNames[#questNames+1]=quest.Name:sub(1,100)
-            for _,key in ipairs({'NPC','NPCName','QuestGiver','DialogueNPC','Source'}) do
-                local attr=quest.GetAttribute and quest:GetAttribute(key)
-                local object=quest:FindFirstChild(key,true); local stored
-                if object then pcall(function() stored=object.Value end) end
-                local value=attr or stored
-                if type(value)=='string' and value~='' then candidates[value]=true end
-            end
-            local id=quest.Name:match('Storyline%s*(#%d+)')
-            if id then candidates['Storyline '..id]=true end
+    for _,quest in ipairs(self:QuestEntries(panel)) do
+        any=true; questNames[#questNames+1]=quest.Name:sub(1,100)
+        for _,key in ipairs({'NPC','NPCName','QuestGiver','DialogueNPC','Source'}) do
+            local attr=quest.GetAttribute and quest:GetAttribute(key)
+            local object=quest:FindFirstChild(key,true); local stored
+            if object then pcall(function() stored=object.Value end) end
+            local value=attr or stored
+            if type(value)=='string' and value~='' then candidates[value]=true end
         end
+        local id=quest.Name:match('Storyline%s*(#%d+)')
+        if id then candidates['Storyline '..id]=true end
     end
     local source=nil
     for name in pairs(candidates) do
@@ -569,14 +579,7 @@ function Context:StorySource()
     if not any then return 'Storyline #1' end
     if self.storySource then return self.storySource end
 
-    -- Fresh YBA accounts can expose a single placeholder child under
-    -- PlayerGui.Quests before the first Giorno story quest exists. Observed
-    -- empty-state labels include "Patch" and "Sample"; accept only this exact
-    -- one-entry shape, never a panel with multiple/unknown quest entries.
-    local placeholderName=#questNames==1 and questNames[1]:lower() or nil
-    local onlyQuestEntriesArePlaceholders=placeholderName=='patch'
-        or placeholderName=='sample'
-    if onlyQuestEntriesArePlaceholders then
+    if #questNames==1 and questNames[1]:lower()=='sample' then
         self:Log('INFO','Quest panel contains only the '..questNames[1]..' placeholder; starting Storyline #1 for a fresh account')
         return 'Storyline #1'
     end
@@ -586,6 +589,7 @@ function Context:StorySource()
 end
 function Context:Dialogue(npc,options,confirm,label)
     self:Check(); if self.pending then error('AP_RESULT_PENDING',0) end
+    self:QuestEntries(player().PlayerGui:FindFirstChild('Quests',true))
     local ok,reason=Dialogue:Run(self,npc,options,confirm,label)
     if not ok then error('AP_DIALOGUE:'..tostring(reason),0) end
     if label and label:sub(1,6)=='Story ' then self.storySource=npc end

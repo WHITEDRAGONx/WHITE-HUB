@@ -211,6 +211,7 @@ local function autoStoryStep()
 
     local questPanel
     ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,5,"quest panel")
+    ctx:QuestEntries(questPanel)
     allocateSkills()
 
     if LocalPlayer.PlayerStats.Level.Value >= 25 and LocalPlayer.PlayerStats.Prestige.Value >= 1
@@ -263,22 +264,13 @@ local function autoStoryStep()
         end
     end
 
-    local questChildren = questPanel:GetChildren()
-    local onlyPlaceholder = #questChildren == 1 and questChildren[1].Name:lower() == "patch"
-
-    -- The live YBA quest UI can keep a generic "Patch" child even after
-    -- Giorno accepts the first objective. Once the Storyline #1 dialogue has
-    -- been confirmed, do not reopen it every tick: run the Security Guard
-    -- combat step and then return to Giorno for the next objective.
-    if #questChildren < 2 and not (onlyPlaceholder and ctx.storySource == "Storyline #1") then
+    if #questPanel:GetChildren() < 2 then
         storyDialogue()
         ctx:Wait(0.2)
     end
 
-    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards")
-        or (onlyPlaceholder and ctx.storySource == "Storyline #1") then
-        moduleLog("INFO", "[AutoPrestige] Quest: Security Guard" ..
-            (onlyPlaceholder and " (Patch-panel fallback)" or ""))
+    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
+        moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
         for guardIndex = 1, 5 do
             ctx:Check()
             moduleLog("INFO", "[AutoPrestige] Security Guard progress: " .. tostring(guardIndex) .. "/5")
