@@ -38,6 +38,7 @@ local halloweenTradeBusy=false
 local lastHalloweenAttemptAt=0
 local runAutoHalloween -- Defined below; called only at serialized worker checkpoints.
 local restockFreeze, restockEpoch = nil, 0
+local prestigeRestockModeLogged=false
 
 local function prestigePending()
     local m=_G.WhiteHubModules
@@ -450,7 +451,11 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     -- Keep a live item in the queue so a transient prompt failure can retry.
     if model and model.Parent then
         local refreshed = GetItemInfo(model)
-        if refreshed then SpawnedItems[index] = refreshed end
+        if refreshed then
+            SpawnedItems[index] = refreshed
+        else
+            SpawnedItems[index] = nil
+        end
     else
         SpawnedItems[index] = nil
     end
@@ -565,6 +570,10 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
     if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or halloweenTradeBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
+    if prestige and not prestigeRestockModeLogged then
+        prestigeRestockModeLogged=true
+        moduleLog("INFO","[Farm][PrestigeRestock] Using the original stable CollectItem path; Fast Pickup is bypassed for Auto Prestige.")
+    end
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
         local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
@@ -586,13 +595,27 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
                     nextScan = tick() + 1
                     for _, model in ipairs(ItemSpawnFolder:GetChildren()) do
                         local info = GetItemInfo(model)
-                        if info and info.Name == name then SpawnedItems[model] = info end
+                        if info and info.Name == name then
+                            SpawnedItems[model] = info
+                        elseif SpawnedItems[model] and SpawnedItems[model].Name == name then
+                            -- Drop stale entries whose prompt/primary part vanished.
+                            SpawnedItems[model] = nil
+                        end
                     end
                 end
                 local candidate, index
                 for key, info in pairs(SpawnedItems) do
-                    if info.Name == name and info.Model and info.Model.Parent then
-                        candidate, index = info, key; break
+                    if info and info.Name == name and info.Model and info.Model.Parent then
+                        local refreshed=GetItemInfo(info.Model)
+                        if refreshed and refreshed.Name==name then
+                            SpawnedItems[key]=refreshed
+                            candidate, index = refreshed, key
+                            break
+                        else
+                            SpawnedItems[key]=nil
+                        end
+                    elseif info and info.Name==name then
+                        SpawnedItems[key]=nil
                     end
                 end
                 if candidate then
