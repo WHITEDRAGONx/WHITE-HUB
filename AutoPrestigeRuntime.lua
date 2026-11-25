@@ -486,8 +486,11 @@ function Context:Active()
         and (not modules.Config:Get('FarmEnabled') or self.selling==true)
 end
 function Context:Check()
+    -- Auto Prestige is a long-running progression worker. Do not expire the
+    -- whole session while it is safely waiting for a scarce required item.
+    -- Individual dialogue, respawn, and remote operations keep their own
+    -- bounded waits; the owner/mode/character guards remain authoritative.
     if not self:Active() then error(CANCEL,0) end
-    if os.clock()>self.deadline then error('AP_SESSION_TIMEOUT',0) end
 end
 function Context:Wait(seconds)
     self:Check(); local endAt=os.clock()+(tonumber(seconds) or 0.03)
@@ -738,7 +741,7 @@ function Runtime:Init(all)
     local env=getgenv and getgenv() or _G
     local scope=env.__WhiteHubAPScope
     previous=type(scope)=="table" and scope.job==game.JobId and scope.place==game.PlaceId and scope or nil
-    log('INFO','Build AP-COMPAT-20261124-R3-PATCH-COUNTER; YBA runtime validation pending')
+    log('INFO','Build AP-COMPAT-20261124-R4-PERSISTENT-RESTOCK; YBA runtime validation pending')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
@@ -753,7 +756,7 @@ function Runtime:Start()
     modules.Config:SetMany({AutoPrestige=true,FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false})
     env.AutoPrestigeEnabled=true
     current=setmetatable({id=serial,runtime=env.__WhiteHubRuntimeId,job=game.JobId,place=game.PlaceId,running=true,tasks=0,calls=0,
-        connections={},objects={},deadline=os.clock()+1800,reason='running'},Context)
+        connections={},objects={},reason='running'},Context)
     env.__WhiteHubAPScope=current
     local ctx=current
     ctx.Task={wait=function(seconds) return ctx:Wait(seconds) end,
