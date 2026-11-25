@@ -551,7 +551,20 @@ function Context:QuestEntries(panel)
         end
     end
     if #entries == 1 and entries[1].Name:lower() == 'patch' then
-        error('Quest status unknown. Check the in-game quest tracker.', 0)
+        -- Patch is a generic live quest-row name on some fresh accounts.
+        -- Keep it when its descendants contain the actual displayed objective.
+        local hasReadableText=false
+        for _,object in ipairs(entries[1]:GetDescendants()) do
+            if object:IsA('TextLabel') or object:IsA('TextButton') then
+                if tostring(object.Text or ''):match('%S') then
+                    hasReadableText=true
+                    break
+                end
+            end
+        end
+        if not hasReadableText then
+            error('Quest status unknown. Check the in-game quest tracker.', 0)
+        end
     end
     return entries
 end
