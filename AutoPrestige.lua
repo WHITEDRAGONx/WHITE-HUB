@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-STAND-RESTOCK-20261124-R5; original Farm restock; no-spawn hop/resume")
+    moduleLog("INFO","Build AP-AFK-20261124-R6; unlimited Stand rolls; no progress timeout")
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
     ctx:Wait(0.25)
@@ -26,7 +26,7 @@ getgenv().autoRequiem      = true
 getgenv().NPCTimeOut       = 15
 getgenv().HamonCharge      = 90
 
-ctx:Until(function() return game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character end,20,"initial Character")
+ctx:Until(function() return game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character end,nil,"initial Character")
 
 local LocalPlayer = game.Players.LocalPlayer
 local Character = nil
@@ -43,7 +43,7 @@ local function refreshCharacter(character)
         RemoteFunction=Character and Character:FindFirstChild("RemoteFunction")
         HRP=Character and Character:FindFirstChild("HumanoidRootPart")
         return Character and Character.Parent and hum and hum.Health>0 and HRP and RemoteEvent and RemoteFunction
-    end,20,"ready Character/root/remotes")
+    end,nil,"ready Character/root/remotes")
     return true
 end
 
@@ -86,21 +86,22 @@ local function countItems(name) return modules.Inventory:Count(name) end
 local function farmItem(name,amount) return ctx:Collect(name,amount) end
 local function useItem(name,amount) return ctx:Consume(name) end
 local function attemptStandFarm()
-    for attempt=1,25 do
+    local attempt=0
+    while ctx:Active() do
+        attempt=attempt+1
         ctx:Check()
         refreshCharacter()
 
         local stand=LocalPlayer.PlayerStats.Stand.Value
         if getgenv().standList[stand] then
-            moduleLog("INFO","[AutoPrestige] Accepted Stand obtained: "..tostring(stand))
+            moduleLog("INFO","[AutoPrestige] Accepted Stand obtained after "..tostring(attempt-1).." roll(s): "..tostring(stand))
             return true
         end
 
-        -- Reset an unwanted Stand first. Do not collect an Arrow while the
-        -- character still owns a Stand, and do not carry a spare Arrow through
-        -- the Rokakaka respawn. Both pickups still use Farm:Restock.
+        -- Keep rolling until an accepted Stand is actually confirmed. No
+        -- attempt cap: AFK progression must not stop on an unlucky sequence.
         if stand~="None" then
-            moduleLog("INFO",("[AutoPrestige] Stand roll %d/25: resetting %s with one Rokakaka")
+            moduleLog("INFO",("[AutoPrestige] Stand roll %d: resetting %s with one Rokakaka")
                 :format(attempt,tostring(stand)))
             farmItem("Rokakaka",1)
             ctx:Check()
@@ -108,17 +109,18 @@ local function attemptStandFarm()
             refreshCharacter()
             ctx:Until(function()
                 return LocalPlayer.PlayerStats.Stand.Value=="None"
-            end,10,"Rokakaka Stand reset")
+            end,nil,"Rokakaka Stand reset")
         end
 
-        moduleLog("INFO",("[AutoPrestige] Stand roll %d/25: collecting one Mysterious Arrow through stable Farm restock")
+        moduleLog("INFO",("[AutoPrestige] Stand roll %d: collecting one Mysterious Arrow through stable Farm restock")
             :format(attempt))
         farmItem("Mysterious Arrow",1)
         ctx:Check()
         useItem("Mysterious Arrow")
         refreshCharacter()
     end
-    error("AP_STAND_ROLL_LIMIT",0)
+    ctx:Check()
+    return false
 end
 
 local function endDialogue(NPC, Dialogue, Option)
@@ -241,7 +243,7 @@ local function autoStoryStep()
     end
 
     local questPanel
-    ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,5,"quest panel")
+    ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,nil,"quest panel")
     ctx:QuestEntries(questPanel)
     allocateSkills()
 
@@ -251,7 +253,7 @@ local function autoStoryStep()
         LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(500, 2010, 500)
         local oldStand = LocalPlayer.PlayerStats.Stand.Value
         useItem("Requiem Arrow", "V")
-        ctx:Until(function() return LocalPlayer.PlayerStats.Stand.Value~=oldStand end,15,"Requiem result")
+        ctx:Until(function() return LocalPlayer.PlayerStats.Stand.Value~=oldStand end,nil,"Requiem result")
         return true
     end
 
@@ -518,7 +520,7 @@ local function autoStoryStep()
 end
 
 
-    local unchangedSince,lastState=os.clock(),ctx:Fingerprint()
+    local lastProgressLogAt=os.clock()+30
     while ctx:Active() do
         refreshCharacter()
         if isMaxPrestige() then
@@ -531,9 +533,11 @@ end
         if not checkPrestige(LocalPlayer.PlayerStats.Level.Value,LocalPlayer.PlayerStats.Prestige.Value) then
             autoStoryStep()
         end
-        local state=ctx:Fingerprint()
-        if state~=lastState then lastState=state; unchangedSince=os.clock() end
-        if os.clock()-unchangedSince>120 then error("AP_PROGRESS_TIMEOUT",0) end
+        if os.clock()>=lastProgressLogAt then
+            lastProgressLogAt=os.clock()+30
+            moduleLog("INFO","[AutoPrestige] Still progressing; no progress timeout. Current state: "
+                ..ctx:Fingerprint())
+        end
         ctx:Wait(0.5)
     end
 end)
