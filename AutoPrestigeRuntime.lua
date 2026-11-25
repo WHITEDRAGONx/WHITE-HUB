@@ -245,45 +245,71 @@ end
 
 function Driver:Init() end
 function Driver:Restore() cleanupDialogue(true) end
-function Driver:Drive(ctx,confirmed,label,timeout)
+function Driver:Drive(ctx,confirmed,label)
     if currentContext and currentContext~=ctx and callbackInFlight>0 then return false,"callback pending" end
     currentContext=ctx
-    local deadline=os.clock()+(timeout or 12)
     local clicks,signature,attempts,lastAt=0,nil,0,0
-    local seen=false; local ownedGui=nil
-    while ctx:Active() and os.clock()<deadline do
+    local lastStatusAt=os.clock()+30
+    local ownedGui=nil
+
+    -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
+    -- game to render the dialogue and keep checking the authoritative player
+    -- state; retry one visible action at a controlled cadence until confirmed.
+    while ctx:Active() do
         local gui=dialogueGui()
         local result=confirmed()
-        -- A quest/player-state confirmation is authoritative even if the game's
-        -- DialogueGui instance remains present but disabled after a fast callback.
-        -- Do not keep clicking through a completed quest dialogue until timeout.
-        if result and callbackInFlight==0 then cleanupDialogue(true); return true end
-        if gui then
-            if ownedGui and ownedGui~=gui then cleanupDialogue(true); return false,"dialogue replaced; result unresolved" end
-            ownedGui=gui; seen=true
+        if result and callbackInFlight==0 then
+            cleanupDialogue(true)
+            ctx:Log("INFO",label.." confirmed by game state after "..tostring(clicks).." dialogue input(s)")
+            return true
         end
+
+        if gui then
+            if ownedGui~=gui then
+                ownedGui=gui
+                signature=nil
+                attempts=0
+                lastAt=0
+            end
+        end
+
         if gui and not result then
             local button,kind=dialogueButton(gui)
-            if kind=="unsupported-options" then cleanupDialogue(true); return false,kind end
-            if button then
+            if kind=="unsupported-options" then
+                ctx:Log("WARN",label.." dialogue is present but its option layout is unsupported; waiting for a readable state")
+            elseif button and callbackInFlight==0 then
                 local stage=stageSignature(gui,kind)
-                if stage~=signature then signature=stage; attempts=0; lastAt=0 end
-                if callbackInFlight==0 and (attempts==0 or os.clock()-lastAt>=0.8) then
-                    if attempts>=2 or clicks>=12 then cleanupDialogue(true); return false,"dialogue stalled" end
+                if stage~=signature then
+                    signature=stage
+                    attempts=0
+                    lastAt=0
+                end
+                if attempts==0 or os.clock()-lastAt>=1.25 then
+                    -- Pace retries instead of treating a slow/unresponsive
+                    -- dialogue as a terminal failure. The game-state predicate
+                    -- above prevents continuing after the step is credited.
                     local ok,method=advanceDialogue(ctx,button,gui,kind,attempts,true)
+                    attempts=attempts+1
+                    lastAt=os.clock()
                     if ok then
-                        clicks=clicks+1; attempts=attempts+1; lastAt=os.clock()
+                        clicks=clicks+1
                         ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending")
+                    elseif attempts%8==0 then
+                        ctx:Log("WARN",label.." dialogue action still unconfirmed; retrying without a timeout")
                     end
                 end
             end
-        elseif not gui and not seen and os.clock()>deadline-(timeout or 12)+5 then
-            cleanupDialogue(true); return false,"dialogue not detected"
         end
-        ctx:Wait(0.03)
+
+        if os.clock()>=lastStatusAt then
+            lastStatusAt=os.clock()+30
+            ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks))
+        end
+        ctx:Wait(0.05)
     end
+
     cleanupDialogue(true)
-    return false,ctx:Active() and "result timeout" or "cancelled"
+    return false,"cancelled"
 end
 -- Diagnostic-only Giorno analyzer. It logs names/paths of likely NPC prompts
 -- and dialogue definitions; it does not trigger or interact with any dialogue.
@@ -548,7 +574,7 @@ local function buildQueuedTransferLoader(record)
         'local service=game:GetService("TeleportService")',
         'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
         'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
-        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R5-SERVER-HOP-RESUME",1,true) then return end',
+        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R6-AFK-NO-TIMEOUT",1,true) then return end',
         'local farmOk,farm=pcall(function() return game:HttpGet(BASE.."Farm.lua") end); if not farmOk or not farm:find("WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER",1,true) then return end',
         'local oldBase='..q('%q','local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/"),
         'local newBase='..q('%q','local BASE_URL = "'..AP_TRANSFER_BASE..'"),
@@ -623,9 +649,19 @@ function Context:Wait(seconds)
     repeat nativeTask.wait(math.min(0.1,math.max(0.01,endAt-os.clock()))); self:Check() until os.clock()>=endAt
 end
 function Context:Until(predicate,seconds,label)
-    local deadline=os.clock()+seconds
-    repeat self:Check(); if predicate() then return true end; self:Wait(0.05) until os.clock()>=deadline
-    error('AP_TIMEOUT:'..label,0)
+    -- The seconds parameter is retained for compatibility with older callers,
+    -- but AutoPrestige progression never expires a wait solely due to elapsed
+    -- time. Keep waiting until the real game state changes or the user cancels.
+    local lastStatusAt=os.clock()+30
+    while true do
+        self:Check()
+        if predicate() then return true end
+        if os.clock()>=lastStatusAt then
+            lastStatusAt=os.clock()+30
+            self:Log('INFO',tostring(label or 'Progress condition')..' still pending; no timeout, waiting for game state')
+        end
+        self:Wait(0.05)
+    end
 end
 function Context:Invoke(remote,...)
     self:Check(); if not remote then error('AP_REMOTE_MISSING',0) end
@@ -781,7 +817,7 @@ function Context:Consume(name)
     if not latest or (limit>0 and latest>=limit) then error('AP_PITY_CHANGED_BEFORE_ACTIVATION',0) end
     self.pending={name=name,confirmed=confirmed}
     self:Check(); tool:Activate() -- exactly once; never activate in a detection loop.
-    local ok,reason=Dialogue:Drive(self,confirmed,name,22)
+    local ok,reason=Dialogue:Drive(self,confirmed,name)
     if not ok then error('AP_CONSUME:'..tostring(reason),0) end
     self.pending=nil
     log('INFO',name..' confirmed by PlayerStats.Stand')
@@ -955,15 +991,26 @@ end
 function Runtime:Watch()
     local env=getgenv and getgenv() or _G
     local runtime=env.__WhiteHubRuntimeId
-    local waitingSince=nil
+    local nextStartAttemptAt=0
+    local nextStartStatusAt=os.clock()+30
+    local lastStartReason=nil
     while env.__WhiteHubRuntimeId==runtime do
         local enabled=env.AutoPrestigeEnabled==true and modules.Config:Get('AutoPrestige')==true
-        if enabled and not (current and (current.running or current.transferPending)) then
+        if enabled and not (current and (current.running or current.transferPending))
+            and os.clock()>=nextStartAttemptAt then
             local ok,reason=self:Start()
             if not ok then
-                waitingSince=waitingSince or os.clock()
-                if os.clock()-waitingSince>20 then self:Stop(reason); waitingSince=nil end
-            else waitingSince=nil end
+                lastStartReason=tostring(reason)
+                nextStartAttemptAt=os.clock()+1
+                if os.clock()>=nextStartStatusAt then
+                    nextStartStatusAt=os.clock()+30
+                    log('INFO','AutoPrestige startup still waiting: '..lastStartReason..'; retrying without a timeout')
+                end
+            else
+                lastStartReason=nil
+                nextStartAttemptAt=0
+                nextStartStatusAt=os.clock()+30
+            end
         elseif not enabled and current and current.running
             and modules.Config:Get('AutoPrestige')~=true then
             self:Stop('Stopped by user')
@@ -991,7 +1038,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261124-R5-SERVER-HOP-RESUME; YBA runtime validation pending')
+    log('INFO','Build AP-COMPAT-20261124-R6-AFK-NO-TIMEOUT; persistent restock + server-hop resume')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
