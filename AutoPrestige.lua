@@ -167,8 +167,7 @@ local function guiTextIsVisible(object, root)
 end
 
 local function hasQuest(panel, questName)
-    if not panel then return false end
-    if panel:FindFirstChild(questName) then return true end
+    if panel and panel:FindFirstChild(questName) then return true end
 
     -- Some YBA builds render the visible quest title outside PlayerGui.Quests
     -- while the Quests container contains only a generic, empty "Patch" row.
