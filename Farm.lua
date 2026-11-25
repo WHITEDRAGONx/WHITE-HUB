@@ -18,6 +18,7 @@ local _serverHop = nil
 local _webhook   = nil
 local _halloween = nil
 local _ui = nil
+local _modules = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
@@ -158,6 +159,7 @@ local function eventModeReady()
 end
 
 function Farm:Init(Modules)
+    _modules = Modules
     _runtimeLog = Modules.RuntimeLog
     _config    = Modules.Config
     _inventory = Modules.Inventory
