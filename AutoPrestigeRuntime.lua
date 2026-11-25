@@ -476,6 +476,132 @@ local function stat(name)
     local p=player(); local stats=p and p:FindFirstChild('PlayerStats'); local value=stats and stats:FindFirstChild(name)
     return value and value.Value
 end
+
+local HttpService=game:GetService('HttpService')
+local TeleportService=game:GetService('TeleportService')
+local AP_TRANSFER_FILE='WHITE_AUTOPRESTIGE_TRANSFER.json'
+local AP_TRANSFER_MARKER='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
+local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/fix/autoprestige-giorno-objective/'
+
+local function transferQueueFunction()
+    local fn=queue_on_teleport or queueonteleport
+    if type(fn)~='function' and type(syn)=='table' then fn=syn.queue_on_teleport end
+    return fn
+end
+
+local function validTransferRecord(record)
+    if type(record)~='table' or record.schema~='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
+        or type(record.id)~='string' or #record.id~=36
+        or type(record.created)~='number' or record.created%1~=0
+        or type(record.expires)~='number' or record.expires%1~=0
+        or record.expires<=os.time() or record.expires-record.created>900
+        or type(record.place)~='number' or record.place~=game.PlaceId
+        or type(record.origin)~='string' or #record.origin<1 or #record.origin>100
+        or type(record.destination)~='string' or #record.destination<1 or #record.destination>100
+        or record.origin==record.destination
+        or (record.kind~='restock' and record.kind~='manual')
+        or type(record.item)~='string' or #record.item<1 or #record.item>100
+        or type(record.count)~='number' or record.count%1~=0 or record.count<0 or record.count>50
+        or type(record.required)~='number' or record.required%1~=0
+        or record.required<0 or record.required>50 then
+        return false
+    end
+    if record.kind=='restock' and (record.required<1 or record.count>=record.required) then return false end
+    if record.kind=='manual' and record.required~=0 then return false end
+    return true
+end
+
+local function invalidateTransfer(id)
+    if type(readfile)=='function' and type(writefile)=='function' then
+        local ok,raw=pcall(readfile,AP_TRANSFER_FILE)
+        if ok and type(raw)=='string' then
+            local decoded,record=pcall(HttpService.JSONDecode,HttpService,raw)
+            if id==nil or (decoded and type(record)=='table' and record.id==id) then
+                pcall(writefile,AP_TRANSFER_FILE,'{}')
+            end
+        end
+    end
+    local ok,value=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if ok and (id==nil or value==id) then
+        pcall(TeleportService.SetTeleportSetting,TeleportService,AP_TRANSFER_MARKER,'')
+    end
+end
+
+local function readTransfer()
+    if type(readfile)~='function' then return nil end
+    local ok,raw=pcall(readfile,AP_TRANSFER_FILE)
+    if not ok or type(raw)~='string' or #raw>5000 then return nil end
+    local decoded,record=pcall(HttpService.JSONDecode,HttpService,raw)
+    return decoded and validTransferRecord(record) and record or nil
+end
+
+local function buildQueuedTransferLoader(record)
+    local q=string.format
+    local lines={
+        'local FILE='..q('%q',AP_TRANSFER_FILE),
+        'local MARKER='..q('%q',AP_TRANSFER_MARKER),
+        'local EXPECTED_ID='..q('%q',record.id),
+        'local BASE='..q('%q',AP_TRANSFER_BASE),
+        'local ok,raw=pcall(readfile,FILE); if not ok or type(raw)~="string" then return end',
+        'local decoded,r=pcall(function() return game:GetService("HttpService"):JSONDecode(raw) end)',
+        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or type(r.expires)~="number" or r.expires<=os.time() then return end',
+        'local service=game:GetService("TeleportService")',
+        'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
+        'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
+        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R5-SERVER-HOP-RESUME",1,true) then return end',
+        'local farmOk,farm=pcall(function() return game:HttpGet(BASE.."Farm.lua") end); if not farmOk or not farm:find("WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER",1,true) then return end',
+        'local oldBase=\'local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/"\'',
+        'local newBase=\'local BASE_URL = "\'..BASE..\'"\'',
+        'local at=main:find(oldBase,1,true); if not at then return end',
+        'main=main:sub(1,at-1)..newBase..main:sub(at+#oldBase)',
+        'local compiler=loadstring or load; if type(compiler)~="function" then return end',
+        'local chunk,err=compiler(main,"@WHITE_HUB_AUTOPRESTIGE_AUTOHOP"); if not chunk then warn(err); return end',
+        'chunk()'
+    }
+    return table.concat(lines,'\n')
+end
+
+local function issueTransfer(record)
+    if type(writefile)~='function' or type(readfile)~='function'
+        or type(transferQueueFunction())~='function'
+        or type(TeleportService.SetTeleportSetting)~='function'
+        or type(TeleportService.GetTeleportSetting)~='function'
+        or not validTransferRecord(record) then
+        return false,'AutoPrestige transfer persistence/queue API unavailable'
+    end
+    local encodedOk,raw=pcall(HttpService.JSONEncode,HttpService,record)
+    if not encodedOk or type(raw)~='string' or #raw>5000 then
+        return false,'AutoPrestige transfer record could not be encoded'
+    end
+    local writeOk=pcall(writefile,AP_TRANSFER_FILE,raw)
+    local readOk,readBack=pcall(readfile,AP_TRANSFER_FILE)
+    if not writeOk or not readOk or readBack~=raw then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige transfer record could not be persisted'
+    end
+    local markerOk=pcall(TeleportService.SetTeleportSetting,TeleportService,AP_TRANSFER_MARKER,record.id)
+    local markerReadOk,marker=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if not markerOk or not markerReadOk or marker~=record.id then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige one-use teleport marker unavailable'
+    end
+    local queued,result=pcall(transferQueueFunction(),buildQueuedTransferLoader(record))
+    if not queued or result==false then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige destination loader could not be queued'
+    end
+    return true
+end
+
+local function claimArrivalTransfer()
+    local record=readTransfer()
+    if not record or record.destination~=tostring(game.JobId) then return nil end
+    local markerOk,marker=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if not markerOk or marker~=record.id then return nil end
+    invalidateTransfer(record.id)
+    return record
+end
+
 local Context={}; Context.__index=Context
 function Context:Active()
     local env=getgenv and getgenv() or _G
@@ -678,7 +804,10 @@ function Context:Collect(name,amount)
     for _=1,amount do
         self:Check(); if inventory:Count(name)>=amount then return true end
         local ok,reason=modules.Farm:Restock(name,function() return self:Active() end,'prestige',amount)
-        if not ok then error('AP_RESTOCK:'..tostring(reason),0) end
+        if not ok then
+            if reason=='AP_TRANSFER_REQUESTED' then error(CANCEL,0) end
+            error('AP_RESTOCK:'..tostring(reason),0)
+        end
     end
     return inventory:Count(name)>=amount
 end
@@ -695,28 +824,131 @@ function Context:Sell()
     self:Until(function() return modules.Inventory:GetMoney()>beforeMoney end,3,'Merchant money confirmation')
 end
 function Context:Log(level,message) log(level,message) end
-function Context:Hop()
-    self:Check()
-    local before=game.JobId
-    local service=game:GetService('TeleportService')
-    local failed=false
-    if service.TeleportInitFailed then
-        self.transferFailureConnection=service.TeleportInitFailed:Connect(function(failedPlayer)
-            if failedPlayer==player() then
-                failed=true
-                if self.pending and self.pending.name=='server transfer' then self.pending=nil end
-                if self.transferFailureConnection then self.transferFailureConnection:Disconnect(); self.transferFailureConnection=nil end
+function Runtime:CancelTransfer(ctx,id,reason)
+    if ctx~=current or not ctx.transferPending then return false end
+    ctx.transferPending=false
+    ctx.preserveAutoPrestige=false
+    ctx.pending=nil
+    invalidateTransfer(id or ctx.transferId)
+    for _,connection in ipairs(ctx.transferConnections or {}) do
+        pcall(function() connection:Disconnect() end)
+    end
+    ctx.transferConnections={}
+    local env=getgenv and getgenv() or _G
+    if modules and modules.Config:Get('AutoPrestige')==true then env.AutoPrestigeEnabled=true end
+    log('WARN','AutoPrestige server transfer failed; saved toggle retained and current runtime will retry: '..tostring(reason or 'teleport failed'))
+    return true
+end
+
+function Runtime:HopAndResume(kind,item,count,required,ownerActive)
+    local ctx=current
+    if not ctx or not ctx:Active() then return false,'AutoPrestige is not active' end
+    if ctx.transferPending then return false,'AutoPrestige transfer already pending' end
+    if modules.Config:Get('StayInPrivateServer')==true then
+        return false,'Stay in Private Server is enabled'
+    end
+    if type(ownerActive)=='function' and not ownerActive() then
+        return false,'Restock owner is no longer active'
+    end
+    if kind~='restock' and kind~='manual' then return false,'Invalid AutoPrestige transfer type' end
+
+    local record={
+        schema='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1',
+        id=HttpService:GenerateGUID(false),
+        created=os.time(),
+        expires=os.time()+600,
+        place=game.PlaceId,
+        origin=tostring(game.JobId),
+        destination='pending',
+        kind=kind,
+        item=tostring(item or (kind=='manual' and 'manual' or 'unknown')),
+        count=math.floor(tonumber(count) or 0),
+        required=math.floor(tonumber(required) or 0),
+    }
+    local failureReason=nil
+    local transferConnections={}
+    local localPlayer=player()
+    local function disconnectLocal()
+        for _,connection in ipairs(transferConnections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        table.clear(transferConnections)
+    end
+    local function onFailed(message)
+        failureReason=tostring(message or 'Teleport failed')
+        if ctx.transferPending then
+            self:CancelTransfer(ctx,record.id,failureReason)
+        end
+    end
+    pcall(function()
+        local connection=localPlayer.OnTeleport:Connect(function(state)
+            if state==Enum.TeleportState.Failed then
+                onFailed('Player.OnTeleport reported Failed')
+            elseif state==Enum.TeleportState.InProgress then
+                log('INFO','AutoPrestige transfer entered Teleport InProgress; destination loader is queued')
             end
         end)
+        transferConnections[#transferConnections+1]=connection
+    end)
+    pcall(function()
+        local connection=TeleportService.TeleportInitFailed:Connect(function(failedPlayer,result,description)
+            if failedPlayer==localPlayer then
+                onFailed(tostring(result)..': '..tostring(description))
+            end
+        end)
+        transferConnections[#transferConnections+1]=connection
+    end)
+
+    local persisted=false
+    local requested=modules.ServerHop:Hop(
+        function()
+            return ctx:Active() and not ctx.transferPending
+                and (type(ownerActive)~='function' or ownerActive())
+        end,
+        function(destination)
+            if failureReason or not ctx:Active()
+                or (type(ownerActive)=='function' and not ownerActive()) then
+                return false
+            end
+            record.destination=tostring(destination)
+            local saved=modules.Config:SetMany({
+                AutoPrestige=true,FarmEnabled=false,EventItemsFarmEnabled=false,
+                QuestFarmEnabled=false,NPCFarmEnabled=false
+            })
+            if not saved then
+                failureReason='AutoPrestige config could not be saved before teleport'
+                return false
+            end
+            local ok,reason=issueTransfer(record)
+            if not ok then failureReason=reason; return false end
+            persisted=true
+            return true
+        end
+    )
+
+    if not requested or not persisted or failureReason then
+        if persisted then invalidateTransfer(record.id) end
+        disconnectLocal()
+        return false,failureReason or 'No eligible different public server was found'
     end
-    local requested=modules.ServerHop:Hop(function() return self:Active() and not self.pending end)
-    if requested and not failed then
-        self.pending={name='server transfer',confirmed=function() return game.JobId~=before end}
-        Runtime:Stop('transfer requested; restart beta manually after arrival')
-    else
-        if self.transferFailureConnection then self.transferFailureConnection:Disconnect(); self.transferFailureConnection=nil end
-        error('AP_TRANSFER_NOT_REQUESTED',0)
-    end
+
+    ctx.transferPending=true
+    ctx.preserveAutoPrestige=true
+    ctx.transferId=record.id
+    ctx.transferConnections=transferConnections
+    ctx.pending={
+        name='server transfer for '..tostring(record.item),
+        confirmed=function() return tostring(game.JobId)~=record.origin end
+    }
+    self:Stop('AutoPrestige transfer requested; resuming on destination server',true)
+    return true,'AutoPrestige transfer requested'
+end
+
+function Context:Hop()
+    self:Check()
+    local ok,reason=Runtime:HopAndResume('manual','manual',0,0,function() return self:Active() end)
+    if not ok then error('AP_TRANSFER_NOT_REQUESTED:'..tostring(reason),0) end
+    error(CANCEL,0)
 end
 function Runtime:Watch()
     local env=getgenv and getgenv() or _G
@@ -724,7 +956,7 @@ function Runtime:Watch()
     local waitingSince=nil
     while env.__WhiteHubRuntimeId==runtime do
         local enabled=env.AutoPrestigeEnabled==true and modules.Config:Get('AutoPrestige')==true
-        if enabled and not (current and current.running) then
+        if enabled and not (current and (current.running or current.transferPending)) then
             local ok,reason=self:Start()
             if not ok then
                 waitingSince=waitingSince or os.clock()
@@ -741,7 +973,20 @@ function Runtime:Init(all)
     local env=getgenv and getgenv() or _G
     local scope=env.__WhiteHubAPScope
     previous=type(scope)=="table" and scope.job==game.JobId and scope.place==game.PlaceId and scope or nil
-    log('INFO','Build AP-COMPAT-20261124-R4-PERSISTENT-RESTOCK; YBA runtime validation pending')
+    local arrival=claimArrivalTransfer()
+    if arrival then
+        local saved=modules.Config:SetMany({
+            AutoPrestige=true,FarmEnabled=false,EventItemsFarmEnabled=false,
+            QuestFarmEnabled=false,NPCFarmEnabled=false
+        })
+        if saved then
+            log('INFO',('[SessionResume] Claimed one-use AutoPrestige transfer from %s; restock item=%s, inventory=%d/%d. Saved Auto Prestige ON.')
+                :format(tostring(arrival.origin),tostring(arrival.item),tonumber(arrival.count) or 0,tonumber(arrival.required) or 0))
+        else
+            log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
+        end
+    end
+    log('INFO','Build AP-COMPAT-20261124-R5-SERVER-HOP-RESUME; YBA runtime validation pending')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
@@ -767,21 +1012,42 @@ function Runtime:Start()
     end)
     return true
 end
-function Runtime:Stop(reason)
+function Runtime:Stop(reason,preserveTransfer)
     local ctx=current
-    local wasActive=ctx and (ctx.running or ctx.tasks>0 or ctx.calls>0 or ctx.pending~=nil)
+    local keepEnabled=preserveTransfer==true and ctx and ctx.transferPending==true
+    local wasActive=ctx and (ctx.running or ctx.tasks>0 or ctx.calls>0 or ctx.pending~=nil or ctx.transferPending==true)
     if wasActive then ctx.running=false; ctx.reason=reason or 'Stopped by user' end
     local env=getgenv and getgenv() or _G
-    if not ctx or ctx.runtime==env.__WhiteHubRuntimeId then
-        env.AutoPrestigeEnabled=false
-        if modules then modules.Config:Set('AutoPrestige',false) end
+
+    if not keepEnabled then
+        if ctx and ctx.transferPending then
+            self:CancelTransfer(ctx,ctx.transferId,'AutoPrestige stopped before transfer completed')
+        else
+            invalidateTransfer()
+        end
+        if not ctx or ctx.runtime==env.__WhiteHubRuntimeId then
+            env.AutoPrestigeEnabled=false
+            if modules then modules.Config:Set('AutoPrestige',false) end
+        end
+    else
+        log('INFO','[SessionResume] Preserving Auto Prestige ON and one-use transfer intent for the destination server.')
     end
+
     if wasActive then
         for _,c in ipairs(ctx.connections) do pcall(function() c:Disconnect() end) end; ctx.connections={}
         for _,o in ipairs(ctx.objects) do pcall(function() o:Destroy() end) end; ctx.objects={}
+        if not keepEnabled then
+            for _,connection in ipairs(ctx.transferConnections or {}) do
+                pcall(function() connection:Disconnect() end)
+            end
+            ctx.transferConnections={}
+        end
         Dialogue:Restore()
-        pcall(function() modules.Movement:SetNoclip(false); modules.Movement:ClearFocus(); modules.Movement:FixCamera()
-            if ctx.runtime==env.__WhiteHubRuntimeId then
+        pcall(function()
+            modules.Movement:SetNoclip(false)
+            modules.Movement:ClearFocus()
+            modules.Movement:FixCamera()
+            if not keepEnabled and ctx.runtime==env.__WhiteHubRuntimeId then
                 local char=player().Character; local hum=char and char:FindFirstChildOfClass('Humanoid')
                 if hum and hum.Health>0 then modules.Movement:Teleport(CFrame.new(978,-42,-49)) end
             end
@@ -820,5 +1086,9 @@ function Runtime:BuildStatus(parent,UI)
         end
     end)
 end
-function Runtime:Destroy() self:Stop('runtime replaced'); Dialogue:Restore() end
+function Runtime:Destroy()
+    local preserve=current and current.transferPending==true and current.preserveAutoPrestige==true
+    self:Stop('runtime replaced',preserve)
+    Dialogue:Restore()
+end
 return Runtime
