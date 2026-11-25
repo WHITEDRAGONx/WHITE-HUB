@@ -1888,7 +1888,10 @@ function CombatFarm:DefeatTarget(targetName,onStep)
         return false,"Auto Prestige is not active"
     end
     if isRunning or activeMode~=nil or outstandingTasks>0 then
-        return false,"CombatFarm is busy"
+        local reason=("CombatFarm busy (mode=%s running=%s tasks=%s)")
+            :format(tostring(activeMode),tostring(isRunning),tostring(outstandingTasks))
+        moduleLog("WARN","[CombatFarm][AutoPrestige] "..reason)
+        return false,reason
     end
 
     runId=runId+1
@@ -1897,14 +1900,36 @@ function CombatFarm:DefeatTarget(targetName,onStep)
     activeMode="AutoPrestige"
     isRunning=true
     pauseItemFarmForCombat()
-    moduleLog("INFO","[CombatFarm][AutoPrestige] Shared XenonLock targeting "..targetName)
+    moduleLog("INFO","[CombatFarm][AutoPrestige] Shared XenonLock target request: "..targetName)
 
-    local spawnDeadline=tick()+15
-    while isTokenActive(token) and not getClosestNPC(targetName) and tick()<spawnDeadline do
-        task.wait(0.10)
+    local targetAvailable=nil
+    local spawnDeadline=tick()+12
+    while isTokenActive(token) and tick()<spawnDeadline do
+        targetAvailable=getClosestNPC(targetName)
+        if targetAvailable then break end
+        task.wait(0.25)
     end
 
-    local ok,result=pcall(killTarget,targetName,token,onStep)
+    if not targetAvailable then
+        local living=workspace:FindFirstChild("Living")
+        local candidates={}
+        for _,model in ipairs(living and living:GetChildren() or {}) do
+            if tostring(model.Name):lower():find("security",1,true) then
+                candidates[#candidates+1]=tostring(model.Name)
+                if #candidates>=8 then break end
+            end
+        end
+        moduleLog("WARN","[CombatFarm][AutoPrestige] No alive exact target '"..targetName
+            .."' in workspace.Living after 12s; security-like models="
+            ..(#candidates>0 and table.concat(candidates,", ") or "none"))
+    else
+        moduleLog("INFO","[CombatFarm][AutoPrestige] Target found: "..tostring(targetAvailable.Name))
+    end
+
+    local ok,result=false,false
+    if targetAvailable and isTokenActive(token) then
+        ok,result=pcall(killTarget,targetName,token,onStep)
+    end
     if token==runId then
         isRunning=false
         activeMode=nil
