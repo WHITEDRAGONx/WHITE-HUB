@@ -551,19 +551,23 @@ function Context:QuestEntries(panel)
         end
     end
     if #entries == 1 and entries[1].Name:lower() == 'patch' then
-        -- Patch is a generic live quest-row name on some fresh accounts.
-        -- Keep it when its descendants contain the actual displayed objective.
+        -- On some YBA builds the objective title is rendered by a separate
+        -- ScreenGui, leaving only an empty generic Patch row under Quests.
+        -- This worker now scans PlayerGui for visible objective text itself;
+        -- the placeholder alone must never abort an otherwise active session.
         local hasReadableText=false
         for _,object in ipairs(entries[1]:GetDescendants()) do
-            if object:IsA('TextLabel') or object:IsA('TextButton') then
-                if tostring(object.Text or ''):match('%S') then
-                    hasReadableText=true
-                    break
-                end
+            if (object:IsA('TextLabel') or object:IsA('TextButton') or object:IsA('TextBox'))
+                and tostring(object.Text or ''):match('%S') then
+                hasReadableText=true
+                break
             end
         end
         if not hasReadableText then
-            error('Quest status unknown. Check the in-game quest tracker.', 0)
+            local progress=stat('QuestProgress')
+            local maximum=stat('QuestMaxProgress')
+            self:Log('WARN',('Generic Patch quest row has no local text; replicated objective counter is %s/%s. Scanning visible PlayerGui text.')
+                :format(tostring(progress or 0),tostring(maximum or 0)))
         end
     end
     return entries
@@ -594,6 +598,14 @@ function Context:StorySource()
 
     if #questNames==1 and questNames[1]:lower()=='sample' then
         self:Log('INFO','Quest panel contains only the '..questNames[1]..' placeholder; starting Storyline #1 for a fresh account')
+        return 'Storyline #1'
+    end
+
+    local progress=stat('QuestProgress')
+    local maximum=stat('QuestMaxProgress')
+    if #questNames==1 and questNames[1]:lower()=='patch' and (tonumber(maximum) or 0)>0 then
+        self:Log('WARN',('Generic Patch row has active objective counter %s/%s; using the first Giorno storyline source.')
+            :format(tostring(progress or 0),tostring(maximum or 0)))
         return 'Storyline #1'
     end
 
@@ -733,7 +745,7 @@ function Runtime:Init(all)
     local env=getgenv and getgenv() or _G
     local scope=env.__WhiteHubAPScope
     previous=type(scope)=="table" and scope.job==game.JobId and scope.place==game.PlaceId and scope or nil
-    log('INFO','Build AP-COMPAT-20261012-R1; dialogue/lifecycle beta, YBA validation pending')
+    log('INFO','Build AP-COMPAT-20261124-R2-GUI-FALLBACK; YBA runtime validation pending')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
