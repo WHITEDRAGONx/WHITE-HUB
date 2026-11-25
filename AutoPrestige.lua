@@ -156,24 +156,46 @@ local function normalizeQuestText(value)
     return tostring(value or ""):lower():gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 end
 
+local function guiTextIsVisible(object, root)
+    local current=object
+    while current and current~=root do
+        if current:IsA("GuiObject") and not current.Visible then return false end
+        if current:IsA("ScreenGui") and not current.Enabled then return false end
+        current=current.Parent
+    end
+    return true
+end
+
 local function hasQuest(panel, questName)
     if not panel then return false end
     if panel:FindFirstChild(questName) then return true end
 
-    -- Quest UI may use a generic "Patch" row and append live progress such as
-    -- "(0/5)" to the title. Match the normalized title as a substring.
+    -- Some YBA builds render the visible quest title outside PlayerGui.Quests
+    -- while the Quests container contains only a generic, empty "Patch" row.
+    -- Search the quest panel first, then all visible player UI text.
     local wanted=normalizeQuestText(questName)
-    local visibleText={}
-    for _,object in ipairs(panel:GetDescendants()) do
-        if object:IsA("TextLabel") or object:IsA("TextButton") then
-            local value=normalizeQuestText(object.Text)
-            if value~="" then
-                if value==wanted or value:find(wanted,1,true) then return true end
-                visibleText[#visibleText+1]=value
+    local function searchText(root)
+        if not root then return false end
+        local objects=root:GetDescendants()
+        if root:IsA("TextLabel") or root:IsA("TextButton") then
+            table.insert(objects,1,root)
+        end
+        for _,object in ipairs(objects) do
+            if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+                and guiTextIsVisible(object,root) then
+                local value=normalizeQuestText(object.Text)
+                if value~="" and (value==wanted or value:find(wanted,1,true)) then
+                    return true
+                end
             end
         end
+        return false
     end
-    return table.concat(visibleText," "):find(wanted,1,true)~=nil
+
+    if searchText(panel) then return true end
+    local playerGui=LocalPlayer:FindFirstChild("PlayerGui")
+    if playerGui and playerGui~=panel and searchText(playerGui) then return true end
+    return false
 end
 
 local function questProgressState()
