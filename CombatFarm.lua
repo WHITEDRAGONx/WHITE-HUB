@@ -580,7 +580,7 @@ local function killTarget(targetName, token, onStep)
     _movement:SetNoclip(true)
 
     local safeYOffset = (targetName == "The Idol") and 35 or -35
-    local startTime = tick()
+    local lastStatusLogAt=tick()+30
     local killed = false
     local lastKnownHp, hpSource = getNPCHealthState(target)
     local lastDamageAt = tick()
@@ -607,7 +607,15 @@ local function killTarget(targetName, token, onStep)
         tostring(targetName), tostring(lastKnownHp), tostring(hpSource), tostring(getCurrentStandName())
     ))
 
-    while isTokenActive(token) and tick() - startTime < 60 do
+    -- AutoPrestige combat has no elapsed-time kill deadline. Keep XenonLock
+    -- attacking until death/despawn is confirmed or the user cancels the mode.
+    while isTokenActive(token) do
+        if tick()>=lastStatusLogAt then
+            lastStatusLogAt=tick()+30
+            local currentHp,currentSource=getNPCHealthState(target)
+            moduleLog("INFO",("[CombatFarm][AutoPrestige] Still fighting %s | hp=%s source=%s; no combat timeout.")
+                :format(tostring(targetName),tostring(currentHp),tostring(currentSource)))
+        end
         if not target or not target.Parent then
             killed = true
             break
@@ -1903,26 +1911,28 @@ function CombatFarm:DefeatTarget(targetName,onStep)
     moduleLog("INFO","[CombatFarm][AutoPrestige] Shared XenonLock target request: "..targetName)
 
     local targetAvailable=nil
-    local spawnDeadline=tick()+12
-    while isTokenActive(token) and tick()<spawnDeadline do
+    local nextTargetStatusAt=tick()+30
+    while isTokenActive(token) and not targetAvailable do
         targetAvailable=getClosestNPC(targetName)
-        if targetAvailable then break end
-        task.wait(0.25)
+        if not targetAvailable and tick()>=nextTargetStatusAt then
+            nextTargetStatusAt=tick()+30
+            local living=workspace:FindFirstChild("Living")
+            local candidates={}
+            for _,model in ipairs(living and living:GetChildren() or {}) do
+                if tostring(model.Name):lower():find("security",1,true) then
+                    candidates[#candidates+1]=tostring(model.Name)
+                    if #candidates>=8 then break end
+                end
+            end
+            moduleLog("INFO","[CombatFarm][AutoPrestige] Still waiting for '"..targetName
+                .."' spawn; security-like models="
+                ..(#candidates>0 and table.concat(candidates,", ") or "none")
+                .."; no spawn timeout.")
+        end
+        if not targetAvailable then task.wait(0.25) end
     end
 
-    if not targetAvailable then
-        local living=workspace:FindFirstChild("Living")
-        local candidates={}
-        for _,model in ipairs(living and living:GetChildren() or {}) do
-            if tostring(model.Name):lower():find("security",1,true) then
-                candidates[#candidates+1]=tostring(model.Name)
-                if #candidates>=8 then break end
-            end
-        end
-        moduleLog("WARN","[CombatFarm][AutoPrestige] No alive exact target '"..targetName
-            .."' in workspace.Living after 12s; security-like models="
-            ..(#candidates>0 and table.concat(candidates,", ") or "none"))
-    else
+    if targetAvailable then
         moduleLog("INFO","[CombatFarm][AutoPrestige] Target found: "..tostring(targetAvailable.Name))
     end
 
