@@ -514,7 +514,7 @@ local HttpService=game:GetService('HttpService')
 local TeleportService=game:GetService('TeleportService')
 local AP_TRANSFER_FILE='WHITE_AUTOPRESTIGE_TRANSFER.json'
 local AP_TRANSFER_MARKER='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
-local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/fix/autoprestige-giorno-objective/'
+local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/83dd3f5ebdf5d79417166c30cfe1450a69079be8/'
 
 local function transferQueueFunction()
     local fn=queue_on_teleport or queueonteleport
