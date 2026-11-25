@@ -7,7 +7,8 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261124-R6; unlimited Stand rolls; no progress timeout")
+    moduleLog("INFO","Build AP-AFK-20261124-R7; generic Patch progression + nonblocking skill allocation")
+    local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
     ctx:Wait(0.25)
@@ -162,21 +163,59 @@ local function checkPrestige(level, prestige)
     return false
 end
 
+local skillAllocationPending=false
 local function allocateSkills()
-    if ctx.skillCharacter==Character and ctx.skillStand==LocalPlayer.PlayerStats.Stand.Value then return end
-    ctx.skillCharacter=Character; ctx.skillStand=LocalPlayer.PlayerStats.Stand.Value
-    do
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power V",  ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power IV", ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power III",["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power II", ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power I",  ["SkillTreeType"]="Stand"})
-        if LocalPlayer.PlayerStats.Spec.Value == "Hamon (William Zeppeli)" then
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Hamon Punch III",       ["SkillTreeType"]="Spec"})
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Lung Capacity III",     ["SkillTreeType"]="Spec"})
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Breathing Technique III",["SkillTreeType"]="Spec"})
-        end
+    local currentStand=LocalPlayer.PlayerStats.Stand.Value
+    if ctx.skillCharacter==Character and ctx.skillStand==currentStand then return end
+    if skillAllocationPending then return end
+    ctx.skillCharacter=Character
+    ctx.skillStand=currentStand
+    skillAllocationPending=true
+
+    -- Skill allocation is optional support, never a gate in the story worker.
+    -- A yielding LearnSkill RemoteFunction must not freeze AutoPrestige progress.
+    local skills={
+        {Skill="Destructive Power V",SkillTreeType="Stand"},
+        {Skill="Destructive Power IV",SkillTreeType="Stand"},
+        {Skill="Destructive Power III",SkillTreeType="Stand"},
+        {Skill="Destructive Power II",SkillTreeType="Stand"},
+        {Skill="Destructive Power I",SkillTreeType="Stand"},
+    }
+    if LocalPlayer.PlayerStats.Spec.Value=="Hamon (William Zeppeli)" then
+        skills[#skills+1]={Skill="Hamon Punch III",SkillTreeType="Spec"}
+        skills[#skills+1]={Skill="Lung Capacity III",SkillTreeType="Spec"}
+        skills[#skills+1]={Skill="Breathing Technique III",SkillTreeType="Spec"}
     end
+
+    nativeTask.spawn(function()
+        local completed,failed=0,0
+        for _,skill in ipairs(skills) do
+            if not ctx:Active() then break end
+            local character=LocalPlayer.Character
+            local remote=character and character:FindFirstChild("RemoteFunction")
+            while ctx:Active() and (not remote or remote.Parent~=character) do
+                nativeTask.wait(0.25)
+                character=LocalPlayer.Character
+                remote=character and character:FindFirstChild("RemoteFunction")
+            end
+            if not ctx:Active() then break end
+            local ok,reason=pcall(function()
+                return remote:InvokeServer("LearnSkill",skill)
+            end)
+            if ok then
+                completed=completed+1
+            else
+                failed=failed+1
+                moduleLog("WARN","[AutoPrestige] Optional skill allocation failed for "
+                    ..tostring(skill.Skill)..": "..tostring(reason))
+            end
+        end
+        skillAllocationPending=false
+        if ctx:Active() then
+            moduleLog("INFO",("[AutoPrestige] Optional skill allocation finished: %d confirmed call(s), %d failed call(s)")
+                :format(completed,failed))
+        end
+    end)
 end
 
 local function normalizeQuestText(value)
@@ -247,6 +286,29 @@ local function autoStoryStep()
     ctx:QuestEntries(questPanel)
     allocateSkills()
 
+    local observedProgress,observedMaximum=questProgressState()
+    local observedState=table.concat({
+        tostring(LocalPlayer.PlayerStats.Level.Value),
+        tostring(LocalPlayer.PlayerStats.Prestige.Value),
+        tostring(LocalPlayer.PlayerStats.Stand.Value),
+        tostring(LocalPlayer.PlayerStats.Spec.Value),
+        tostring(observedProgress).."/"..tostring(observedMaximum)
+    },"|")
+    if observedState~=ctx.lastAutoStoryState then
+        ctx.lastAutoStoryState=observedState
+        moduleLog("INFO","[AutoPrestige] Progression snapshot: Level="
+            ..tostring(LocalPlayer.PlayerStats.Level.Value)
+            .." Prestige="..tostring(LocalPlayer.PlayerStats.Prestige.Value)
+            .." Stand="..tostring(LocalPlayer.PlayerStats.Stand.Value)
+            .." Spec="..tostring(LocalPlayer.PlayerStats.Spec.Value)
+            .." Quest="..tostring(observedProgress).."/"..tostring(observedMaximum))
+    end
+    local observedStand=LocalPlayer.PlayerStats.Stand.Value
+    if getgenv().standList[observedStand] and ctx.lastAcceptedStandLog~=observedStand then
+        ctx.lastAcceptedStandLog=observedStand
+        moduleLog("INFO","[AutoPrestige] Valid Stand confirmed: "..tostring(observedStand).."; continuing Storyline progression")
+    end
+
     if LocalPlayer.PlayerStats.Level.Value >= 25 and LocalPlayer.PlayerStats.Prestige.Value >= 1
     and LocalPlayer.Backpack:FindFirstChild("Requiem Arrow")
     and (LocalPlayer.PlayerStats.Stand.Value == "King Crimson" or LocalPlayer.PlayerStats.Stand.Value == "Star Platinum") then
@@ -304,9 +366,24 @@ local function autoStoryStep()
     -- Fresh YBA accounts can render only a generic "Patch" row. Giorno's
     -- first Security Guard mission is the known 5-step objective; use the
     -- replicated quest counter instead of scanning the entire PlayerGui.
-    local genericGiornoGuardQuest=hasOnlyGenericPatchRow(questPanel)
+    local genericPatchActive=hasOnlyGenericPatchRow(questPanel) and questMaxProgress>0
+    local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
-    local knownStoryQuest=genericGiornoGuardQuest or hasKnownStoryQuest(questPanel)
+    local namedStoryQuest=hasKnownStoryQuest(questPanel)
+    local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
+
+    -- Generic Patch rows with a non-five-step counter are not the Security
+    -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
+    -- Storyline #1 fallback for this active generic row and confirms dialogue
+    -- progress using the replicated quest fingerprint.
+    if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
+        local source=ctx:StorySource()
+        moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
+            ..tostring(questMaxProgress).." is not a mapped combat quest; requesting "..tostring(source))
+        storyDialogue()
+        ctx:Wait(0.2)
+        return true
+    end
 
     if questComplete or (not questIncomplete and not knownStoryQuest) then
         storyDialogue()
