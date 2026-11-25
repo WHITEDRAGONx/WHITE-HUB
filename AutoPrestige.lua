@@ -112,7 +112,7 @@ local function storyDialogue()
     return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
 end
 
--- Auto Prestige's own controller; CombatFarm/XenonLock is not modified.
+-- Auto Prestige delegates NPC combat to the shared CombatFarm/XenonLock core.
 local function killNPC(npcName,playerDistance,dontDestroyOnKill,extraParameters)
     ctx:Check()
     local combat=modules.CombatFarm
@@ -433,11 +433,20 @@ local function autoStoryStep()
     and LocalPlayer.PlayerStats.Level.Value ~= 50 then
         moduleLog("INFO", "[AutoPrestige] Quest: Vampires")
         getgenv().HamonCharge = 10
+        local vampireDialogueAttempted=false
         local function vampire()
-            LocalPlayer.Character.PrimaryPart.CFrame = workspace.Living:FindFirstChild("Vampire").HumanoidRootPart.CFrame - Vector3.new(0, 15, 0)
-            if not hasQuest(questPanel, "Take down 3 vampires") then
-                if (tick() - lastTick) >= 5 then lastTick = tick() end
-                endDialogue("William Zeppeli", "Dialogue4", "Option1")
+            local living=workspace:FindFirstChild("Living")
+            local vampireNPC=living and living:FindFirstChild("Vampire")
+            local vampireRoot=vampireNPC and vampireNPC:FindFirstChild("HumanoidRootPart")
+            local character=LocalPlayer.Character
+            if vampireRoot and character and character.PrimaryPart then
+                character.PrimaryPart.CFrame=vampireRoot.CFrame-Vector3.new(0,15,0)
+            end
+            if not hasQuest(questPanel,"Take down 3 vampires") and not vampireDialogueAttempted then
+                vampireDialogueAttempted=true
+                if (tick()-lastTick)>=5 then lastTick=tick() end
+                endDialogue("William Zeppeli","Dialogue4","Option1")
+                return true
             end
         end
         killNPC("Vampire", 15, false, vampire)
