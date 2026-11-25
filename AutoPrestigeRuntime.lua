@@ -1131,7 +1131,7 @@ function Runtime:IsBusy()
     return busy(current)
 end
 function Runtime:GetStatus()
-    return {running=current and current.running or false,busy=self:IsBusy(),
+    return {running=current and (current.running or current.transferPending) or false,busy=self:IsBusy(),
         reason=current and current.reason or 'idle',pending=current and current.pending and current.pending.name,
         tasks=current and current.tasks or 0}
 end
