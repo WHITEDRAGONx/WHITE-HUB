@@ -73,12 +73,12 @@ local function TPReturner(canContinue, onDestination)
     resetHourlyCacheIfNeeded()
 
     local url = serverListURL()
-    local waitDeadline = tick() + 5
-    while prepareBusy and tick() < waitDeadline do
+    -- Never duplicate an in-flight API request, but do not expire an AFK
+    -- AutoPrestige hop merely because the prefetched server-list request is slow.
+    while prepareBusy do
         if canContinue and not canContinue() then return false end
-        task.wait(0.03)
+        task.wait(0.05)
     end
-    if prepareBusy then return false end -- Never duplicate an in-flight API request.
     local Site
     if preparedSite and preparedURL == url and tick() - preparedAt <= 15 then
         Site = preparedSite
