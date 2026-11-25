@@ -276,7 +276,7 @@ local function autoStoryStep()
     if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
         local progress,maxProgress=questProgressState()
-        local goal=maxProgress>0 and maxProgress or (progress+5)
+        local goal=maxProgress>0 and maxProgress or 5
         local attempts=0
 
         while progress<goal and attempts<20 do
