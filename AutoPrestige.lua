@@ -7,6 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
+    moduleLog("INFO","Build AP-STAND-RESTOCK-20261124-R4; original Farm restock; reset-before-arrow")
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
     ctx:Wait(0.25)
