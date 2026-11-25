@@ -544,7 +544,7 @@ local function buildQueuedTransferLoader(record)
         'local BASE='..q('%q',AP_TRANSFER_BASE),
         'local ok,raw=pcall(readfile,FILE); if not ok or type(raw)~="string" then return end',
         'local decoded,r=pcall(function() return game:GetService("HttpService"):JSONDecode(raw) end)',
-        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or type(r.expires)~="number" or r.expires<=os.time() then return end',
+        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or r.origin==game.JobId or (r.kind~="restock" and r.kind~="manual") or type(r.expires)~="number" or r.expires<=os.time() then return end',
         'local service=game:GetService("TeleportService")',
         'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
         'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
@@ -886,6 +886,8 @@ function Runtime:HopAndResume(kind,item,count,required,ownerActive)
                 onFailed('Player.OnTeleport reported Failed')
             elseif state==Enum.TeleportState.InProgress then
                 log('INFO','AutoPrestige transfer entered Teleport InProgress; destination loader is queued')
+                disconnectLocal()
+                ctx.transferConnections={}
             end
         end)
         transferConnections[#transferConnections+1]=connection
@@ -962,7 +964,10 @@ function Runtime:Watch()
                 waitingSince=waitingSince or os.clock()
                 if os.clock()-waitingSince>20 then self:Stop(reason); waitingSince=nil end
             else waitingSince=nil end
-        elseif not enabled and current and current.running then self:Stop('Stopped by user') end
+        elseif not enabled and current and current.running
+            and modules.Config:Get('AutoPrestige')~=true then
+            self:Stop('Stopped by user')
+        end
         nativeTask.wait(0.1)
     end
 end
@@ -1012,9 +1017,10 @@ function Runtime:Start()
     end)
     return true
 end
-function Runtime:Stop(reason,preserveTransfer)
+function Runtime:Stop(reason,preserveSavedToggle)
     local ctx=current
-    local keepEnabled=preserveTransfer==true and ctx and ctx.transferPending==true
+    local keepEnabled=preserveSavedToggle==true
+    local keepTransfer=keepEnabled and ctx and ctx.transferPending==true and ctx.preserveAutoPrestige==true
     local wasActive=ctx and (ctx.running or ctx.tasks>0 or ctx.calls>0 or ctx.pending~=nil or ctx.transferPending==true)
     if wasActive then ctx.running=false; ctx.reason=reason or 'Stopped by user' end
     local env=getgenv and getgenv() or _G
@@ -1030,13 +1036,18 @@ function Runtime:Stop(reason,preserveTransfer)
             if modules then modules.Config:Set('AutoPrestige',false) end
         end
     else
-        log('INFO','[SessionResume] Preserving Auto Prestige ON and one-use transfer intent for the destination server.')
+        if keepTransfer then
+            log('INFO','[SessionResume] Preserving Auto Prestige ON and one-use transfer intent for the destination server.')
+        else
+            invalidateTransfer()
+            log('INFO','[SessionResume] Preserving saved Auto Prestige ON across runtime reload.')
+        end
     end
 
     if wasActive then
         for _,c in ipairs(ctx.connections) do pcall(function() c:Disconnect() end) end; ctx.connections={}
         for _,o in ipairs(ctx.objects) do pcall(function() o:Destroy() end) end; ctx.objects={}
-        if not keepEnabled then
+        if not keepTransfer then
             for _,connection in ipairs(ctx.transferConnections or {}) do
                 pcall(function() connection:Disconnect() end)
             end
@@ -1087,7 +1098,7 @@ function Runtime:BuildStatus(parent,UI)
     end)
 end
 function Runtime:Destroy()
-    local preserve=current and current.transferPending==true and current.preserveAutoPrestige==true
+    local preserve=modules and modules.Config and modules.Config:Get('AutoPrestige')==true
     self:Stop('runtime replaced',preserve)
     Dialogue:Restore()
 end
