@@ -246,10 +246,14 @@ end
 function Driver:Init() end
 function Driver:Restore() cleanupDialogue(true) end
 function Driver:Drive(ctx,confirmed,label)
-    if currentContext and currentContext~=ctx and callbackInFlight>0 then return false,"callback pending" end
+    while currentContext and currentContext~=ctx and callbackInFlight>0 and ctx:Active() do
+        ctx:Wait(0.05)
+    end
+    if not ctx:Active() then return false,"cancelled" end
     currentContext=ctx
     local clicks,signature,attempts,lastAt=0,nil,0,0
     local lastStatusAt=os.clock()+30
+    local lastUnsupportedLogAt=0
     local ownedGui=nil
 
     -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
@@ -276,7 +280,10 @@ function Driver:Drive(ctx,confirmed,label)
         if gui and not result then
             local button,kind=dialogueButton(gui)
             if kind=="unsupported-options" then
-                ctx:Log("WARN",label.." dialogue is present but its option layout is unsupported; waiting for a readable state")
+                if os.clock()>=lastUnsupportedLogAt then
+                    lastUnsupportedLogAt=os.clock()+30
+                    ctx:Log("WARN",label.." dialogue is present but its option layout is unsupported; waiting for a readable state")
+                end
             elseif button and callbackInFlight==0 then
                 local stage=stageSignature(gui,kind)
                 if stage~=signature then
@@ -519,8 +526,6 @@ local function validTransferRecord(record)
     if type(record)~='table' or record.schema~='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
         or type(record.id)~='string' or #record.id~=36
         or type(record.created)~='number' or record.created%1~=0
-        or type(record.expires)~='number' or record.expires%1~=0
-        or record.expires<=os.time() or record.expires-record.created>900
         or type(record.place)~='number' or record.place~=game.PlaceId
         or type(record.origin)~='string' or #record.origin<1 or #record.origin>100
         or type(record.destination)~='string' or #record.destination<1 or #record.destination>100
@@ -570,7 +575,7 @@ local function buildQueuedTransferLoader(record)
         'local BASE='..q('%q',AP_TRANSFER_BASE),
         'local ok,raw=pcall(readfile,FILE); if not ok or type(raw)~="string" then return end',
         'local decoded,r=pcall(function() return game:GetService("HttpService"):JSONDecode(raw) end)',
-        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or r.origin==game.JobId or (r.kind~="restock" and r.kind~="manual") or type(r.expires)~="number" or r.expires<=os.time() then return end',
+        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or r.origin==game.JobId or (r.kind~="restock" and r.kind~="manual") then return end',
         'local service=game:GetService("TeleportService")',
         'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
         'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
@@ -638,10 +643,9 @@ function Context:Active()
         and (not modules.Config:Get('FarmEnabled') or self.selling==true)
 end
 function Context:Check()
-    -- Auto Prestige is a long-running progression worker. Do not expire the
-    -- whole session while it is safely waiting for a scarce required item.
-    -- Individual dialogue, respawn, and remote operations keep their own
-    -- bounded waits; the owner/mode/character guards remain authoritative.
+    -- Auto Prestige is a long-running AFK progression worker. No task/dialogue/
+    -- respawn wait expires due to elapsed time; only owner, toggle, runtime,
+    -- character and mode cancellation guards can end the session.
     if not self:Active() then error(CANCEL,0) end
 end
 function Context:Wait(seconds)
@@ -892,7 +896,6 @@ function Runtime:HopAndResume(kind,item,count,required,ownerActive)
         schema='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1',
         id=HttpService:GenerateGUID(false),
         created=os.time(),
-        expires=os.time()+600,
         place=game.PlaceId,
         origin=tostring(game.JobId),
         destination='pending',
