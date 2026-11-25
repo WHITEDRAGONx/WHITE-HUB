@@ -579,7 +579,7 @@ local function buildQueuedTransferLoader(record)
         'local service=game:GetService("TeleportService")',
         'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
         'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
-        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R6-AFK-NO-TIMEOUT",1,true) then return end',
+        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R7-GENERIC-PATCH-ADVANCE",1,true) then return end',
         'local farmOk,farm=pcall(function() return game:HttpGet(BASE.."Farm.lua") end); if not farmOk or not farm:find("WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER",1,true) then return end',
         'local oldBase='..q('%q','local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/"'),
         'local newBase='..q('%q','local BASE_URL = "'..AP_TRANSFER_BASE..'"'),
@@ -1041,7 +1041,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261124-R6-AFK-NO-TIMEOUT; persistent restock + server-hop resume')
+    log('INFO','Build AP-COMPAT-20261124-R7-GENERIC-PATCH-ADVANCE; persistent restock + server-hop resume')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
