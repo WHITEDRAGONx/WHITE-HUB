@@ -86,12 +86,36 @@ local function farmItem(name,amount) return ctx:Collect(name,amount) end
 local function useItem(name,amount) return ctx:Consume(name) end
 local function attemptStandFarm()
     for attempt=1,25 do
-        ctx:Check(); refreshCharacter()
+        ctx:Check()
+        refreshCharacter()
+
         local stand=LocalPlayer.PlayerStats.Stand.Value
-        if getgenv().standList[stand] then return true end
+        if getgenv().standList[stand] then
+            moduleLog("INFO","[AutoPrestige] Accepted Stand obtained: "..tostring(stand))
+            return true
+        end
+
+        -- Reset an unwanted Stand first. Do not collect an Arrow while the
+        -- character still owns a Stand, and do not carry a spare Arrow through
+        -- the Rokakaka respawn. Both pickups still use Farm:Restock.
+        if stand~="None" then
+            moduleLog("INFO",("[AutoPrestige] Stand roll %d/25: resetting %s with one Rokakaka")
+                :format(attempt,tostring(stand)))
+            farmItem("Rokakaka",1)
+            ctx:Check()
+            useItem("Rokakaka")
+            refreshCharacter()
+            ctx:Until(function()
+                return LocalPlayer.PlayerStats.Stand.Value=="None"
+            end,10,"Rokakaka Stand reset")
+        end
+
+        moduleLog("INFO",("[AutoPrestige] Stand roll %d/25: collecting one Mysterious Arrow through stable Farm restock")
+            :format(attempt))
         farmItem("Mysterious Arrow",1)
-        if stand~="None" then farmItem("Rokakaka",1); useItem("Rokakaka"); refreshCharacter() end
-        useItem("Mysterious Arrow"); refreshCharacter()
+        ctx:Check()
+        useItem("Mysterious Arrow")
+        refreshCharacter()
     end
     error("AP_STAND_ROLL_LIMIT",0)
 end
