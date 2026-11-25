@@ -156,45 +156,33 @@ local function normalizeQuestText(value)
     return tostring(value or ""):lower():gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 end
 
-local function guiTextIsVisible(object, root)
-    local current=object
-    while current and current~=root do
-        if current:IsA("GuiObject") and not current.Visible then return false end
-        if current:IsA("ScreenGui") and not current.Enabled then return false end
-        current=current.Parent
-    end
-    return true
-end
-
 local function hasQuest(panel, questName)
-    if panel and panel:FindFirstChild(questName) then return true end
+    if not panel then return false end
+    if panel:FindFirstChild(questName) then return true end
 
-    -- Some YBA builds render the visible quest title outside PlayerGui.Quests
-    -- while the Quests container contains only a generic, empty "Patch" row.
-    -- Search the quest panel first, then all visible player UI text.
+    -- Keep this scan inside the small Quests container. Searching all of
+    -- PlayerGui every 0.5s was expensive and caused avoidable frame spikes.
     local wanted=normalizeQuestText(questName)
-    local function searchText(root)
-        if not root then return false end
-        local objects=root:GetDescendants()
-        if root:IsA("TextLabel") or root:IsA("TextButton") then
-            table.insert(objects,1,root)
-        end
-        for _,object in ipairs(objects) do
-            if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
-                and guiTextIsVisible(object,root) then
-                local value=normalizeQuestText(object.Text)
-                if value~="" and (value==wanted or value:find(wanted,1,true)) then
-                    return true
-                end
+    for _,object in ipairs(panel:GetDescendants()) do
+        if object:IsA("TextLabel") or object:IsA("TextButton") then
+            local value=normalizeQuestText(object.Text)
+            if value~="" and (value==wanted or value:find(wanted,1,true)) then
+                return true
             end
         end
-        return false
     end
-
-    if searchText(panel) then return true end
-    local playerGui=LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui and playerGui~=panel and searchText(playerGui) then return true end
     return false
+end
+
+local function hasOnlyGenericPatchRow(panel)
+    if not panel then return false end
+    local rows={}
+    for _,child in ipairs(panel:GetChildren()) do
+        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            rows[#rows+1]=child
+        end
+    end
+    return #rows==1 and tostring(rows[1].Name):lower()=="patch"
 end
 
 local function questProgressState()
@@ -285,16 +273,25 @@ local function autoStoryStep()
     local questProgress,questMaxProgress=questProgressState()
     local questIncomplete=questMaxProgress>0 and questProgress<questMaxProgress
     local questComplete=questMaxProgress>0 and questProgress>=questMaxProgress
-    local knownStoryQuest=hasKnownStoryQuest(questPanel)
-    -- Do not infer "no quest" from the number of GUI children: fresh-account
-    -- quest rows can be a single generic Patch frame.
+
+    -- Fresh YBA accounts can render only a generic "Patch" row. Giorno's
+    -- first Security Guard mission is the known 5-step objective; use the
+    -- replicated quest counter instead of scanning the entire PlayerGui.
+    local genericGiornoGuardQuest=hasOnlyGenericPatchRow(questPanel)
+        and questMaxProgress==5 and questProgress<questMaxProgress
+    local knownStoryQuest=genericGiornoGuardQuest or hasKnownStoryQuest(questPanel)
+
     if questComplete or (not questIncomplete and not knownStoryQuest) then
         storyDialogue()
         ctx:Wait(0.2)
         return true
     end
 
-    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
+    if genericGiornoGuardQuest then
+        moduleLog("INFO","[AutoPrestige] Generic Patch + active 5-step counter identified as Giorno Security Guards")
+    end
+
+    if genericGiornoGuardQuest or hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
         local progress,maxProgress=questProgressState()
         local goal=maxProgress>0 and maxProgress or 5
