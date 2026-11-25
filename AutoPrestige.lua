@@ -23,7 +23,7 @@ getgenv().waitUntilCollect = 0.6
 getgenv().sortOrder        = "Asc"
 getgenv().lessPing         = false
 getgenv().autoRequiem      = true
-getgenv().NPCTimeOut       = 15
+-- No AutoPrestige NPC deadline: XenonLock waits until defeat or user cancellation.
 getgenv().HamonCharge      = 90
 
 ctx:Until(function() return game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character end,nil,"initial Character")
