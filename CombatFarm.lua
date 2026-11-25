@@ -507,6 +507,16 @@ local function isTokenActive(token, expectedMode)
         if activeMode == "Quest" and _config:Get("QuestFarmEnabled") ~= true then
             return false
         end
+        if activeMode == "AutoPrestige" then
+            local env=getgenv and getgenv() or _G
+            if _config:Get("AutoPrestige")~=true or env.AutoPrestigeEnabled~=true
+                or _config:Get("FarmEnabled")==true
+                or _config:Get("NPCFarmEnabled")==true
+                or _config:Get("QuestFarmEnabled")==true
+                or _config:Get("StandFarmEnabled")==true then
+                return false
+            end
+        end
     end
     return true
 end
@@ -529,7 +539,7 @@ end
 -- =============================================
 -- COMBAT CORE (Xenon V5 style)
 -- =============================================
-local function killTarget(targetName, token)
+local function killTarget(targetName, token, onStep)
     local target = getClosestNPC(targetName)
     if not target then
         moduleLog("INFO", "[CombatFarm] No alive target found: " .. targetName)
@@ -590,6 +600,8 @@ local function killTarget(targetName, token)
     local standGraceUntil = hasStand and (tick() + 1.25) or 0
     local meleeFallbackGraceUntil = 0
     local skillLogSeen = {}
+    local onStepDone = false
+    local nextOnStepAt = 0
 
     moduleLog("INFO", ("[CombatFarm][XenonLock] Locked %s | hp=%s source=%s stand=%s"):format(
         tostring(targetName), tostring(lastKnownHp), tostring(hpSource), tostring(getCurrentStandName())
@@ -695,6 +707,18 @@ local function killTarget(targetName, token)
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
         end)
+
+        -- Optional AutoPrestige-specific step hook, used only by progression
+        -- branches that must service a quest giver while a target is alive.
+        if type(onStep)=="function" and not onStepDone and tick()>=nextOnStepAt then
+            nextOnStepAt=tick()+0.25
+            local callbackOk,finished=pcall(onStep,target,character)
+            if callbackOk and finished==true then
+                onStepDone=true
+            elseif not callbackOk then
+                moduleLog("WARN","[CombatFarm][AutoPrestige] Step callback failed: "..tostring(finished))
+            end
+        end
 
         -- Auto Skills are checked before M1. If no skills are enabled, preserve
         -- the original full-speed M1 spam exactly. If skills are enabled, create
@@ -1853,6 +1877,56 @@ function CombatFarm:StartQuest()
     startMode("Quest")
 end
 
+-- AutoPrestige reuses XenonLock instead of maintaining a second NPC combat loop.
+-- This synchronous, scoped entry point owns combat only for one progression step.
+function CombatFarm:DefeatTarget(targetName,onStep)
+    if type(targetName)~="string" or targetName=="" then
+        return false,"Invalid NPC name"
+    end
+    local env=getgenv and getgenv() or _G
+    if not _config or _config:Get("AutoPrestige")~=true or env.AutoPrestigeEnabled~=true then
+        return false,"Auto Prestige is not active"
+    end
+    if isRunning or activeMode~=nil or outstandingTasks>0 then
+        return false,"CombatFarm is busy"
+    end
+
+    runId=runId+1
+    local token=runId
+    stopRequested=false
+    activeMode="AutoPrestige"
+    isRunning=true
+    pauseItemFarmForCombat()
+    moduleLog("INFO","[CombatFarm][AutoPrestige] Shared XenonLock targeting "..targetName)
+
+    local spawnDeadline=tick()+15
+    while isTokenActive(token) and not getClosestNPC(targetName) and tick()<spawnDeadline do
+        task.wait(0.10)
+    end
+
+    local ok,result=pcall(killTarget,targetName,token,onStep)
+    if token==runId then
+        isRunning=false
+        activeMode=nil
+        _movement:SetNoclip(false)
+        _movement:ClearFocus()
+        _movement:FixCamera()
+        if ok and result==true then
+            goToSafeSpot("Auto Prestige target defeated")
+        end
+        resumeItemFarmAfterCombat()
+    end
+
+    if not ok then
+        moduleLog("ERROR","[CombatFarm][AutoPrestige] "..tostring(result))
+        return false,tostring(result)
+    end
+    if result==true then
+        return true
+    end
+    return false,"Target not defeated yet"
+end
+
 function CombatFarm:Stop()
     local previousMode = activeMode
     runId = runId + 1
@@ -1890,6 +1964,7 @@ end
 assert(type(CombatFarm.Init) == "function", "CombatFarm export missing Init")
 assert(type(CombatFarm.StartNPC) == "function", "CombatFarm export missing StartNPC")
 assert(type(CombatFarm.StartQuest) == "function", "CombatFarm export missing StartQuest")
+assert(type(CombatFarm.DefeatTarget) == "function", "CombatFarm export missing DefeatTarget")
 assert(type(CombatFarm.Stop) == "function", "CombatFarm export missing Stop")
 assert(type(CombatFarm.IsRunning) == "function", "CombatFarm export missing IsRunning")
 
