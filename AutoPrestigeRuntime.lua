@@ -460,6 +460,7 @@ end)()
 -- DEV compatibility scope. No scheduler/profiles; tracks only Auto Prestige work.
 local Runtime={}
 local modules, registered, current, serial, previous
+local lastPatchDiagnostic=nil
 local nativeTask=task
 local CANCEL='AP_CANCELLED'
 local function log(level,message)
@@ -551,23 +552,15 @@ function Context:QuestEntries(panel)
         end
     end
     if #entries == 1 and entries[1].Name:lower() == 'patch' then
-        -- On some YBA builds the objective title is rendered by a separate
-        -- ScreenGui, leaving only an empty generic Patch row under Quests.
-        -- This worker now scans PlayerGui for visible objective text itself;
-        -- the placeholder alone must never abort an otherwise active session.
-        local hasReadableText=false
-        for _,object in ipairs(entries[1]:GetDescendants()) do
-            if (object:IsA('TextLabel') or object:IsA('TextButton') or object:IsA('TextBox'))
-                and tostring(object.Text or ''):match('%S') then
-                hasReadableText=true
-                break
-            end
-        end
-        if not hasReadableText then
-            local progress=stat('QuestProgress')
-            local maximum=stat('QuestMaxProgress')
-            self:Log('WARN',('Generic Patch quest row has no local text; replicated objective counter is %s/%s. Scanning visible PlayerGui text.')
-                :format(tostring(progress or 0),tostring(maximum or 0)))
+        -- The quest label is external to this row on this YBA build. Do not
+        -- scan descendants here; AutoPrestige resolves the first 5-step
+        -- Giorno objective directly from the replicated counter.
+        local progress=stat('QuestProgress')
+        local maximum=stat('QuestMaxProgress')
+        local signature=tostring(progress or 0)..'/'..tostring(maximum or 0)
+        if signature~=lastPatchDiagnostic then
+            lastPatchDiagnostic=signature
+            self:Log('INFO','Generic Patch row; objective counter '..signature)
         end
     end
     return entries
@@ -741,11 +734,11 @@ end
 Runtime.Dialogue=Dialogue
 function Runtime:Init(all)
     Dialogue:Init()
-    modules=all; registered=nil; current=nil; serial=0
+    modules=all; registered=nil; current=nil; serial=0; lastPatchDiagnostic=nil
     local env=getgenv and getgenv() or _G
     local scope=env.__WhiteHubAPScope
     previous=type(scope)=="table" and scope.job==game.JobId and scope.place==game.PlaceId and scope or nil
-    log('INFO','Build AP-COMPAT-20261124-R2-GUI-FALLBACK; YBA runtime validation pending')
+    log('INFO','Build AP-COMPAT-20261124-R3-PATCH-COUNTER; YBA runtime validation pending')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
