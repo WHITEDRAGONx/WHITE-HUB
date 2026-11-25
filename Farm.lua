@@ -21,7 +21,8 @@ local _ui = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 25s limit.
+local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate wait policy.
+local WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER = 120 -- Hop only after two minutes with no valid spawn of the required item.
 local detectionEpoch = 0
 local lastItemTime    = tick()
 
@@ -592,6 +593,8 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
         local attempts,nextScan,nextStatusAt=0,0,startedAt+30
         local retryAfter={}
         local lastFailureLogAt=0
+        local lastMatchingSpawnAt=startedAt
+        local nextHopAttemptAt=startedAt+WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
 
         while permitted() do
             local currentCount=_inventory:Count(name)
@@ -607,9 +610,11 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
                 -- have removed previously cached items which are still alive.
                 if ItemSpawnFolder and now>=nextScan then
                     nextScan=now+1
+                    local matchingSpawnCount=0
                     for _,model in ipairs(ItemSpawnFolder:GetChildren()) do
                         local info=GetItemInfo(model)
                         if info and info.Name==name then
+                            matchingSpawnCount=matchingSpawnCount+1
                             SpawnedItems[model]=info
                         elseif SpawnedItems[model] and SpawnedItems[model].Name==name then
                             -- Drop stale entries whose prompt/primary part vanished.
@@ -617,6 +622,7 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
                             retryAfter[model]=nil
                         end
                     end
+                    if matchingSpawnCount>0 then lastMatchingSpawnAt=now end
                 end
 
                 local candidate,index
@@ -665,10 +671,31 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
                 end
             end
 
+            if prestige and now-lastMatchingSpawnAt>=WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
+                and now>=nextHopAttemptAt then
+                nextHopAttemptAt=now+WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
+                local currentCount=_inventory:Count(name)
+                local runtime=_modules and _modules.AutoPrestigeRuntime
+                moduleLog("WARN",("[Farm][PrestigeRestock] No valid %s spawn for %.0fs; requesting a different server (%d/%d stock).")
+                    :format(tostring(name),now-lastMatchingSpawnAt,currentCount,required))
+                if runtime and type(runtime.HopAndResume)=="function" then
+                    local hopped,hopReason=runtime:HopAndResume("restock",name,currentCount,required,permitted)
+                    if hopped then
+                        moduleLog("INFO","[Farm][PrestigeRestock] Owned hop queued; Auto Prestige and restock will resume on arrival.")
+                        return false,"AP_TRANSFER_REQUESTED"
+                    end
+                    moduleLog("WARN","[Farm][PrestigeRestock] Server hop unavailable; continuing to wait here: "..tostring(hopReason))
+                else
+                    moduleLog("WARN","[Farm][PrestigeRestock] AutoPrestige transfer runtime API is unavailable; continuing to wait.")
+                end
+            end
+
             if tick()>=nextStatusAt then
                 nextStatusAt=tick()+30
-                moduleLog("INFO",("[Farm][PrestigeRestock] Still waiting for %s: %d/%d stock, %d attempt(s), %.0fs elapsed; no retry ceiling.")
-                    :format(tostring(name),_inventory:Count(name),required,attempts,tick()-startedAt))
+                local noSpawnFor=math.max(0,tick()-lastMatchingSpawnAt)
+                moduleLog("INFO",("[Farm][PrestigeRestock] Still waiting for %s: %d/%d stock, %d attempt(s), %.0fs elapsed; no valid spawn %.0fs; server hop at %.0fs without a spawn.")
+                    :format(tostring(name),_inventory:Count(name),required,attempts,tick()-startedAt,
+                        noSpawnFor,math.max(0,WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER-noSpawnFor)))
             end
             task.wait(0.25)
         end
