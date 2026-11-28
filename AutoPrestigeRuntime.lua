@@ -513,7 +513,7 @@ local HttpService=game:GetService('HttpService')
 local TeleportService=game:GetService('TeleportService')
 local AP_TRANSFER_FILE='WHITE_AUTOPRESTIGE_TRANSFER.json'
 local AP_TRANSFER_MARKER='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
-local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/618780960ff2e09f9c385bcb5cefc5e37b1af8f2/'
+local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/0cd34140a26b8234d328fbdd3e0b075bccaf125d/'
 
 local function transferQueueFunction()
     local fn=queue_on_teleport or queueonteleport
