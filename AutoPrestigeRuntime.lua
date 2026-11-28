@@ -321,7 +321,7 @@ end
 
 function Driver:Init() end
 function Driver:Restore() cleanupDialogue(true) end
-function Driver:Drive(ctx,confirmed,label)
+function Driver:Drive(ctx,confirmed,label,reopenOnClose)
     while currentContext and currentContext~=ctx and callbackInFlight>0 and ctx:Active() do
         ctx:Wait(0.05)
     end
@@ -335,6 +335,8 @@ function Driver:Drive(ctx,confirmed,label)
     local mistaTrapHandled=false
     local dialogueSeen=false
     local confirmedWhileOpenLogged=false
+    local closedSince=nil
+    local driveStartedAt=os.clock()
 
     -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
     -- game to render the dialogue and keep checking the authoritative player
@@ -342,13 +344,29 @@ function Driver:Drive(ctx,confirmed,label)
     while ctx:Active() do
         local gui=dialogueGui()
         local result=confirmed()
-        if result and callbackInFlight==0 and dialogueSeen and not gui then
+        if result and callbackInFlight==0 and (dialogueSeen or reopenOnClose) and not gui then
             cleanupDialogue(true)
             ctx:Log("INFO",label.." confirmed by game state after "..tostring(clicks).." dialogue input(s); dialogue GUI closed")
             return true
         end
 
+        if reopenOnClose and not result and not gui then
+            if dialogueSeen then
+                closedSince=closedSince or os.clock()
+                if os.clock()-closedSince>=2.5 and callbackInFlight==0 then
+                    cleanupDialogue(true)
+                    ctx:Log("WARN",label.." dialogue closed without the Pesci quest; returning control to Trish retry handler")
+                    return false,"dialogue-closed-unconfirmed"
+                end
+            elseif os.clock()-driveStartedAt>=5 then
+                cleanupDialogue(true)
+                ctx:Log("WARN",label.." prompt fired but no DialogueGui appeared; returning control to Trish retry handler")
+                return false,"dialogue-not-opened"
+            end
+        end
+
         if gui then
+            closedSince=nil
             dialogueSeen=true
             if ownedGui~=gui then
                 ownedGui=gui
@@ -635,7 +653,42 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         return false,"NPC prompt/definition not found: "..npc
     end
 
-    local ok,info=self:Drive(ctx,confirmed,label or npc,12)
+    local retryTrishAfterFugo=(npc=="Storyline #12")
+    local ok,info=self:Drive(ctx,confirmed,label or npc,retryTrishAfterFugo)
+    local retryNumber=0
+    while retryTrishAfterFugo and not ok
+        and (info=="dialogue-closed-unconfirmed" or info=="dialogue-not-opened")
+        and ctx:Active() do
+        if confirmed() then
+            ok,info=true,"Pesci quest is now visible"
+            break
+        end
+        retryNumber=retryNumber+1
+        ctx:Log("WARN",(label or npc).." did not activate Pesci yet; reopening Trish Storyline #12 (retry "
+            ..tostring(retryNumber)..")")
+        ctx:Wait(1.25)
+        if confirmed() then
+            ok,info=true,"Pesci quest is now visible"
+            break
+        end
+        local retryCharacter=player.Character
+        local retryRemote=retryCharacter and retryCharacter:FindFirstChild("RemoteEvent")
+        local retryTarget=storyTarget or liveStoryTarget
+        local reopened=false
+        if retryRemote and retryTarget then
+            ctx:Fire(retryRemote,"PromptTriggered",retryTarget)
+            reopened=true
+        elseif prompt and type(fireproximityprompt)=="function" then
+            local fireOk=pcall(fireproximityprompt,prompt)
+            reopened=fireOk
+        end
+        if not reopened then
+            info="Trish #12 could not be reopened: exact target/prompt unavailable"
+            ctx:Log("WARN",(label or npc).." retry stopped: "..info)
+            break
+        end
+        ok,info=self:Drive(ctx,confirmed,label or npc,true)
+    end
     if ok then ctx.pending=nil end
     return ok,info
 end
@@ -1362,7 +1415,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261128-R10-TRISH-PESCI-CONFIRM; verify next quest row after Trish dialogue')
+    log('INFO','Build AP-COMPAT-20261128-R11-TRISH-RETRY; reopen Trish #12 when dialogue closes without Pesci quest')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
