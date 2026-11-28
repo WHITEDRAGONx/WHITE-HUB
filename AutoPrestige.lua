@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261124-R7; generic Patch progression + nonblocking skill allocation")
+    moduleLog("INFO","Build AP-AFK-20261127-R8-KOICHI-STORY; generic Patch progression + nonblocking skill allocation")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -269,6 +269,7 @@ local function hasKnownStoryQuest(panel)
         "Defeat Ghiaccio",
         "Defeat Diavolo",
         "Take down 3 vampires",
+        "Return Koichi's Suitcase",
     }) do
         if hasQuest(panel,name) then return true end
     end
@@ -367,15 +368,26 @@ local function autoStoryStep()
     -- first Security Guard mission is the known 5-step objective; use the
     -- replicated quest counter instead of scanning the entire PlayerGui.
     local genericPatchActive=hasOnlyGenericPatchRow(questPanel) and questMaxProgress>0
+    local storyObjective=ctx:StoryObjective()
+    local koichiSuitcaseQuest=storyObjective=="Return Koichi's Suitcase"
+        or hasQuest(questPanel,"Return Koichi's Suitcase")
     local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
-    local namedStoryQuest=hasKnownStoryQuest(questPanel)
+    local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest
     local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
 
     -- Generic Patch rows with a non-five-step counter are not the Security
     -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
     -- Storyline #1 fallback for this active generic row and confirms dialogue
     -- progress using the replicated quest fingerprint.
+    if koichiSuitcaseQuest then
+        local source=ctx:StorySource()
+        if source~="Storyline #2" then error("AP_KOICHI_STORY_SOURCE_MISMATCH",0) end
+        moduleLog("INFO","[AutoPrestige] Quest: Return Koichi's Suitcase; resolved NPC "..source)
+        storyDialogue()
+        ctx:Wait(0.2)
+        return true
+    end
     if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
         local source=ctx:StorySource()
         moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
