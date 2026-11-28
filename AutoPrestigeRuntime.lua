@@ -864,9 +864,9 @@ function Context:StoryObjective()
                             end
                             return "Talk to Bruno","Storyline #10"
                         elseif value:find("trish",1,true) then
-                            if lastSource=="Storyline #11" then
+                            if value:find("after fugo",1,true) or lastSource=="Storyline #11" then
                                 return "Talk to Trish after Fugo","Storyline #12"
-                            elseif lastSource=="Storyline #12" then
+                            elseif value:find("after pesci",1,true) or lastSource=="Storyline #12" then
                                 return "Talk to Trish after Pesci","Storyline #13"
                             end
                             return "Talk to Trish","Storyline #11"
