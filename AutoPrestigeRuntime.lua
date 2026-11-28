@@ -425,9 +425,21 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     if prompt and type(fireproximityprompt)=="function" then
         fireproximityprompt(prompt)
     else
-        local root=ReplicatedStorage:FindFirstChild("NewDialogue")
-        local target=root and root:FindFirstChild(npc)
-        if not target and storyAlias then target=root and root:FindFirstChild(storyAlias) end
+        -- YBA's story dialogue definitions are stored under ReplicatedStorage.Dialogue
+        -- (the SimpleSpy path for Bruno is Dialogue["Storyline #4"]). Check the
+        -- exact indexed definition before the compatibility NewDialogue folder.
+        local storyIndex=npc:match("^Storyline #(%d+)$")
+        local storyAliases={["1"]="Giorno Giovanna",["2"]="Koichi"}
+        local storyAlias=storyIndex and storyAliases[storyIndex]
+        local target=nil
+        for _,rootName in ipairs({"Dialogue","NewDialogue"}) do
+            local root=ReplicatedStorage:FindFirstChild(rootName)
+            target=root and root:FindFirstChild(npc)
+            if not target and root and storyAlias then
+                target=root:FindFirstChild(storyAlias)
+            end
+            if target then break end
+        end
         -- Prefer the exact live Storyline index; do not choose another NPC that
         -- happens to share a display-name fragment.
         if not target and storyIndex then
