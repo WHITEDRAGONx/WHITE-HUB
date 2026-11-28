@@ -399,8 +399,6 @@ local function findPrompt(npc)
     if promptCache[npc] and promptCache[npc].Parent then return promptCache[npc] end
     local best=nil
     local roots={workspace:FindFirstChild("Dialogues") or workspace}
-    local definition=ReplicatedStorage:FindFirstChild("Dialogue") or ReplicatedStorage:FindFirstChild("NewDialogue")
-    if definition then roots[#roots+1]=definition end
 
     -- Storyline keys are stable indices; live models can expose display names.
     local storyIndex=npc:match("^Storyline #(%d+)$")
@@ -442,6 +440,29 @@ local function findPrompt(npc)
     if best then promptCache[npc]=best end
     return best
 end
+
+local function findLiveStoryModel(npc)
+    local index=tostring(npc):match("^Storyline #(%d+)$")
+    if not index then return nil end
+    local folder=workspace:FindFirstChild("Dialogues")
+    if not folder then return nil end
+    local exact=folder:FindFirstChild(npc)
+    if exact then return exact end
+    local pattern="^Storyline #"..index.." %([^%)]+%)$"
+    for _,candidate in ipairs(folder:GetChildren()) do
+        if candidate.Name:match(pattern) then return candidate end
+    end
+    return nil
+end
+
+function Driver:HasLivePrompt(npc)
+    local model=findLiveStoryModel(npc)
+    if not model then return false,"live Storyline NPC is not present" end
+    local prompt=model:FindFirstChildWhichIsA("ProximityPrompt",true)
+    if not prompt or not prompt.Enabled then return false,"live Storyline prompt is unavailable or disabled" end
+    return true,model
+end
+
 function Driver:Run(ctx,npc,options,confirmed,label)
     if dialogueGui() or callbackInFlight>0 then return false,"existing dialogue/callback" end
     if type(npc)~="string" or type(confirmed)~="function" then return false,"invalid dialogue request" end
@@ -452,80 +473,84 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     if npc=="Storyline #1" then
         ctx:Log("INFO",analyzeGiorno())
     end
-    local prompt,reason=findPrompt(npc)
-    if reason then return false,reason end
+
+    local storyIndex=npc:match("^Storyline #(%d+)$")
+    local storyDefinitionRoot=ReplicatedStorage:FindFirstChild("Dialogue")
+    local storyTarget=storyIndex and storyDefinitionRoot and storyDefinitionRoot:FindFirstChild(npc)
+    local liveStoryTarget=storyIndex and findLiveStoryModel(npc)
+    local prompt,reason=nil,nil
+    if not storyTarget and not liveStoryTarget then
+        prompt,reason=findPrompt(npc)
+        if reason then return false,reason end
+    end
+
     currentContext=ctx; ctx:Check()
     ctx.pending={name=label or npc,npc=npc,confirmed=confirmed}
-    if prompt and type(fireproximityprompt)=="function" then
+
+    -- Numbered YBA story NPCs use the exact RemoteEvent payload observed in
+    -- RemoteSpy: PromptTriggered + ReplicatedStorage.Dialogue["Storyline #N"].
+    if storyTarget then
+        local char=player.Character
+        local remote=char and char:FindFirstChild("RemoteEvent")
+        if not remote then
+            ctx.pending=nil
+            return false,"Storyline "..npc.." found but Character.RemoteEvent is missing"
+        end
+        ctx:Log("INFO","Opening "..npc.." through Character.RemoteEvent PromptTriggered")
+        ctx:Fire(remote,"PromptTriggered",storyTarget)
+    elseif liveStoryTarget then
+        local char=player.Character
+        local remote=char and char:FindFirstChild("RemoteEvent")
+        if not remote then
+            ctx.pending=nil
+            return false,"Live "..npc.." model found but Character.RemoteEvent is missing"
+        end
+        ctx:Log("INFO","Opening live "..npc.." model through Character.RemoteEvent PromptTriggered")
+        ctx:Fire(remote,"PromptTriggered",liveStoryTarget)
+    elseif prompt and type(fireproximityprompt)=="function" then
         fireproximityprompt(prompt)
-    else
-        -- YBA's story dialogue definitions are stored under ReplicatedStorage.Dialogue
-        -- (the SimpleSpy path for Bruno is Dialogue["Storyline #4"]). Check the
-        -- exact indexed definition before the compatibility NewDialogue folder.
-        local storyIndex=npc:match("^Storyline #(%d+)$")
-        local storyAliases={["1"]="Giorno Giovanna",["2"]="Koichi"}
-        local storyAlias=storyIndex and storyAliases[storyIndex]
-        local target=nil
-        for _,rootName in ipairs({"Dialogue","NewDialogue"}) do
-            local root=ReplicatedStorage:FindFirstChild(rootName)
-            target=root and root:FindFirstChild(npc)
-            if not target and root and storyAlias then
-                target=root:FindFirstChild(storyAlias)
-            end
-            if target then break end
+    elseif prompt and storyIndex then
+        local char=player.Character
+        local remote=char and char:FindFirstChild("RemoteEvent")
+        local root=ReplicatedStorage:FindFirstChild("Dialogue")
+        local target=root and root:FindFirstChild(npc)
+        if not remote or not target then
+            ctx.pending=nil
+            return false,"Storyline prompt found but exact ReplicatedStorage.Dialogue target/RemoteEvent is missing"
         end
-        -- Prefer the exact live Storyline index; do not choose another NPC that
-        -- happens to share a display-name fragment.
-        if not target and storyIndex then
-            local liveDialogues=workspace:FindFirstChild("Dialogues")
-            if liveDialogues then
-                target=liveDialogues:FindFirstChild(npc)
-                if not target then
-                    for _,candidate in ipairs(liveDialogues:GetChildren()) do
-                        if candidate.Name:match("^Storyline #"..storyIndex.." %([^%)]+%)$") then
-                            target=candidate
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        if target then
-            local char=player.Character
-            local remote=char and char:FindFirstChild("RemoteEvent")
-            if not remote then
-                ctx.pending=nil
-                return false,"dialogue target found but Character.RemoteEvent is missing"
-            end
-            ctx:Fire(remote,"PromptTriggered",target)
-        elseif npc=="Storyline #1" then
-            -- Fresh accounts may not replicate Giorno's prompt/definition into the
-            -- folders scanned above. Quest Farm's local DialogueGui driver is still
-            -- used below; this one-shot compatibility request only opens/advances
-            -- the first storyline page using YBA's known EndDialogue payload.
-            local char=player.Character
-            local remote=char and char:FindFirstChild("RemoteEvent")
-            if not remote then
-                ctx.pending=nil
-                return false,"Storyline #1 has no prompt/definition and Character.RemoteEvent is missing"
-            end
-            ctx:Log("WARN","Storyline #1 prompt/definition unavailable; trying one guarded EndDialogue bootstrap")
-            local okFire,fireErr=pcall(function()
-                ctx:Fire(remote,"EndDialogue",{
-                    NPC="Storyline #1",
-                    Dialogue="Dialogue2",
-                    Option="Option1",
-                })
-            end)
-            if not okFire then
-                ctx.pending=nil
-                return false,"Storyline #1 EndDialogue bootstrap failed: "..tostring(fireErr)
-            end
+        ctx:Fire(remote,"PromptTriggered",target)
+    elseif prompt then
+        if type(fireproximityprompt)=="function" then
+            fireproximityprompt(prompt)
         else
             ctx.pending=nil
-            return false,"NPC prompt/definition not found: "..npc
+            return false,"fireproximityprompt unavailable for "..npc
         end
+    elseif npc=="Storyline #1" then
+        -- Compatibility for fresh accounts whose first Giorno definition is not replicated.
+        local char=player.Character
+        local remote=char and char:FindFirstChild("RemoteEvent")
+        if not remote then
+            ctx.pending=nil
+            return false,"Storyline #1 definition unavailable and Character.RemoteEvent is missing"
+        end
+        ctx:Log("WARN","Storyline #1 definition unavailable; trying one guarded EndDialogue bootstrap")
+        local okFire,fireErr=pcall(function()
+            ctx:Fire(remote,"EndDialogue",{
+                NPC="Storyline #1",
+                Dialogue="Dialogue2",
+                Option="Option1",
+            })
+        end)
+        if not okFire then
+            ctx.pending=nil
+            return false,"Storyline #1 EndDialogue bootstrap failed: "..tostring(fireErr)
+        end
+    else
+        ctx.pending=nil
+        return false,"NPC prompt/definition not found: "..npc
     end
+
     local ok,info=self:Drive(ctx,confirmed,label or npc,12)
     if ok then ctx.pending=nil end
     return ok,info
@@ -933,6 +958,18 @@ function Context:StorySource()
 
     self:Log('WARN','Story quest source not identified; active quests: '..table.concat(questNames,' | '):sub(1,500))
     error('AP_STORY_SOURCE_UNKNOWN: export quest/NPC runtime log; no blind dialogue sweep',0)
+end
+function Context:TryStorySource()
+    self:Check()
+    local ok,source=pcall(self.StorySource,self)
+    if ok and type(source)=="string" and source~="" then return source end
+    local reason=ok and "story source is empty" or tostring(source)
+    self:Log("WARN","No Storyline source inferred from current quest UI: "..reason)
+    return nil,reason
+end
+function Context:HasStoryPrompt(npc)
+    self:Check()
+    return Dialogue:HasLivePrompt(npc)
 end
 function Context:Dialogue(npc,options,confirm,label)
     self:Check(); if self.pending then error('AP_RESULT_PENDING',0) end
