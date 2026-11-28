@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.11-TRISH-RETRY-L16; resume Trish #12 after Fugo and retry unconfirmed dialogue")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.12-TRISH-L11-CHECKPOINT; return to Trish Storyline #11 after Fugo and preserve prestige checkpoint")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -134,7 +134,7 @@ local function endDialogue(NPC, Dialogue, Option)
     end,"NPC "..NPC)
 end
 
-local function storyDialogue(sourceOverride)
+local function storyDialogue(sourceOverride,expectedQuest)
     local source=sourceOverride
     if not source then
         local reason
@@ -146,7 +146,11 @@ local function storyDialogue(sourceOverride)
     end
     local before=ctx:QuestFingerprint()
     local function confirmed()
-        if source=="Storyline #4" then
+        if expectedQuest=="Defeat Pesci" then
+            return ctx:HasQuestTitle("Defeat Pesci")
+        elseif expectedQuest=="Defeat Fugo" then
+            return ctx:HasQuestTitle("Defeat Fugo")
+        elseif source=="Storyline #4" then
             local backpack=LocalPlayer:FindFirstChildOfClass("Backpack")
             local character=LocalPlayer.Character
             local lighterPresent=(backpack and backpack:FindFirstChild("Lighter")~=nil)
@@ -154,15 +158,14 @@ local function storyDialogue(sourceOverride)
             if lighterPresent then return true end
             local objective=ctx:StoryObjective()
             return objective=="Deliver Lighter to Giorno"
-        elseif source=="Storyline #12" then
-            -- After Fugo, Storyline #12 is Trish's handoff to Pesci.
-            -- Require the new active Story quest row, not a closed dialogue
-            -- or a changed generic counter, before saving this checkpoint.
-            return ctx:HasQuestTitle("Defeat Pesci")
         end
         return ctx:QuestFingerprint()~=before
     end
-    return ctx:Dialogue(source,{"Option1"},confirmed,"Story "..source)
+    local label="Story "..source
+    if source=="Storyline #11" and expectedQuest=="Defeat Pesci" then
+        label="Story Trish after Fugo"
+    end
+    return ctx:Dialogue(source,{"Option1"},confirmed,label)
 end
 
 -- These are dialogue-only transitions documented by the YBA Story/Trello route.
@@ -522,6 +525,58 @@ local function autoStoryStep()
     local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest or mappedCombatQuest
     local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
 
+    -- On Prestige, YBA clears its quest UI. Use the account-wide confirmed
+    -- Storyline high-water mark to resume the current arc instead of replaying
+    -- the first missions. A completed #17 chain is never started again.
+    local liveStoryStage=0
+    if isSecurityQuest then liveStoryStage=1
+    elseif isLucaQuest then liveStoryStage=3
+    elseif isBucciaratiQuest then liveStoryStage=4
+    elseif isMoneyQuest then liveStoryStage=10
+    elseif isFugoQuest then liveStoryStage=11
+    elseif isPesciQuest then liveStoryStage=12
+    elseif isGhiaccioQuest then liveStoryStage=14
+    elseif isDiavoloQuest then liveStoryStage=17
+    elseif objectiveStoryIndex then liveStoryStage=objectiveStoryIndex end
+
+    local savedStoryHigh=tonumber(ctx.storyHighWaterIndex) or 0
+    if ctx.storyResumeAfterPrestige and savedStoryHigh>=17 then
+        ctx.storyPreviouslyCompleted=true
+        ctx.storyResumeAfterPrestige=false
+        moduleLog("INFO","[AutoPrestige] Storyline was already completed before Prestige; skipping repeated main-story quests")
+    elseif ctx.storyResumeAfterPrestige and savedStoryHigh>=11 and savedStoryHigh<=16 then
+        if liveStoryStage==0 or liveStoryStage<savedStoryHigh then
+            local resumeSource=ctx.storyResumeSource or ctx.storySource
+            if resumeSource and ctx:HasStoryDefinition(resumeSource) then
+                moduleLog("INFO","[AutoPrestige] Prestige carryover: resuming from last confirmed checkpoint "
+                    ..tostring(resumeSource).." instead of replaying early Storyline steps")
+                storyDialogue(resumeSource)
+                ctx.storyResumeAfterPrestige=false
+                return true
+            end
+        else
+            ctx.storyResumeAfterPrestige=false
+            moduleLog("INFO","[AutoPrestige] Live Storyline objective is already at/after the saved Prestige checkpoint; following live quest state")
+        end
+    end
+
+    if ctx.storyPreviouslyCompleted then
+        koichiSuitcaseQuest=false
+        talkObjective=false
+        isSecurityQuest=false
+        isLucaQuest=false
+        isBucciaratiQuest=false
+        isMoneyQuest=false
+        isFugoQuest=false
+        isPesciQuest=false
+        isGhiaccioQuest=false
+        isDiavoloQuest=false
+        mappedCombatQuest=false
+        namedStoryQuest=false
+        genericGiornoGuardQuest=false
+        knownStoryQuest=false
+    end
+
     -- Generic Patch/Sample rows may be unrelated side quests. Only the confirmed
     -- StoryObjective mapper or a live known Storyline NPC can authorize dialogue.
     -- A restart can happen after XenonLock has already defeated a boss.
@@ -536,7 +591,7 @@ local function autoStoryStep()
         elseif isBucciaratiQuest then
             turnInSource="Storyline #4"
         elseif isFugoQuest then
-            turnInSource="Storyline #12"
+            turnInSource="Storyline #11"
         elseif isPesciQuest then
             turnInSource="Storyline #13"
         elseif isGhiaccioQuest then
@@ -574,7 +629,11 @@ local function autoStoryStep()
         and not hasQuest(questPanel,"Defeat Leaky Eye Luca") then
         moduleLog("INFO","[AutoPrestige] Story talk objective mapped to "..mappedStorySource
             .." ("..tostring(storyObjective)..")")
-        storyDialogue(mappedStorySource)
+        if storyObjective=="Talk to Trish after Fugo" then
+            storyDialogue(mappedStorySource,"Defeat Pesci")
+        else
+            storyDialogue(mappedStorySource)
+        end
         ctx:Wait(0.2)
         return true
     end
@@ -632,28 +691,27 @@ local function autoStoryStep()
             ..tostring(moneyNow)..")")
     end
 
-    -- Post-Fugo rejoin checkpoint: Level 16 is the observed stage after Fugo.
-    -- A generic Sample row can hide the story quest title after restart, so
-    -- resume at Trish #12 rather than requiring an old saved checkpoint.
+    -- Post-Fugo rejoin checkpoint: Trish's next conversation is still
+    -- Storyline #11. Reuse that exact definition and wait for the Pesci row.
     local resumeTrishAfterFugoFromSaved=(ctx.storySource=="Storyline #11"
         or ctx.storySource=="Storyline #12")
     local resumeTrishAfterFugoFromLevel=(ctx.storySource==nil and storyPrestige==0
         and storyLevel>=16 and storyLevel<=17)
     if not knownStoryQuest and not talkObjective
         and (resumeTrishAfterFugoFromSaved or resumeTrishAfterFugoFromLevel) then
-        local trishAfterFugoAvailable,trishAfterFugoInfo=ctx:HasStoryDefinition("Storyline #12")
+        local trishAfterFugoAvailable,trishAfterFugoInfo=ctx:HasStoryDefinition("Storyline #11")
         if trishAfterFugoAvailable then
-            moduleLog("INFO","[AutoPrestige] Post-Fugo checkpoint detected; returning to Trish Storyline #12 (Level="
+            moduleLog("INFO","[AutoPrestige] Post-Fugo checkpoint detected; returning to Trish Storyline #11 (Level="
                 ..tostring(storyLevel)..", source="..tostring(ctx.storySource or "live-level")..")")
-            storyDialogue("Storyline #12")
+            storyDialogue("Storyline #11","Defeat Pesci")
             return true
         else
-            moduleLog("WARN","[AutoPrestige] Trish Storyline #12 unavailable during post-Fugo recovery: "
+            moduleLog("WARN","[AutoPrestige] Trish Storyline #11 unavailable during post-Fugo recovery: "
                 ..tostring(trishAfterFugoInfo))
         end
     end
 
-    if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
+    if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest and not ctx.storyPreviouslyCompleted then
         local source,reason=ctx:TryStorySource()
         if source then
             moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
@@ -746,7 +804,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Collect $5,000")
         if LocalPlayer.PlayerStats.Money.Value >= 5000 then
             moduleLog("INFO","[AutoPrestige] $5,000 requirement confirmed; opening Trish Storyline #11")
-            storyDialogue("Storyline #11")
+            storyDialogue("Storyline #11","Defeat Fugo")
             return true
         end
         if LocalPlayer.PlayerStats.Money.Value < 5000 then
@@ -777,7 +835,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Fugo")
         if killNPC("Fugo", 15) then
             task.wait(1)
-            storyDialogue("Storyline #12")
+            storyDialogue("Storyline #11","Defeat Pesci")
             return true
         else
             return true
