@@ -207,7 +207,10 @@ function RemoteAudit:_append(record, signature, logToRuntime)
     self._coalesced[signature] = record
     table.insert(self._records, record)
     while #self._records > self._maxRecords do
-        table.remove(self._records, 1)
+        local removed=table.remove(self._records, 1)
+        if removed and removed.Signature and self._coalesced[removed.Signature]==removed then
+            self._coalesced[removed.Signature]=nil
+        end
     end
 
     if logToRuntime then
