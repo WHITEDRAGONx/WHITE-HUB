@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.13-TRISH-L11-CREDIT-GUARD; confirm Pesci handoff after Fugo recovery")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.14-ACTIVE-QUEST-PRIORITY; active story quests block dialogue handoffs and save accepted Ghiaccio checkpoint")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -539,6 +539,54 @@ local function autoStoryStep()
     elseif isDiavoloQuest then liveStoryStage=17
     elseif objectiveStoryIndex then liveStoryStage=objectiveStoryIndex end
 
+    -- A manually accepted Ghiaccio mission is stronger evidence than the
+    -- previous dialogue checkpoint. Persist it before any dialogue handoff so
+    -- a Prestige/rejoin resumes at this arc instead of replaying old chapters.
+    if isGhiaccioQuest and not ctx.storyPreviouslyCompleted then
+        local checkpointSource="Storyline #14"
+        local accountKey=tostring(LocalPlayer.UserId)
+        local saved=modules.Config:Get("AutoPrestigeStoryProgress")
+        if type(saved)~="table" then saved={} end
+        local previous=saved[accountKey]
+        local previousIndex=type(previous)=="table" and (tonumber(previous.index) or 0) or 0
+        local previousHigh=type(previous)=="table" and (tonumber(previous.highestIndex) or previousIndex) or 0
+        local previousSource=type(previous)=="table" and previous.source or nil
+        local previousHighSource=type(previous)=="table" and (previous.highestSource or previous.source) or nil
+        local checkpointIndex=math.max(previousIndex,14)
+        local checkpointSavedSource=checkpointIndex==14 and checkpointSource or (previousSource or checkpointSource)
+        local highestIndex=math.max(previousHigh,14)
+        local highestSource=highestIndex==14 and checkpointSource or (previousHighSource or checkpointSavedSource)
+        local currentIndex=tonumber(tostring(ctx.storySource or ""):match("^Storyline #(%d+)$")) or 0
+        local checkpointRecord={
+            source=checkpointSavedSource,
+            index=checkpointIndex,
+            prestige=storyPrestige,
+            highestIndex=highestIndex,
+            highestSource=highestSource,
+            completed=(type(previous)=="table" and previous.completed==true) or highestIndex>=17
+        }
+        local changed=type(previous)~="table"
+            or checkpointIndex>previousIndex
+            or highestIndex>previousHigh
+            or tonumber(previous.prestige)~=storyPrestige
+            or previous.source~=checkpointSavedSource
+        if changed then
+            saved[accountKey]=checkpointRecord
+            local persisted,persistErr=pcall(function()
+                modules.Config:Set("AutoPrestigeStoryProgress",saved)
+            end)
+            if persisted then
+                moduleLog("INFO","[SessionResume] Active Defeat Ghiaccio quest confirmed; saved Storyline #14 checkpoint at Prestige "
+                    ..tostring(storyPrestige).." so Prestige will not replay earlier chapters")
+            else
+                moduleLog("WARN","[SessionResume] Could not persist active Ghiaccio checkpoint: "..tostring(persistErr))
+            end
+        end
+        if checkpointIndex>=currentIndex then ctx.storySource=checkpointSavedSource end
+        ctx.storyHighWaterIndex=highestIndex
+        ctx.storyResumeSource=highestSource
+    end
+
     local savedStoryHigh=tonumber(ctx.storyHighWaterIndex) or 0
     if ctx.storyResumeAfterPrestige and savedStoryHigh>=17 then
         ctx.storyPreviouslyCompleted=true
@@ -642,9 +690,13 @@ local function autoStoryStep()
         return true
     end
 
-    -- Continue only known dialogue-to-dialogue handoffs; never guess a boss or
-    -- bypass a combat/money gate. The next dialogue must change the quest state.
-    if advanceKnownStoryDialogue() then return true end
+    -- An accepted main-story objective always has priority over a saved
+    -- dialogue handoff. In particular, never open Storyline #14 while the
+    -- active Defeat Ghiaccio quest is waiting to be completed.
+    if not knownStoryQuest and not mappedCombatQuest and not talkObjective
+        and advanceKnownStoryDialogue() then
+        return true
+    end
 
     -- Storyline #4 hands over the lighter; #5 is the Giorno hand-in/recruit step.
     if hasLighter and storyLevel<=10
