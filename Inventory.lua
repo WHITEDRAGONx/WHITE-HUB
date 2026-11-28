@@ -46,7 +46,22 @@ local MaxItemAmounts = {
 }
 
 local _runtimeLog = nil
+local _remoteAudit = nil
 local _rawPrint, _rawWarn = print, warn
+
+local function auditedFire(remote,...)
+    if _remoteAudit and type(_remoteAudit.Fire)=="function" then
+        return _remoteAudit:Fire("Inventory",remote,...)
+    end
+    return remote:FireServer(...)
+end
+
+local function auditedInvoke(remote,...)
+    if _remoteAudit and type(_remoteAudit.Invoke)=="function" then
+        return _remoteAudit:Invoke("Inventory",remote,...)
+    end
+    return remote:InvokeServer(...)
+end
 local function moduleLog(level, ...)
     if _runtimeLog and type(_runtimeLog.Write) == "function" then
         pcall(_runtimeLog.Write, _runtimeLog, level, "Inventory", ...)
@@ -63,6 +78,7 @@ end
 -- =====================
 function Inventory:Init(Modules)
     _runtimeLog = Modules.RuntimeLog
+    _remoteAudit = Modules.RemoteAudit
     _config   = Modules.Config
     _movement = Modules.Movement
     moduleLog("INFO", "[Inventory] Build SALE-20261018-PACING-BETA; proven FINAL unchanged unless Merchant Pacing beta enabled")
@@ -1432,7 +1448,7 @@ local function tryDirectMerchantSell(itemName)
     -- the new dialogue fallback handle it.
     for attempt = 1, 2 do
         local fired = pcall(function()
-            remoteEvent:FireServer("EndDialogue", {
+            auditedFire(remoteEvent, "EndDialogue", {
                 NPC = DIRECT_SELL_ARGS.NPC,
                 Dialogue = DIRECT_SELL_ARGS.Dialogue,
                 Option = DIRECT_SELL_ARGS.Option,
@@ -1679,7 +1695,7 @@ function Inventory:BuyLucky()
             if not char then return end
             local re = char:FindFirstChild("RemoteEvent")
             if not re then return end
-            re:FireServer("PurchaseShopItem", { ItemName = "1x Lucky Arrow" })
+            auditedFire(re, "PurchaseShopItem", { ItemName = "1x Lucky Arrow" })
         end)
         task.wait(1)
         attempts = attempts + 1
@@ -1722,7 +1738,7 @@ function Inventory:SummonStand()
 
     local summoned = char:FindFirstChild("SummonedStand")
     if summoned and summoned.Value == false then
-        remoteFunc:InvokeServer("ToggleStand", "Toggle")
+        auditedInvoke(remoteFunc, "ToggleStand", "Toggle")
         task.wait(0.3)
         return true
     end
