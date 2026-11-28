@@ -13,7 +13,7 @@ local function auditStage(stage,details)
     end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.17-POST-GHIACCIO-STORYLINE14; use observed Storyline #14 direct handoff and confirm Defeat Diavolo")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.18-POST-DIAVOLO-STORYLINE14-END; finish the story through observed Storyline #14 dialogue")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -168,8 +168,8 @@ local function storyDialogue(sourceOverride,expectedQuest)
             return objective=="Talk to Giorno about Diavolo"
                 or ctx:HasQuestTitle("Defeat Diavolo")
         elseif expectedQuest=="Final story reward" then
-            return not ctx:HasQuestTitle("Defeat Diavolo")
-                and ctx:QuestFingerprint()~=before
+            return ctx.pending~=nil and ctx.pending.dialogueSeen==true
+                and not ctx:HasQuestTitle("Defeat Diavolo")
         elseif source=="Storyline #4" then
             local backpack=LocalPlayer:FindFirstChildOfClass("Backpack")
             local character=LocalPlayer.Character
@@ -230,8 +230,6 @@ local STORY_DIALOGUE_NEXT = {
     ["Storyline #8"]="Storyline #9",
     ["Storyline #9"]="Storyline #10",
     ["Storyline #13"]="Storyline #14",
-    ["Storyline #15"]="Storyline #16",
-    ["Storyline #16"]="Storyline #17",
 }
 
 local function advanceKnownStoryDialogue()
@@ -612,7 +610,7 @@ local function autoStoryStep()
     elseif isFugoQuest then liveStoryStage=11
     elseif isPesciQuest then liveStoryStage=12
     elseif isGhiaccioQuest then liveStoryStage=14
-    elseif isDiavoloQuest then liveStoryStage=17
+    elseif isDiavoloQuest then liveStoryStage=14
     elseif objectiveStoryIndex then liveStoryStage=objectiveStoryIndex end
 
     -- A manually accepted Ghiaccio mission is stronger evidence than the
@@ -669,11 +667,14 @@ local function autoStoryStep()
         moduleLog("INFO","[AutoPrestige] Storyline was explicitly marked complete after the final Giorno reward; skipping repeated main-story quests")
     elseif ctx.storyResumeAfterPrestige and savedStoryHigh>=11 and savedStoryHigh<=17 then
         if liveStoryStage==0 or liveStoryStage<savedStoryHigh then
-            local resumeSource=savedStoryHigh>=17 and "Storyline #17" or (ctx.storyResumeSource or ctx.storySource)
+            local resumeSource=savedStoryHigh>=17 and "Storyline #14" or (ctx.storyResumeSource or ctx.storySource)
             if resumeSource and ctx:HasStoryDefinition(resumeSource) then
                 moduleLog("INFO","[AutoPrestige] Prestige carryover: resuming from last confirmed checkpoint "
                     ..tostring(resumeSource).." instead of replaying early Storyline steps")
-                storyDialogue(resumeSource,resumeSource=="Storyline #17" and "Defeat Diavolo" or nil)
+                local expected=resumeSource=="Storyline #14"
+                    and (ctx.storyDiavoloDefeated and "Final story reward" or "Defeat Diavolo") or nil
+                local resumed=storyDialogue(resumeSource,expected)
+                if resumed and ctx.storyDiavoloDefeated then ctx:MarkStoryCompleted() end
                 ctx.storyResumeAfterPrestige=false
                 return true
             end
@@ -720,10 +721,11 @@ local function autoStoryStep()
         elseif isGhiaccioQuest then
             turnInSource="Storyline #14"
         elseif isDiavoloQuest then
-            turnInSource="Storyline #17"
+            turnInSource="Storyline #14"
         end
         if turnInSource then
             moduleLog("INFO","[AutoPrestige] Completed story objective detected; resuming turn-in at "..turnInSource)
+            if isDiavoloQuest then ctx:MarkDiavoloDefeated() end
             local turnInConfirmed=false
             if isFugoQuest then
                 turnInConfirmed=storyDialogue(turnInSource,"Defeat Pesci")
@@ -737,7 +739,7 @@ local function autoStoryStep()
             if isDiavoloQuest and turnInConfirmed then
                 ctx.storyFinalComplete=true
                 ctx:MarkStoryCompleted()
-                moduleLog("INFO","[AutoPrestige] Final Storyline #17 turn-in confirmed after recovery")
+                moduleLog("INFO","[AutoPrestige] Final Storyline #14 dialogue confirmed after recovery")
             end
             ctx:Wait(0.2)
             return true
@@ -783,11 +785,34 @@ local function autoStoryStep()
         return true
     end
 
-    -- A saved #14 checkpoint means Mista already sent the player to defeat
-    -- Ghiaccio. After that boss is gone, the next Mista conversation is #15.
-    -- The prior build incorrectly reopened #14 and waited for Diavolo directly.
+    -- Recover the final handoff after an executor restart: once Diavolo's
+    -- defeat was saved, Storyline #14 must now close the story, not re-accept him.
     if not knownStoryQuest and not mappedCombatQuest and not talkObjective
-        and not ctx.storyPreviouslyCompleted and ctx.storySource=="Storyline #14"
+        and ctx.storyDiavoloDefeated and not ctx.storyPreviouslyCompleted then
+        local retryAt=tonumber(ctx.lastPostDiavoloRecoveryAt) or 0
+        if os.clock()-retryAt>=12 then
+            ctx.lastPostDiavoloRecoveryAt=os.clock()
+            local available,reason=ctx:HasStoryDefinition("Storyline #14")
+            if available then
+                moduleLog("INFO","[AutoPrestige] Post-Diavolo recovery: opening final Storyline #14 dialogue and waiting for it to close")
+                auditStage("POST_DIAVOLO_RECOVERY",{checkpoint="Storyline #14",expected="final dialogue closed"})
+                local completed=storyDialogue("Storyline #14","Final story reward")
+                if completed then
+                    ctx.storyFinalComplete=true
+                    ctx:MarkStoryCompleted()
+                end
+            else
+                moduleLog("WARN","[AutoPrestige] Giorno Storyline #14 definition is not replicated yet: "..tostring(reason))
+            end
+        end
+        return true
+    end
+
+    -- Storyline #14 is the observed direct handoff before and after Diavolo;
+    -- do not route through Mista or Bruno Storylines #15/#16.
+    if not knownStoryQuest and not mappedCombatQuest and not talkObjective
+        and not ctx.storyPreviouslyCompleted and not ctx.storyDiavoloDefeated
+        and ctx.storySource=="Storyline #14"
         and storyPrestige==0 and storyLevel>=20 and storyLevel<50 then
         local retryAt=tonumber(ctx.lastPostGhiaccioRecoveryAt) or 0
         if os.clock()-retryAt>=12 then
@@ -1029,14 +1054,15 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Diavolo")
         if killNPC("Diavolo", 15) then
             task.wait(1)
-            moduleLog("INFO","[AutoPrestige] Diavolo defeated; opening Giorno Storyline #17 reward dialogue")
-            local finalTurnIn=storyDialogue("Storyline #17","Final story reward")
+            ctx:MarkDiavoloDefeated()
+            moduleLog("INFO","[AutoPrestige] Diavolo defeated; opening final Storyline #14 dialogue through Character.RemoteEvent PromptTriggered")
+            local finalTurnIn=storyDialogue("Storyline #14","Final story reward")
             if finalTurnIn then
                 ctx.storyFinalComplete=true
                 ctx:MarkStoryCompleted()
-                moduleLog("INFO","[AutoPrestige] Storyline #17 reward dialogue confirmed; story chain marked complete for this runtime")
+                moduleLog("INFO","[AutoPrestige] Final Storyline #14 dialogue closed and confirmed; story chain marked complete")
             else
-                moduleLog("WARN","[AutoPrestige] Diavolo was defeated, but the final Giorno reward dialogue is not yet confirmed; preserving checkpoint")
+                moduleLog("WARN","[AutoPrestige] Diavolo was defeated, but the final Storyline #14 dialogue is not yet confirmed; preserving recovery state")
             end
         end
         return true
