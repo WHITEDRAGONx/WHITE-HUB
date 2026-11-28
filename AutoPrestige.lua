@@ -7,6 +7,8 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
+    moduleLog("INFO","Build AP-AFK-20261127-R8-KOICHI-STORY; generic Patch progression + nonblocking skill allocation")
+    local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
     ctx:Wait(0.25)
@@ -22,10 +24,10 @@ getgenv().waitUntilCollect = 0.6
 getgenv().sortOrder        = "Asc"
 getgenv().lessPing         = false
 getgenv().autoRequiem      = true
-getgenv().NPCTimeOut       = 15
+-- No AutoPrestige NPC deadline: XenonLock waits until defeat or user cancellation.
 getgenv().HamonCharge      = 90
 
-ctx:Until(function() return game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character end,20,"initial Character")
+ctx:Until(function() return game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character end,nil,"initial Character")
 
 local LocalPlayer = game.Players.LocalPlayer
 local Character = nil
@@ -42,7 +44,7 @@ local function refreshCharacter(character)
         RemoteFunction=Character and Character:FindFirstChild("RemoteFunction")
         HRP=Character and Character:FindFirstChild("HumanoidRootPart")
         return Character and Character.Parent and hum and hum.Health>0 and HRP and RemoteEvent and RemoteFunction
-    end,20,"ready Character/root/remotes")
+    end,nil,"ready Character/root/remotes")
     return true
 end
 
@@ -85,15 +87,41 @@ local function countItems(name) return modules.Inventory:Count(name) end
 local function farmItem(name,amount) return ctx:Collect(name,amount) end
 local function useItem(name,amount) return ctx:Consume(name) end
 local function attemptStandFarm()
-    for attempt=1,25 do
-        ctx:Check(); refreshCharacter()
+    local attempt=0
+    while ctx:Active() do
+        attempt=attempt+1
+        ctx:Check()
+        refreshCharacter()
+
         local stand=LocalPlayer.PlayerStats.Stand.Value
-        if getgenv().standList[stand] then return true end
+        if getgenv().standList[stand] then
+            moduleLog("INFO","[AutoPrestige] Accepted Stand obtained after "..tostring(attempt-1).." roll(s): "..tostring(stand))
+            return true
+        end
+
+        -- Keep rolling until an accepted Stand is actually confirmed. No
+        -- attempt cap: AFK progression must not stop on an unlucky sequence.
+        if stand~="None" then
+            moduleLog("INFO",("[AutoPrestige] Stand roll %d: resetting %s with one Rokakaka")
+                :format(attempt,tostring(stand)))
+            farmItem("Rokakaka",1)
+            ctx:Check()
+            useItem("Rokakaka")
+            refreshCharacter()
+            ctx:Until(function()
+                return LocalPlayer.PlayerStats.Stand.Value=="None"
+            end,nil,"Rokakaka Stand reset")
+        end
+
+        moduleLog("INFO",("[AutoPrestige] Stand roll %d: collecting one Mysterious Arrow through stable Farm restock")
+            :format(attempt))
         farmItem("Mysterious Arrow",1)
-        if stand~="None" then farmItem("Rokakaka",1); useItem("Rokakaka"); refreshCharacter() end
-        useItem("Mysterious Arrow"); refreshCharacter()
+        ctx:Check()
+        useItem("Mysterious Arrow")
+        refreshCharacter()
     end
-    error("AP_STAND_ROLL_LIMIT",0)
+    ctx:Check()
+    return false
 end
 
 local function endDialogue(NPC, Dialogue, Option)
@@ -112,55 +140,19 @@ local function storyDialogue()
     return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
 end
 
--- Auto Prestige's own controller; CombatFarm/XenonLock is not modified.
+-- Auto Prestige delegates NPC combat to the shared CombatFarm/XenonLock core.
 local function killNPC(npcName,playerDistance,dontDestroyOnKill,extraParameters)
-    ctx:Check(); refreshCharacter()
-    local living=workspace:FindFirstChild("Living")
-    local NPC=nil
-    ctx:Until(function()
-        NPC=living and living:FindFirstChild(npcName)
-        local h=NPC and NPC:FindFirstChildOfClass("Humanoid")
-        return h and h.Health>0 and NPC:FindFirstChild("HumanoidRootPart")
-    end,15,"NPC "..npcName)
-    local deadline= tick()+90
-    local nextAttack,nextSkill,nextHamon=0,0,0
-    while ctx:Active() and tick()<deadline do
-        refreshCharacter()
-        local hp=NPC:FindFirstChild("HealthValue") or NPC:FindFirstChildOfClass("Humanoid")
-        local health=hp and (hp:IsA("Humanoid") and hp.Health or tonumber(hp.Value))
-        if health and health<=0 then
-            moduleLog("INFO","[AutoPrestige] Confirmed death: "..npcName)
-            return true
-        end
-        local targetRoot=NPC:FindFirstChild("HumanoidRootPart")
-        if not NPC.Parent or not targetRoot then return false end
-        local summoned=Character:FindFirstChild("SummonedStand")
-        if summoned and not summoned.Value and tick()>=nextSkill then
-            nextSkill=tick()+0.5; ctx:Invoke(RemoteFunction,"ToggleStand","Toggle")
-        end
-        local morph=Character:FindFirstChild("StandMorph")
-        if morph and morph.PrimaryPart then
-            morph.PrimaryPart.CFrame=targetRoot.CFrame+targetRoot.CFrame.lookVector*-1.1
-            HRP.CFrame=morph.PrimaryPart.CFrame+targetRoot.CFrame.lookVector-Vector3.new(0,playerDistance,0)
-        else HRP.CFrame=targetRoot.CFrame-Vector3.new(0,playerDistance,0) end
-        if extraParameters then extraParameters() end
-        if tick()>=nextHamon then
-            nextHamon=tick()+1
-            local hamon=Character:FindFirstChild("Hamon")
-            if hamon and hamon.Value<=getgenv().HamonCharge then
-                ctx:Invoke(RemoteFunction,"AssignSkillKey",{Type="Spec",Key="Enum.KeyCode.L",Skill="Hamon Breathing"})
-                ctx:Fire(RemoteEvent,"InputBegan",{Input=Enum.KeyCode.L})
-            end
-        end
-        if tick()>=nextAttack then
-            nextAttack=tick()+0.1
-            if game:GetService("CollectionService"):HasTag(NPC,"Blocking") then
-                ctx:Fire(RemoteEvent,"InputBegan",{Input=Enum.KeyCode.R})
-            else ctx:Invoke(RemoteFunction,"Attack","m1") end
-        end
-        ctx:Wait(0.05)
+    ctx:Check()
+    local combat=modules.CombatFarm
+    if not combat or type(combat.DefeatTarget)~="function" then
+        error("AP_COMBAT_API_MISSING",0)
     end
-    error("AP_NPC_TIMEOUT:"..npcName,0)
+    local defeated,reason=combat:DefeatTarget(npcName,extraParameters)
+    ctx:Check()
+    if not defeated and reason then
+        moduleLog("WARN","[AutoPrestige] Shared combat will retry "..tostring(npcName)..": "..tostring(reason))
+    end
+    return defeated==true
 end
 
 local function checkPrestige(level, prestige)
@@ -171,34 +163,115 @@ local function checkPrestige(level, prestige)
     return false
 end
 
+local skillAllocationPending=false
 local function allocateSkills()
-    if ctx.skillCharacter==Character and ctx.skillStand==LocalPlayer.PlayerStats.Stand.Value then return end
-    ctx.skillCharacter=Character; ctx.skillStand=LocalPlayer.PlayerStats.Stand.Value
-    do
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power V",  ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power IV", ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power III",["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power II", ["SkillTreeType"]="Stand"})
-        ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Destructive Power I",  ["SkillTreeType"]="Stand"})
-        if LocalPlayer.PlayerStats.Spec.Value == "Hamon (William Zeppeli)" then
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Hamon Punch III",       ["SkillTreeType"]="Spec"})
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Lung Capacity III",     ["SkillTreeType"]="Spec"})
-            ctx:Invoke(RemoteFunction,"LearnSkill", {["Skill"]="Breathing Technique III",["SkillTreeType"]="Spec"})
-        end
+    local currentStand=LocalPlayer.PlayerStats.Stand.Value
+    if ctx.skillCharacter==Character and ctx.skillStand==currentStand then return end
+    if skillAllocationPending then return end
+    ctx.skillCharacter=Character
+    ctx.skillStand=currentStand
+    skillAllocationPending=true
+
+    -- Skill allocation is optional support, never a gate in the story worker.
+    -- A yielding LearnSkill RemoteFunction must not freeze AutoPrestige progress.
+    local skills={
+        {Skill="Destructive Power V",SkillTreeType="Stand"},
+        {Skill="Destructive Power IV",SkillTreeType="Stand"},
+        {Skill="Destructive Power III",SkillTreeType="Stand"},
+        {Skill="Destructive Power II",SkillTreeType="Stand"},
+        {Skill="Destructive Power I",SkillTreeType="Stand"},
+    }
+    if LocalPlayer.PlayerStats.Spec.Value=="Hamon (William Zeppeli)" then
+        skills[#skills+1]={Skill="Hamon Punch III",SkillTreeType="Spec"}
+        skills[#skills+1]={Skill="Lung Capacity III",SkillTreeType="Spec"}
+        skills[#skills+1]={Skill="Breathing Technique III",SkillTreeType="Spec"}
     end
+
+    nativeTask.spawn(function()
+        local completed,failed=0,0
+        for _,skill in ipairs(skills) do
+            if not ctx:Active() then break end
+            local character=LocalPlayer.Character
+            local remote=character and character:FindFirstChild("RemoteFunction")
+            while ctx:Active() and (not remote or remote.Parent~=character) do
+                nativeTask.wait(0.25)
+                character=LocalPlayer.Character
+                remote=character and character:FindFirstChild("RemoteFunction")
+            end
+            if not ctx:Active() then break end
+            local ok,reason=pcall(function()
+                return remote:InvokeServer("LearnSkill",skill)
+            end)
+            if ok then
+                completed=completed+1
+            else
+                failed=failed+1
+                moduleLog("WARN","[AutoPrestige] Optional skill allocation failed for "
+                    ..tostring(skill.Skill)..": "..tostring(reason))
+            end
+        end
+        skillAllocationPending=false
+        if ctx:Active() then
+            moduleLog("INFO",("[AutoPrestige] Optional skill allocation finished: %d confirmed call(s), %d failed call(s)")
+                :format(completed,failed))
+        end
+    end)
+end
+
+local function normalizeQuestText(value)
+    return tostring(value or ""):lower():gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 end
 
 local function hasQuest(panel, questName)
     if not panel then return false end
     if panel:FindFirstChild(questName) then return true end
-    -- Some live quest panels use a generic child name (observed: "Patch")
-    -- and store the actual quest title in a descendant TextLabel/TextButton.
-    local wanted = tostring(questName):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-    for _, object in ipairs(panel:GetDescendants()) do
+
+    -- Keep this scan inside the small Quests container. Searching all of
+    -- PlayerGui every 0.5s was expensive and caused avoidable frame spikes.
+    local wanted=normalizeQuestText(questName)
+    for _,object in ipairs(panel:GetDescendants()) do
         if object:IsA("TextLabel") or object:IsA("TextButton") then
-            local text = tostring(object.Text or ""):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-            if text == wanted then return true end
+            local value=normalizeQuestText(object.Text)
+            if value~="" and (value==wanted or value:find(wanted,1,true)) then
+                return true
+            end
         end
+    end
+    return false
+end
+
+local function hasOnlyGenericPatchRow(panel)
+    if not panel then return false end
+    local rows={}
+    for _,child in ipairs(panel:GetChildren()) do
+        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            rows[#rows+1]=child
+        end
+    end
+    return #rows==1 and tostring(rows[1].Name):lower()=="patch"
+end
+
+local function questProgressState()
+    local stats=LocalPlayer:FindFirstChild("PlayerStats")
+    local progress=stats and stats:FindFirstChild("QuestProgress")
+    local maximum=stats and stats:FindFirstChild("QuestMaxProgress")
+    return tonumber(progress and progress.Value) or 0,tonumber(maximum and maximum.Value) or 0
+end
+
+local function hasKnownStoryQuest(panel)
+    for _,name in ipairs({
+        "Help Giorno by Defeating Security Guards",
+        "Defeat Leaky Eye Luca",
+        "Defeat Bucciarati",
+        "Collect $5,000 To Cover For Popo's Real Fortune",
+        "Defeat Fugo And His Purple Haze",
+        "Defeat Pesci",
+        "Defeat Ghiaccio",
+        "Defeat Diavolo",
+        "Take down 3 vampires",
+        "Return Koichi's Suitcase",
+    }) do
+        if hasQuest(panel,name) then return true end
     end
     return false
 end
@@ -210,9 +283,32 @@ local function autoStoryStep()
     end
 
     local questPanel
-    ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,5,"quest panel")
+    ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,nil,"quest panel")
     ctx:QuestEntries(questPanel)
     allocateSkills()
+
+    local observedProgress,observedMaximum=questProgressState()
+    local observedState=table.concat({
+        tostring(LocalPlayer.PlayerStats.Level.Value),
+        tostring(LocalPlayer.PlayerStats.Prestige.Value),
+        tostring(LocalPlayer.PlayerStats.Stand.Value),
+        tostring(LocalPlayer.PlayerStats.Spec.Value),
+        tostring(observedProgress).."/"..tostring(observedMaximum)
+    },"|")
+    if observedState~=ctx.lastAutoStoryState then
+        ctx.lastAutoStoryState=observedState
+        moduleLog("INFO","[AutoPrestige] Progression snapshot: Level="
+            ..tostring(LocalPlayer.PlayerStats.Level.Value)
+            .." Prestige="..tostring(LocalPlayer.PlayerStats.Prestige.Value)
+            .." Stand="..tostring(LocalPlayer.PlayerStats.Stand.Value)
+            .." Spec="..tostring(LocalPlayer.PlayerStats.Spec.Value)
+            .." Quest="..tostring(observedProgress).."/"..tostring(observedMaximum))
+    end
+    local observedStand=LocalPlayer.PlayerStats.Stand.Value
+    if getgenv().standList[observedStand] and ctx.lastAcceptedStandLog~=observedStand then
+        ctx.lastAcceptedStandLog=observedStand
+        moduleLog("INFO","[AutoPrestige] Valid Stand confirmed: "..tostring(observedStand).."; continuing Storyline progression")
+    end
 
     if LocalPlayer.PlayerStats.Level.Value >= 25 and LocalPlayer.PlayerStats.Prestige.Value >= 1
     and LocalPlayer.Backpack:FindFirstChild("Requiem Arrow")
@@ -220,7 +316,7 @@ local function autoStoryStep()
         LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(500, 2010, 500)
         local oldStand = LocalPlayer.PlayerStats.Stand.Value
         useItem("Requiem Arrow", "V")
-        ctx:Until(function() return LocalPlayer.PlayerStats.Stand.Value~=oldStand end,15,"Requiem result")
+        ctx:Until(function() return LocalPlayer.PlayerStats.Stand.Value~=oldStand end,nil,"Requiem result")
         return true
     end
 
@@ -264,25 +360,91 @@ local function autoStoryStep()
         end
     end
 
-    if #questPanel:GetChildren() < 2 then
+    local questProgress,questMaxProgress=questProgressState()
+    local questIncomplete=questMaxProgress>0 and questProgress<questMaxProgress
+    local questComplete=questMaxProgress>0 and questProgress>=questMaxProgress
+
+    -- Fresh YBA accounts can render only a generic "Patch" row. Giorno's
+    -- first Security Guard mission is the known 5-step objective; use the
+    -- replicated quest counter instead of scanning the entire PlayerGui.
+    local genericPatchActive=hasOnlyGenericPatchRow(questPanel) and questMaxProgress>0
+    local storyObjective=ctx:StoryObjective()
+    local koichiSuitcaseQuest=storyObjective=="Return Koichi's Suitcase"
+        or hasQuest(questPanel,"Return Koichi's Suitcase")
+    local genericGiornoGuardQuest=genericPatchActive
+        and questMaxProgress==5 and questProgress<questMaxProgress
+    local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest
+    local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
+
+    -- Generic Patch rows with a non-five-step counter are not the Security
+    -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
+    -- Storyline #1 fallback for this active generic row and confirms dialogue
+    -- progress using the replicated quest fingerprint.
+    if koichiSuitcaseQuest then
+        local source=ctx:StorySource()
+        if source~="Storyline #2" then error("AP_KOICHI_STORY_SOURCE_MISMATCH",0) end
+        moduleLog("INFO","[AutoPrestige] Quest: Return Koichi's Suitcase; resolved NPC "..source)
         storyDialogue()
         ctx:Wait(0.2)
+        return true
+    end
+    if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
+        local source=ctx:StorySource()
+        moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
+            ..tostring(questMaxProgress).." is not a mapped combat quest; requesting "..tostring(source))
+        storyDialogue()
+        ctx:Wait(0.2)
+        return true
     end
 
-    if hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
+    if questComplete or (not questIncomplete and not knownStoryQuest) then
+        storyDialogue()
+        ctx:Wait(0.2)
+        return true
+    end
+
+    if genericGiornoGuardQuest then
+        moduleLog("INFO","[AutoPrestige] Generic Patch + active 5-step counter identified as Giorno Security Guards")
+    end
+
+    if genericGiornoGuardQuest or hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
-        for guardIndex = 1, 5 do
+        local progress,maxProgress=questProgressState()
+        local goal=maxProgress>0 and maxProgress or 5
+        local attempts=0
+
+        while progress<goal and attempts<20 do
             ctx:Check()
-            moduleLog("INFO", "[AutoPrestige] Security Guard progress: " .. tostring(guardIndex) .. "/5")
-            if not killNPC("Security Guard", 15) then
-                moduleLog("WARN", "[AutoPrestige] Security Guard target disappeared before confirmed defeat; retrying next cycle")
+            attempts=attempts+1
+            moduleLog("INFO",("[AutoPrestige] Security Guard progress: %s/%s")
+                :format(tostring(progress),tostring(goal)))
+
+            if not killNPC("Security Guard",15) then
+                moduleLog("WARN","[AutoPrestige] Security Guard not confirmed; retrying on the next cycle")
                 return true
             end
-            if guardIndex < 5 then ctx:Wait(0.75) end
+
+            local previousProgress=progress
+            local creditDeadline=tick()+5
+            repeat
+                ctx:Wait(0.1)
+                progress,maxProgress=questProgressState()
+                if maxProgress>0 then goal=maxProgress end
+            until progress>previousProgress or tick()>=creditDeadline
+
+            if progress<=previousProgress then
+                moduleLog("WARN","[AutoPrestige] Guard defeated but quest credit has not replicated; checking again next cycle")
+                return true
+            end
         end
-        moduleLog("INFO", "[AutoPrestige] Security Guard objective loop finished; returning to Giorno")
-        ctx:Wait(1)
-        storyDialogue()
+
+        if progress>=goal then
+            moduleLog("INFO","[AutoPrestige] Security Guard objective complete; returning to Giorno")
+            ctx:Wait(1)
+            storyDialogue()
+        else
+            moduleLog("WARN","[AutoPrestige] Security Guard loop reached its safety limit; rechecking quest state")
+        end
         return true
 
     elseif not getgenv().standList[LocalPlayer.PlayerStats.Stand.Value]
@@ -405,11 +567,20 @@ local function autoStoryStep()
     and LocalPlayer.PlayerStats.Level.Value ~= 50 then
         moduleLog("INFO", "[AutoPrestige] Quest: Vampires")
         getgenv().HamonCharge = 10
+        local vampireDialogueAttempted=false
         local function vampire()
-            LocalPlayer.Character.PrimaryPart.CFrame = workspace.Living:FindFirstChild("Vampire").HumanoidRootPart.CFrame - Vector3.new(0, 15, 0)
-            if not hasQuest(questPanel, "Take down 3 vampires") then
-                if (tick() - lastTick) >= 5 then lastTick = tick() end
-                endDialogue("William Zeppeli", "Dialogue4", "Option1")
+            local living=workspace:FindFirstChild("Living")
+            local vampireNPC=living and living:FindFirstChild("Vampire")
+            local vampireRoot=vampireNPC and vampireNPC:FindFirstChild("HumanoidRootPart")
+            local character=LocalPlayer.Character
+            if vampireRoot and character and character.PrimaryPart then
+                character.PrimaryPart.CFrame=vampireRoot.CFrame-Vector3.new(0,15,0)
+            end
+            if not hasQuest(questPanel,"Take down 3 vampires") and not vampireDialogueAttempted then
+                vampireDialogueAttempted=true
+                if (tick()-lastTick)>=5 then lastTick=tick() end
+                endDialogue("William Zeppeli","Dialogue4","Option1")
+                return true
             end
         end
         killNPC("Vampire", 15, false, vampire)
@@ -438,7 +609,7 @@ local function autoStoryStep()
 end
 
 
-    local unchangedSince,lastState=os.clock(),ctx:Fingerprint()
+    local lastProgressLogAt=os.clock()+30
     while ctx:Active() do
         refreshCharacter()
         if isMaxPrestige() then
@@ -451,9 +622,11 @@ end
         if not checkPrestige(LocalPlayer.PlayerStats.Level.Value,LocalPlayer.PlayerStats.Prestige.Value) then
             autoStoryStep()
         end
-        local state=ctx:Fingerprint()
-        if state~=lastState then lastState=state; unchangedSince=os.clock() end
-        if os.clock()-unchangedSince>120 then error("AP_PROGRESS_TIMEOUT",0) end
+        if os.clock()>=lastProgressLogAt then
+            lastProgressLogAt=os.clock()+30
+            moduleLog("INFO","[AutoPrestige] Still progressing; no progress timeout. Current state: "
+                ..ctx:Fingerprint())
+        end
         ctx:Wait(0.5)
     end
 end)

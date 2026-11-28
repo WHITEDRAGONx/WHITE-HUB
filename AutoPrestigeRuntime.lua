@@ -245,45 +245,78 @@ end
 
 function Driver:Init() end
 function Driver:Restore() cleanupDialogue(true) end
-function Driver:Drive(ctx,confirmed,label,timeout)
-    if currentContext and currentContext~=ctx and callbackInFlight>0 then return false,"callback pending" end
+function Driver:Drive(ctx,confirmed,label)
+    while currentContext and currentContext~=ctx and callbackInFlight>0 and ctx:Active() do
+        ctx:Wait(0.05)
+    end
+    if not ctx:Active() then return false,"cancelled" end
     currentContext=ctx
-    local deadline=os.clock()+(timeout or 12)
     local clicks,signature,attempts,lastAt=0,nil,0,0
-    local seen=false; local ownedGui=nil
-    while ctx:Active() and os.clock()<deadline do
+    local lastStatusAt=os.clock()+30
+    local lastUnsupportedLogAt=0
+    local ownedGui=nil
+
+    -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
+    -- game to render the dialogue and keep checking the authoritative player
+    -- state; retry one visible action at a controlled cadence until confirmed.
+    while ctx:Active() do
         local gui=dialogueGui()
         local result=confirmed()
-        -- A quest/player-state confirmation is authoritative even if the game's
-        -- DialogueGui instance remains present but disabled after a fast callback.
-        -- Do not keep clicking through a completed quest dialogue until timeout.
-        if result and callbackInFlight==0 then cleanupDialogue(true); return true end
-        if gui then
-            if ownedGui and ownedGui~=gui then cleanupDialogue(true); return false,"dialogue replaced; result unresolved" end
-            ownedGui=gui; seen=true
+        if result and callbackInFlight==0 then
+            cleanupDialogue(true)
+            ctx:Log("INFO",label.." confirmed by game state after "..tostring(clicks).." dialogue input(s)")
+            return true
         end
+
+        if gui then
+            if ownedGui~=gui then
+                ownedGui=gui
+                signature=nil
+                attempts=0
+                lastAt=0
+            end
+        end
+
         if gui and not result then
             local button,kind=dialogueButton(gui)
-            if kind=="unsupported-options" then cleanupDialogue(true); return false,kind end
-            if button then
+            if kind=="unsupported-options" then
+                if os.clock()>=lastUnsupportedLogAt then
+                    lastUnsupportedLogAt=os.clock()+30
+                    ctx:Log("WARN",label.." dialogue is present but its option layout is unsupported; waiting for a readable state")
+                end
+            elseif button and callbackInFlight==0 then
                 local stage=stageSignature(gui,kind)
-                if stage~=signature then signature=stage; attempts=0; lastAt=0 end
-                if callbackInFlight==0 and (attempts==0 or os.clock()-lastAt>=0.8) then
-                    if attempts>=2 or clicks>=12 then cleanupDialogue(true); return false,"dialogue stalled" end
+                if stage~=signature then
+                    signature=stage
+                    attempts=0
+                    lastAt=0
+                end
+                if attempts==0 or os.clock()-lastAt>=1.25 then
+                    -- Pace retries instead of treating a slow/unresponsive
+                    -- dialogue as a terminal failure. The game-state predicate
+                    -- above prevents continuing after the step is credited.
                     local ok,method=advanceDialogue(ctx,button,gui,kind,attempts,true)
+                    attempts=attempts+1
+                    lastAt=os.clock()
                     if ok then
-                        clicks=clicks+1; attempts=attempts+1; lastAt=os.clock()
+                        clicks=clicks+1
                         ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending")
+                    elseif attempts%8==0 then
+                        ctx:Log("WARN",label.." dialogue action still unconfirmed; retrying without a timeout")
                     end
                 end
             end
-        elseif not gui and not seen and os.clock()>deadline-(timeout or 12)+5 then
-            cleanupDialogue(true); return false,"dialogue not detected"
         end
-        ctx:Wait(0.03)
+
+        if os.clock()>=lastStatusAt then
+            lastStatusAt=os.clock()+30
+            ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks))
+        end
+        ctx:Wait(0.05)
     end
+
     cleanupDialogue(true)
-    return false,ctx:Active() and "result timeout" or "cancelled"
+    return false,"cancelled"
 end
 -- Diagnostic-only Giorno analyzer. It logs names/paths of likely NPC prompts
 -- and dialogue definitions; it does not trigger or interact with any dialogue.
@@ -335,18 +368,20 @@ local function findPrompt(npc)
     local definition=ReplicatedStorage:FindFirstChild("Dialogue") or ReplicatedStorage:FindFirstChild("NewDialogue")
     if definition then roots[#roots+1]=definition end
 
-    -- Storyline #1 is the story-dialogue key used by AutoPrestige, not the
-    -- physical NPC prompt name on a fresh YBA account. Resolve it to Giorno.
+    -- Storyline keys are stable indices; live models can expose display names.
+    local storyIndex=npc:match("^Storyline #(%d+)$")
+    local storyAliases={["1"]="Giorno Giovanna",["2"]="Koichi"}
+    local storyAlias=storyIndex and storyAliases[storyIndex]
     local names={npc}
-    if npc=="Storyline #1" then names[#names+1]="Giorno Giovanna" end
+    if storyAlias then names[#names+1]=storyAlias end
     local function matches(value)
         for _,name in ipairs(names) do
             if value==name then return true end
         end
         -- Live story NPC models use display names such as
-        -- "Storyline #1 (Giorno)", while the quest key is "Storyline #1".
-        if npc=="Storyline #1" and type(value)=="string"
-            and value:match("^Storyline #1 %([^%)]+%)$") then
+        -- "Storyline #2 (Koichi)", while the quest key remains "Storyline #2".
+        if storyIndex and type(value)=="string"
+            and value:match("^Storyline #"..storyIndex.." %([^%)]+%)$") then
             return true
         end
         return false
@@ -392,19 +427,16 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     else
         local root=ReplicatedStorage:FindFirstChild("NewDialogue")
         local target=root and root:FindFirstChild(npc)
-        if not target and npc=="Storyline #1" then target=root and root:FindFirstChild("Giorno Giovanna") end
-        -- YBA can replicate the physical storyline NPC under Workspace.Dialogues
-        -- without a ProximityPrompt or a ReplicatedStorage definition. Prefer that
-        -- live model as PromptTriggered's target before attempting any remote fallback.
-        if not target and npc=="Storyline #1" then
+        if not target and storyAlias then target=root and root:FindFirstChild(storyAlias) end
+        -- Prefer the exact live Storyline index; do not choose another NPC that
+        -- happens to share a display-name fragment.
+        if not target and storyIndex then
             local liveDialogues=workspace:FindFirstChild("Dialogues")
             if liveDialogues then
-                target=liveDialogues:FindFirstChild("Storyline #1")
-                    or liveDialogues:FindFirstChild("Storyline #1 (Giorno)")
-                -- Prefer the exact storyline index, not any Giorno NPC.
+                target=liveDialogues:FindFirstChild(npc)
                 if not target then
                     for _,candidate in ipairs(liveDialogues:GetChildren()) do
-                        if candidate.Name:match("^Storyline #1 %([^%)]+%)$") then
+                        if candidate.Name:match("^Storyline #"..storyIndex.." %([^%)]+%)$") then
                             target=candidate
                             break
                         end
@@ -460,6 +492,7 @@ end)()
 -- DEV compatibility scope. No scheduler/profiles; tracks only Auto Prestige work.
 local Runtime={}
 local modules, registered, current, serial, previous
+local lastPatchDiagnostic=nil
 local nativeTask=task
 local CANCEL='AP_CANCELLED'
 local function log(level,message)
@@ -475,6 +508,130 @@ local function stat(name)
     local p=player(); local stats=p and p:FindFirstChild('PlayerStats'); local value=stats and stats:FindFirstChild(name)
     return value and value.Value
 end
+
+local HttpService=game:GetService('HttpService')
+local TeleportService=game:GetService('TeleportService')
+local AP_TRANSFER_FILE='WHITE_AUTOPRESTIGE_TRANSFER.json'
+local AP_TRANSFER_MARKER='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
+local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/dev/2026-11-27-koichi-story-r8/'
+
+local function transferQueueFunction()
+    local fn=queue_on_teleport or queueonteleport
+    if type(fn)~='function' and type(syn)=='table' then fn=syn.queue_on_teleport end
+    return fn
+end
+
+local function validTransferRecord(record)
+    if type(record)~='table' or record.schema~='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
+        or type(record.id)~='string' or #record.id~=36
+        or type(record.created)~='number' or record.created%1~=0
+        or type(record.place)~='number' or record.place~=game.PlaceId
+        or type(record.origin)~='string' or #record.origin<1 or #record.origin>100
+        or type(record.destination)~='string' or #record.destination<1 or #record.destination>100
+        or record.origin==record.destination
+        or (record.kind~='restock' and record.kind~='manual')
+        or type(record.item)~='string' or #record.item<1 or #record.item>100
+        or type(record.count)~='number' or record.count%1~=0 or record.count<0 or record.count>50
+        or type(record.required)~='number' or record.required%1~=0
+        or record.required<0 or record.required>50 then
+        return false
+    end
+    if record.kind=='restock' and (record.required<1 or record.count>=record.required) then return false end
+    if record.kind=='manual' and record.required~=0 then return false end
+    return true
+end
+
+local function invalidateTransfer(id)
+    if type(readfile)=='function' and type(writefile)=='function' then
+        local ok,raw=pcall(readfile,AP_TRANSFER_FILE)
+        if ok and type(raw)=='string' then
+            local decoded,record=pcall(HttpService.JSONDecode,HttpService,raw)
+            if id==nil or (decoded and type(record)=='table' and record.id==id) then
+                pcall(writefile,AP_TRANSFER_FILE,'{}')
+            end
+        end
+    end
+    local ok,value=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if ok and (id==nil or value==id) then
+        pcall(TeleportService.SetTeleportSetting,TeleportService,AP_TRANSFER_MARKER,'')
+    end
+end
+
+local function readTransfer()
+    if type(readfile)~='function' then return nil end
+    local ok,raw=pcall(readfile,AP_TRANSFER_FILE)
+    if not ok or type(raw)~='string' or #raw>5000 then return nil end
+    local decoded,record=pcall(HttpService.JSONDecode,HttpService,raw)
+    return decoded and validTransferRecord(record) and record or nil
+end
+
+local function buildQueuedTransferLoader(record)
+    local q=string.format
+    local lines={
+        'local FILE='..q('%q',AP_TRANSFER_FILE),
+        'local MARKER='..q('%q',AP_TRANSFER_MARKER),
+        'local EXPECTED_ID='..q('%q',record.id),
+        'local BASE='..q('%q',AP_TRANSFER_BASE),
+        'local ok,raw=pcall(readfile,FILE); if not ok or type(raw)~="string" then return end',
+        'local decoded,r=pcall(function() return game:GetService("HttpService"):JSONDecode(raw) end)',
+        'if not decoded or type(r)~="table" or r.schema~="WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1" or r.id~=EXPECTED_ID or r.destination~=game.JobId or r.place~=game.PlaceId or r.origin==game.JobId or (r.kind~="restock" and r.kind~="manual") then return end',
+        'local service=game:GetService("TeleportService")',
+        'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
+        'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
+        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261127-R8-KOICHI-STORY",1,true) then return end',
+        'local farmOk,farm=pcall(function() return game:HttpGet(BASE.."Farm.lua") end); if not farmOk or not farm:find("WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER",1,true) then return end',
+        'local oldBase='..q('%q','local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/"'),
+        'local newBase='..q('%q','local BASE_URL = "'..AP_TRANSFER_BASE..'"'),
+        'local at=main:find(oldBase,1,true); if not at then return end',
+        'main=main:sub(1,at-1)..newBase..main:sub(at+#oldBase)',
+        'local compiler=loadstring or load; if type(compiler)~="function" then return end',
+        'local chunk,err=compiler(main,"@WHITE_HUB_AUTOPRESTIGE_AUTOHOP"); if not chunk then warn(err); return end',
+        'chunk()'
+    }
+    return table.concat(lines,'\n')
+end
+
+local function issueTransfer(record)
+    if type(writefile)~='function' or type(readfile)~='function'
+        or type(transferQueueFunction())~='function'
+        or type(TeleportService.SetTeleportSetting)~='function'
+        or type(TeleportService.GetTeleportSetting)~='function'
+        or not validTransferRecord(record) then
+        return false,'AutoPrestige transfer persistence/queue API unavailable'
+    end
+    local encodedOk,raw=pcall(HttpService.JSONEncode,HttpService,record)
+    if not encodedOk or type(raw)~='string' or #raw>5000 then
+        return false,'AutoPrestige transfer record could not be encoded'
+    end
+    local writeOk=pcall(writefile,AP_TRANSFER_FILE,raw)
+    local readOk,readBack=pcall(readfile,AP_TRANSFER_FILE)
+    if not writeOk or not readOk or readBack~=raw then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige transfer record could not be persisted'
+    end
+    local markerOk=pcall(TeleportService.SetTeleportSetting,TeleportService,AP_TRANSFER_MARKER,record.id)
+    local markerReadOk,marker=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if not markerOk or not markerReadOk or marker~=record.id then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige one-use teleport marker unavailable'
+    end
+    local queued,result=pcall(transferQueueFunction(),buildQueuedTransferLoader(record))
+    if not queued or result==false then
+        invalidateTransfer(record.id)
+        return false,'AutoPrestige destination loader could not be queued'
+    end
+    return true
+end
+
+local function claimArrivalTransfer()
+    local record=readTransfer()
+    if not record or record.destination~=tostring(game.JobId) then return nil end
+    local markerOk,marker=pcall(TeleportService.GetTeleportSetting,TeleportService,AP_TRANSFER_MARKER)
+    if not markerOk or marker~=record.id then return nil end
+    invalidateTransfer(record.id)
+    return record
+end
+
 local Context={}; Context.__index=Context
 function Context:Active()
     local env=getgenv and getgenv() or _G
@@ -485,17 +642,29 @@ function Context:Active()
         and (not modules.Config:Get('FarmEnabled') or self.selling==true)
 end
 function Context:Check()
+    -- Auto Prestige is a long-running AFK progression worker. No task/dialogue/
+    -- respawn wait expires due to elapsed time; only owner, toggle, runtime,
+    -- character and mode cancellation guards can end the session.
     if not self:Active() then error(CANCEL,0) end
-    if os.clock()>self.deadline then error('AP_SESSION_TIMEOUT',0) end
 end
 function Context:Wait(seconds)
     self:Check(); local endAt=os.clock()+(tonumber(seconds) or 0.03)
     repeat nativeTask.wait(math.min(0.1,math.max(0.01,endAt-os.clock()))); self:Check() until os.clock()>=endAt
 end
 function Context:Until(predicate,seconds,label)
-    local deadline=os.clock()+seconds
-    repeat self:Check(); if predicate() then return true end; self:Wait(0.05) until os.clock()>=deadline
-    error('AP_TIMEOUT:'..label,0)
+    -- The seconds parameter is retained for compatibility with older callers,
+    -- but AutoPrestige progression never expires a wait solely due to elapsed
+    -- time. Keep waiting until the real game state changes or the user cancels.
+    local lastStatusAt=os.clock()+30
+    while true do
+        self:Check()
+        if predicate() then return true end
+        if os.clock()>=lastStatusAt then
+            lastStatusAt=os.clock()+30
+            self:Log('INFO',tostring(label or 'Progress condition')..' still pending; no timeout, waiting for game state')
+        end
+        self:Wait(0.05)
+    end
 end
 function Context:Invoke(remote,...)
     self:Check(); if not remote then error('AP_REMOTE_MISSING',0) end
@@ -551,13 +720,44 @@ function Context:QuestEntries(panel)
         end
     end
     if #entries == 1 and entries[1].Name:lower() == 'patch' then
-        local progress, maximum = stat('QuestProgress'), stat('QuestMaxProgress')
-        if progress ~= nil and maximum ~= nil then
-            self:Log('INFO', ('Generic Patch row; objective counter %s/%s'):format(tostring(progress), tostring(maximum)))
+        -- The quest label is external to this row on this YBA build. Do not
+        -- scan descendants here; AutoPrestige resolves the first 5-step
+        -- Giorno objective directly from the replicated counter.
+        local progress=stat('QuestProgress')
+        local maximum=stat('QuestMaxProgress')
+        local signature=tostring(progress or 0)..'/'..tostring(maximum or 0)
+        if signature~=lastPatchDiagnostic then
+            lastPatchDiagnostic=signature
+            self:Log('INFO','Generic Patch row; objective counter '..signature)
         end
-        error('Quest status unknown. Check the in-game quest tracker.', 0)
     end
     return entries
+end
+local function normalizeStoryObjective(value)
+    local text=tostring(value or ''):lower()
+    text=text:gsub("’","'"):gsub("‘","'")
+    return text:gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+end
+function Context:StoryObjective()
+    local p=player()
+    local pg=p and p:FindFirstChild('PlayerGui')
+    if not pg then return nil,nil end
+    for _,object in ipairs(pg:GetDescendants()) do
+        if object:IsA('TextLabel') or object:IsA('TextButton') then
+            local value=normalizeStoryObjective(object.Text)
+            if value:find("return koichi's suitcase",1,true) then
+                local node=object
+                local isVisible=true
+                while node and node~=pg do
+                    if node:IsA('GuiObject') and not node.Visible then isVisible=false; break end
+                    if node:IsA('ScreenGui') and not node.Enabled then isVisible=false; break end
+                    node=node.Parent
+                end
+                if isVisible then return "Return Koichi's Suitcase","Storyline #2" end
+            end
+        end
+    end
+    return nil,nil
 end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
@@ -576,6 +776,15 @@ function Context:StorySource()
         local id=quest.Name:match('Storyline%s*(#%d+)')
         if id then candidates['Storyline '..id]=true end
     end
+    local objective,mappedSource=self:StoryObjective()
+    if mappedSource then
+        if self.storyObjective~=objective then
+            self:Log('INFO','Story objective "'..objective..'" mapped to '..mappedSource)
+        end
+        self.storyObjective=objective
+        return mappedSource
+    end
+    self.storyObjective=nil
     local source=nil
     for name in pairs(candidates) do
         if source and source~=name then error('AP_STORY_SOURCE_AMBIGUOUS',0) end
@@ -587,6 +796,14 @@ function Context:StorySource()
         error('AP_STORY_SOURCE_UNKNOWN: No active quest is visible. Check the quest panel before restarting Auto Prestige.',0)
     end
     if source then return source end
+
+    local progress=stat('QuestProgress')
+    local maximum=stat('QuestMaxProgress')
+    if #questNames==1 and questNames[1]:lower()=='patch' and (tonumber(maximum) or 0)>0 then
+        self:Log('WARN',('Generic Patch row has active objective counter %s/%s but no recognized objective title; refusing blind Storyline selection.')
+            :format(tostring(progress or 0),tostring(maximum or 0)))
+        error('AP_STORY_SOURCE_UNKNOWN: generic Patch objective title not readable; no blind Storyline fallback',0)
+    end
 
     self:Log('WARN','Story quest source not identified; active quests: '..table.concat(questNames,' | '):sub(1,500))
     error('AP_STORY_SOURCE_UNKNOWN: export quest/NPC runtime log; no blind dialogue sweep',0)
@@ -638,7 +855,7 @@ function Context:Consume(name)
     if not latest or (limit>0 and latest>=limit) then error('AP_PITY_CHANGED_BEFORE_ACTIVATION',0) end
     self.pending={name=name,confirmed=confirmed}
     self:Check(); tool:Activate() -- exactly once; never activate in a detection loop.
-    local ok,reason=Dialogue:Drive(self,confirmed,name,22)
+    local ok,reason=Dialogue:Drive(self,confirmed,name)
     if not ok then error('AP_CONSUME:'..tostring(reason),0) end
     self.pending=nil
     log('INFO',name..' confirmed by PlayerStats.Stand')
@@ -661,7 +878,10 @@ function Context:Collect(name,amount)
     for _=1,amount do
         self:Check(); if inventory:Count(name)>=amount then return true end
         local ok,reason=modules.Farm:Restock(name,function() return self:Active() end,'prestige',amount)
-        if not ok then error('AP_RESTOCK:'..tostring(reason),0) end
+        if not ok then
+            if reason=='AP_TRANSFER_REQUESTED' then error(CANCEL,0) end
+            error('AP_RESTOCK:'..tostring(reason),0)
+        end
     end
     return inventory:Count(name)>=amount
 end
@@ -678,53 +898,184 @@ function Context:Sell()
     self:Until(function() return modules.Inventory:GetMoney()>beforeMoney end,3,'Merchant money confirmation')
 end
 function Context:Log(level,message) log(level,message) end
-function Context:Hop()
-    self:Check()
-    local before=game.JobId
-    local service=game:GetService('TeleportService')
-    local failed=false
-    if service.TeleportInitFailed then
-        self.transferFailureConnection=service.TeleportInitFailed:Connect(function(failedPlayer)
-            if failedPlayer==player() then
-                failed=true
-                if self.pending and self.pending.name=='server transfer' then self.pending=nil end
-                if self.transferFailureConnection then self.transferFailureConnection:Disconnect(); self.transferFailureConnection=nil end
+function Runtime:CancelTransfer(ctx,id,reason)
+    if ctx~=current or not ctx.transferPending then return false end
+    ctx.transferPending=false
+    ctx.preserveAutoPrestige=false
+    ctx.pending=nil
+    invalidateTransfer(id or ctx.transferId)
+    for _,connection in ipairs(ctx.transferConnections or {}) do
+        pcall(function() connection:Disconnect() end)
+    end
+    ctx.transferConnections={}
+    local env=getgenv and getgenv() or _G
+    if modules and modules.Config:Get('AutoPrestige')==true then env.AutoPrestigeEnabled=true end
+    log('WARN','AutoPrestige server transfer failed; saved toggle retained and current runtime will retry: '..tostring(reason or 'teleport failed'))
+    return true
+end
+
+function Runtime:HopAndResume(kind,item,count,required,ownerActive)
+    local ctx=current
+    if not ctx or not ctx:Active() then return false,'AutoPrestige is not active' end
+    if ctx.transferPending then return false,'AutoPrestige transfer already pending' end
+    if modules.Config:Get('StayInPrivateServer')==true then
+        return false,'Stay in Private Server is enabled'
+    end
+    if type(ownerActive)=='function' and not ownerActive() then
+        return false,'Restock owner is no longer active'
+    end
+    if kind~='restock' and kind~='manual' then return false,'Invalid AutoPrestige transfer type' end
+
+    local record={
+        schema='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1',
+        id=HttpService:GenerateGUID(false),
+        created=os.time(),
+        place=game.PlaceId,
+        origin=tostring(game.JobId),
+        destination='pending',
+        kind=kind,
+        item=tostring(item or (kind=='manual' and 'manual' or 'unknown')),
+        count=math.floor(tonumber(count) or 0),
+        required=math.floor(tonumber(required) or 0),
+    }
+    local failureReason=nil
+    local transferConnections={}
+    local localPlayer=player()
+    local function disconnectLocal()
+        for _,connection in ipairs(transferConnections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        table.clear(transferConnections)
+    end
+    local function onFailed(message)
+        failureReason=tostring(message or 'Teleport failed')
+        if ctx.transferPending then
+            self:CancelTransfer(ctx,record.id,failureReason)
+        end
+    end
+    pcall(function()
+        local connection=localPlayer.OnTeleport:Connect(function(state)
+            if state==Enum.TeleportState.Failed then
+                onFailed('Player.OnTeleport reported Failed')
+            elseif state==Enum.TeleportState.InProgress then
+                log('INFO','AutoPrestige transfer entered Teleport InProgress; destination loader is queued')
+                disconnectLocal()
+                ctx.transferConnections={}
             end
         end)
+        transferConnections[#transferConnections+1]=connection
+    end)
+    pcall(function()
+        local connection=TeleportService.TeleportInitFailed:Connect(function(failedPlayer,result,description)
+            if failedPlayer==localPlayer then
+                onFailed(tostring(result)..': '..tostring(description))
+            end
+        end)
+        transferConnections[#transferConnections+1]=connection
+    end)
+
+    local persisted=false
+    local requested=modules.ServerHop:Hop(
+        function()
+            return ctx:Active() and not ctx.transferPending
+                and (type(ownerActive)~='function' or ownerActive())
+        end,
+        function(destination)
+            if failureReason or not ctx:Active()
+                or (type(ownerActive)=='function' and not ownerActive()) then
+                return false
+            end
+            record.destination=tostring(destination)
+            local saved=modules.Config:SetMany({
+                AutoPrestige=true,FarmEnabled=false,EventItemsFarmEnabled=false,
+                QuestFarmEnabled=false,NPCFarmEnabled=false
+            })
+            if not saved then
+                failureReason='AutoPrestige config could not be saved before teleport'
+                return false
+            end
+            local ok,reason=issueTransfer(record)
+            if not ok then failureReason=reason; return false end
+            persisted=true
+            return true
+        end
+    )
+
+    if not requested or not persisted or failureReason then
+        if persisted then invalidateTransfer(record.id) end
+        disconnectLocal()
+        return false,failureReason or 'No eligible different public server was found'
     end
-    local requested=modules.ServerHop:Hop(function() return self:Active() and not self.pending end)
-    if requested and not failed then
-        self.pending={name='server transfer',confirmed=function() return game.JobId~=before end}
-        Runtime:Stop('transfer requested; restart beta manually after arrival')
-    else
-        if self.transferFailureConnection then self.transferFailureConnection:Disconnect(); self.transferFailureConnection=nil end
-        error('AP_TRANSFER_NOT_REQUESTED',0)
-    end
+
+    ctx.transferPending=true
+    ctx.preserveAutoPrestige=true
+    ctx.transferId=record.id
+    ctx.transferConnections=transferConnections
+    ctx.pending={
+        name='server transfer for '..tostring(record.item),
+        confirmed=function() return tostring(game.JobId)~=record.origin end
+    }
+    self:Stop('AutoPrestige transfer requested; resuming on destination server',true)
+    return true,'AutoPrestige transfer requested'
+end
+
+function Context:Hop()
+    self:Check()
+    local ok,reason=Runtime:HopAndResume('manual','manual',0,0,function() return self:Active() end)
+    if not ok then error('AP_TRANSFER_NOT_REQUESTED:'..tostring(reason),0) end
+    error(CANCEL,0)
 end
 function Runtime:Watch()
     local env=getgenv and getgenv() or _G
     local runtime=env.__WhiteHubRuntimeId
-    local waitingSince=nil
+    local nextStartAttemptAt=0
+    local nextStartStatusAt=os.clock()+30
+    local lastStartReason=nil
     while env.__WhiteHubRuntimeId==runtime do
         local enabled=env.AutoPrestigeEnabled==true and modules.Config:Get('AutoPrestige')==true
-        if enabled and not (current and current.running) then
+        if enabled and not (current and (current.running or current.transferPending))
+            and os.clock()>=nextStartAttemptAt then
             local ok,reason=self:Start()
             if not ok then
-                waitingSince=waitingSince or os.clock()
-                if os.clock()-waitingSince>20 then self:Stop(reason); waitingSince=nil end
-            else waitingSince=nil end
-        elseif not enabled and current and current.running then self:Stop('Stopped by user') end
+                lastStartReason=tostring(reason)
+                nextStartAttemptAt=os.clock()+1
+                if os.clock()>=nextStartStatusAt then
+                    nextStartStatusAt=os.clock()+30
+                    log('INFO','AutoPrestige startup still waiting: '..lastStartReason..'; retrying without a timeout')
+                end
+            else
+                lastStartReason=nil
+                nextStartAttemptAt=0
+                nextStartStatusAt=os.clock()+30
+            end
+        elseif not enabled and current and current.running
+            and modules.Config:Get('AutoPrestige')~=true then
+            self:Stop('Stopped by user')
+        end
         nativeTask.wait(0.1)
     end
 end
 Runtime.Dialogue=Dialogue
 function Runtime:Init(all)
     Dialogue:Init()
-    modules=all; registered=nil; current=nil; serial=0
+    modules=all; registered=nil; current=nil; serial=0; lastPatchDiagnostic=nil
     local env=getgenv and getgenv() or _G
     local scope=env.__WhiteHubAPScope
     previous=type(scope)=="table" and scope.job==game.JobId and scope.place==game.PlaceId and scope or nil
-    log('INFO','Build AP-COMPAT-20261012-R1; dialogue/lifecycle beta, YBA validation pending')
+    local arrival=claimArrivalTransfer()
+    if arrival then
+        local saved=modules.Config:SetMany({
+            AutoPrestige=true,FarmEnabled=false,EventItemsFarmEnabled=false,
+            QuestFarmEnabled=false,NPCFarmEnabled=false
+        })
+        if saved then
+            log('INFO',('[SessionResume] Claimed one-use AutoPrestige transfer from %s; restock item=%s, inventory=%d/%d. Saved Auto Prestige ON.')
+                :format(tostring(arrival.origin),tostring(arrival.item),tonumber(arrival.count) or 0,tonumber(arrival.required) or 0))
+        else
+            log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
+        end
+    end
+    log('INFO','Build AP-COMPAT-20261127-R8-KOICHI-STORY; persistent restock + server-hop resume')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
@@ -739,7 +1090,7 @@ function Runtime:Start()
     modules.Config:SetMany({AutoPrestige=true,FarmEnabled=false,QuestFarmEnabled=false,NPCFarmEnabled=false})
     env.AutoPrestigeEnabled=true
     current=setmetatable({id=serial,runtime=env.__WhiteHubRuntimeId,job=game.JobId,place=game.PlaceId,running=true,tasks=0,calls=0,
-        connections={},objects={},deadline=os.clock()+1800,reason='running'},Context)
+        connections={},objects={},reason='running'},Context)
     env.__WhiteHubAPScope=current
     local ctx=current
     ctx.Task={wait=function(seconds) return ctx:Wait(seconds) end,
@@ -750,18 +1101,42 @@ function Runtime:Start()
     end)
     return true
 end
-function Runtime:Stop(reason)
+function Runtime:Stop(reason,preserveSavedToggle)
     local ctx=current
-    local wasActive=ctx and (ctx.running or ctx.tasks>0 or ctx.calls>0 or ctx.pending~=nil)
+    local keepEnabled=preserveSavedToggle==true
+    local keepTransfer=keepEnabled and ctx and ctx.transferPending==true and ctx.preserveAutoPrestige==true
+    local wasActive=ctx and (ctx.running or ctx.tasks>0 or ctx.calls>0 or ctx.pending~=nil or ctx.transferPending==true)
     if wasActive then ctx.running=false; ctx.reason=reason or 'Stopped by user' end
     local env=getgenv and getgenv() or _G
-    if not ctx or ctx.runtime==env.__WhiteHubRuntimeId then
-        env.AutoPrestigeEnabled=false
-        if modules then modules.Config:Set('AutoPrestige',false) end
+
+    if not keepEnabled then
+        if ctx and ctx.transferPending then
+            self:CancelTransfer(ctx,ctx.transferId,'AutoPrestige stopped before transfer completed')
+        else
+            invalidateTransfer()
+        end
+        if not ctx or ctx.runtime==env.__WhiteHubRuntimeId then
+            env.AutoPrestigeEnabled=false
+            if modules then modules.Config:Set('AutoPrestige',false) end
+        end
+    else
+        if keepTransfer then
+            log('INFO','[SessionResume] Preserving Auto Prestige ON and one-use transfer intent for the destination server.')
+        else
+            invalidateTransfer()
+            log('INFO','[SessionResume] Preserving saved Auto Prestige ON across runtime reload.')
+        end
     end
+
     if wasActive then
         for _,c in ipairs(ctx.connections) do pcall(function() c:Disconnect() end) end; ctx.connections={}
         for _,o in ipairs(ctx.objects) do pcall(function() o:Destroy() end) end; ctx.objects={}
+        if not keepTransfer then
+            for _,connection in ipairs(ctx.transferConnections or {}) do
+                pcall(function() connection:Disconnect() end)
+            end
+            ctx.transferConnections={}
+        end
         Dialogue:Restore()
         pcall(function()
             modules.Movement:SetNoclip(false)
@@ -786,7 +1161,7 @@ function Runtime:IsBusy()
     return busy(current)
 end
 function Runtime:GetStatus()
-    return {running=current and current.running or false,busy=self:IsBusy(),
+    return {running=current and (current.running or current.transferPending) or false,busy=self:IsBusy(),
         reason=current and current.reason or 'idle',pending=current and current.pending and current.pending.name,
         tasks=current and current.tasks or 0}
 end
@@ -802,5 +1177,9 @@ function Runtime:BuildStatus(parent,UI)
         end
     end)
 end
-function Runtime:Destroy() self:Stop('runtime replaced'); Dialogue:Restore() end
+function Runtime:Destroy()
+    local preserve=modules and modules.Config and modules.Config:Get('AutoPrestige')==true
+    self:Stop('runtime replaced',preserve)
+    Dialogue:Restore()
+end
 return Runtime

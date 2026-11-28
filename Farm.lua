@@ -18,10 +18,12 @@ local _serverHop = nil
 local _webhook   = nil
 local _halloween = nil
 local _ui = nil
+local _modules = nil
 
 local SpawnedItems    = {}
 local ItemSpawnFolder = nil
-local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate 25s limit.
+local NO_ITEM_TIMEOUT = 20 -- Historical normal cadence; restock keeps its separate wait policy.
+local WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER = 120 -- Hop only after two minutes with no valid spawn of the required item.
 local detectionEpoch = 0
 local lastItemTime    = tick()
 
@@ -38,6 +40,7 @@ local halloweenTradeBusy=false
 local lastHalloweenAttemptAt=0
 local runAutoHalloween -- Defined below; called only at serialized worker checkpoints.
 local restockFreeze, restockEpoch = nil, 0
+local prestigeRestockModeLogged=false
 
 local function prestigePending()
     local m=_G.WhiteHubModules
@@ -156,6 +159,7 @@ local function eventModeReady()
 end
 
 function Farm:Init(Modules)
+    _modules = Modules
     _runtimeLog = Modules.RuntimeLog
     _config    = Modules.Config
     _inventory = Modules.Inventory
@@ -450,7 +454,11 @@ local function CollectItem(itemInfo, index, restockGuard, collectionMode)
     -- Keep a live item in the queue so a transient prompt failure can retry.
     if model and model.Parent then
         local refreshed = GetItemInfo(model)
-        if refreshed then SpawnedItems[index] = refreshed end
+        if refreshed then
+            SpawnedItems[index] = refreshed
+        else
+            SpawnedItems[index] = nil
+        end
     else
         SpawnedItems[index] = nil
     end
@@ -578,6 +586,10 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
     if not allowedNames[name] or type(ownerActive) ~= "function" then return false, "Invalid restock request" end
     if restockBusy or manualSellBusy or sellBusy or prestigeSaleBusy or halloweenTradeBusy or stopRequested then return false, "Item Farm unavailable/busy" end
     restockBusy = true
+    if prestige and not prestigeRestockModeLogged then
+        prestigeRestockModeLogged=true
+        moduleLog("INFO","[Farm][PrestigeRestock] Using the original stable CollectItem path; Fast Pickup is bypassed for Auto Prestige.")
+    end
     local epoch, char, movementUsed = restockEpoch, Player.Character, false
     local function permitted()
         local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
@@ -589,37 +601,121 @@ function Farm:Restock(name, ownerActive, ownerKind, required)
             and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
     end
     local ok, success, reason = pcall(function()
-        local deadline, attempts, nextScan = tick() + 25, 0, 0
-        while permitted() and tick() < deadline and attempts < 8 do
-            if _inventory:Count(name) >= required then return true, "Stock confirmed" end
+        -- AutoPrestige restock has no wall-clock or attempt ceiling. It remains
+        -- the single owner of collection until the requested inventory amount
+        -- is confirmed, or the owner/character/mode is explicitly cancelled.
+        local startedAt=tick()
+        local attempts,nextScan,nextStatusAt=0,0,startedAt+30
+        local retryAfter={}
+        local lastFailureLogAt=0
+        local lastMatchingSpawnAt=startedAt
+        local nextHopAttemptAt=startedAt+WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
+
+        while permitted() do
+            local currentCount=_inventory:Count(name)
+            if currentCount>=required then
+                moduleLog("INFO",("[Farm][PrestigeRestock] Stock confirmed: %s %d/%d after %d attempt(s), %.1fs")
+                    :format(tostring(name),currentCount,required,attempts,tick()-startedAt))
+                return true,"Stock confirmed"
+            end
+
+            local now=tick()
             if not cycleBusy and not startupBusy then
                 -- Refresh from the existing detection source: phase filters may
                 -- have removed previously cached items which are still alive.
-                if ItemSpawnFolder and tick() >= nextScan then
-                    nextScan = tick() + 1
-                    for _, model in ipairs(ItemSpawnFolder:GetChildren()) do
-                        local info = GetItemInfo(model)
-                        if info and info.Name == name then SpawnedItems[model] = info end
+                if ItemSpawnFolder and now>=nextScan then
+                    nextScan=now+1
+                    local matchingSpawnCount=0
+                    for _,model in ipairs(ItemSpawnFolder:GetChildren()) do
+                        local info=GetItemInfo(model)
+                        if info and info.Name==name then
+                            matchingSpawnCount=matchingSpawnCount+1
+                            SpawnedItems[model]=info
+                        elseif SpawnedItems[model] and SpawnedItems[model].Name==name then
+                            -- Drop stale entries whose prompt/primary part vanished.
+                            SpawnedItems[model]=nil
+                            retryAfter[model]=nil
+                        end
+                    end
+                    if matchingSpawnCount>0 then lastMatchingSpawnAt=now end
+                end
+
+                local candidate,index
+                for key,info in pairs(SpawnedItems) do
+                    if info and info.Name==name and info.Model and info.Model.Parent then
+                        local refreshed=GetItemInfo(info.Model)
+                        if refreshed and refreshed.Name==name then
+                            SpawnedItems[key]=refreshed
+                            if (retryAfter[key] or 0)<=now then
+                                candidate,index=refreshed,key
+                                break
+                            end
+                        else
+                            SpawnedItems[key]=nil
+                            retryAfter[key]=nil
+                        end
+                    elseif info and info.Name==name then
+                        SpawnedItems[key]=nil
+                        retryAfter[key]=nil
                     end
                 end
-                local candidate, index
-                for key, info in pairs(SpawnedItems) do
-                    if info.Name == name and info.Model and info.Model.Parent then
-                        candidate, index = info, key; break
-                    end
-                end
+
                 if candidate then
-                    attempts = attempts + 1
-                    movementUsed = true
-                    CollectItem(candidate, index, permitted)
-                    -- A despawn is not proof of inventory acquisition.
-                    if permitted() and _inventory:Count(name) >= required then return true, "Stock confirmed" end
+                    attempts=attempts+1
+                    movementUsed=true
+                    local beforeCount=_inventory:Count(name)
+                    local callOk,collectResult=pcall(CollectItem,candidate,index,permitted)
+                    local afterCount=_inventory:Count(name)
+                    if afterCount>=required then
+                        moduleLog("INFO",("[Farm][PrestigeRestock] %s confirmed after pickup %d/%d")
+                            :format(tostring(name),afterCount,required))
+                        return true,"Stock confirmed"
+                    elseif afterCount>beforeCount then
+                        retryAfter[index]=nil
+                        moduleLog("INFO",("[Farm][PrestigeRestock] Partial stock: %s %d/%d")
+                            :format(tostring(name),afterCount,required))
+                    else
+                        -- Keep trying indefinitely, but cool down this exact
+                        -- spawn so a bad/contested prompt is never hammered.
+                        retryAfter[index]=tick()+3
+                        if not callOk and tick()-lastFailureLogAt>=15 then
+                            lastFailureLogAt=tick()
+                            moduleLog("WARN","[Farm][PrestigeRestock] Pickup attempt failed; will retry after cooldown: "..tostring(collectResult))
+                        end
+                    end
                 end
             end
-            task.wait(0.2)
+
+            if prestige and now-lastMatchingSpawnAt>=WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
+                and now>=nextHopAttemptAt then
+                nextHopAttemptAt=now+WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER
+                local currentCount=_inventory:Count(name)
+                local runtime=_modules and _modules.AutoPrestigeRuntime
+                moduleLog("WARN",("[Farm][PrestigeRestock] No valid %s spawn for %.0fs; requesting a different server (%d/%d stock).")
+                    :format(tostring(name),now-lastMatchingSpawnAt,currentCount,required))
+                if runtime and type(runtime.HopAndResume)=="function" then
+                    local hopped,hopReason=runtime:HopAndResume("restock",name,currentCount,required,permitted)
+                    if hopped then
+                        moduleLog("INFO","[Farm][PrestigeRestock] Owned hop queued; Auto Prestige and restock will resume on arrival.")
+                        return false,"AP_TRANSFER_REQUESTED"
+                    end
+                    moduleLog("WARN","[Farm][PrestigeRestock] Server hop unavailable; continuing to wait here: "..tostring(hopReason))
+                else
+                    moduleLog("WARN","[Farm][PrestigeRestock] AutoPrestige transfer runtime API is unavailable; continuing to wait.")
+                end
+            end
+
+            if tick()>=nextStatusAt then
+                nextStatusAt=tick()+30
+                local noSpawnFor=math.max(0,tick()-lastMatchingSpawnAt)
+                moduleLog("INFO",("[Farm][PrestigeRestock] Still waiting for %s: %d/%d stock, %d attempt(s), %.0fs elapsed; no valid spawn %.0fs; server hop at %.0fs without a spawn.")
+                    :format(tostring(name),_inventory:Count(name),required,attempts,tick()-startedAt,
+                        noSpawnFor,math.max(0,WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER-noSpawnFor)))
+            end
+            task.wait(0.25)
         end
-        if not permitted() then return false, "Restock cancelled/character changed" end
-        return false, "Restock limit reached (25s/8 attempts); missing " .. name
+
+        return false,"Restock cancelled/character changed"
     end)
     if restockFreeze then pcall(function() _movement:Unfreeze(restockFreeze) end) end
     if movementUsed then pcall(function() _movement:SetNoclip(false) end) end
