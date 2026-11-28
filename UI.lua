@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local UI = {}
 
-local UI_BUILD = "SILVER-V5-PUBLIC-20261018-DEV-SYNC-R5"
+local UI_BUILD = "SILVER-V5-PUBLIC-20261127-PLAYER-TARGET-R1"
 UI.Build = UI_BUILD
 
 local THEME = {
@@ -1383,7 +1383,103 @@ function UI:Create()
             end
         end
     end)
-    
+
+    -- One-shot player targeting: dropdown only lists current server players.
+    -- CombatFarm moves only StandMorph; the local HumanoidRootPart stays put.
+    MakeSection(QuestPage, "PLAYER TARGET - STAND ONLY")
+    local selectedPlayerTarget=nil
+    local playerTargetDropdownRefresh=nil
+    local playerTargetDropdown=nil
+    local function currentPlayerTargets()
+        local names={}
+        for _,other in ipairs(Players:GetPlayers()) do
+            if other~=Player then names[#names+1]=other.Name end
+        end
+        table.sort(names)
+        if #names==0 then names[1]="No other players" end
+        return names
+    end
+    local playerTargetOptions=currentPlayerTargets()
+    playerTargetDropdown,playerTargetDropdownRefresh=MakeStyledDropdown(
+        QuestPage,"Target Player",playerTargetOptions,function(name)
+            selectedPlayerTarget=(name~="No other players") and name or nil
+        end)
+    if playerTargetOptions[1]~="No other players" then
+        selectedPlayerTarget=playerTargetOptions[1]
+    end
+    local function refreshPlayerTargets()
+        local previous=selectedPlayerTarget
+        playerTargetOptions=currentPlayerTargets()
+        if playerTargetDropdownRefresh then playerTargetDropdownRefresh(playerTargetOptions) end
+        if previous and table.find(playerTargetOptions,previous) then
+            selectedPlayerTarget=previous
+            if playerTargetDropdown then playerTargetDropdown.Text=previous end
+        else
+            selectedPlayerTarget=playerTargetOptions[1]~="No other players" and playerTargetOptions[1] or nil
+        end
+    end
+    trackConnection(Players.PlayerAdded:Connect(refreshPlayerTargets))
+    trackConnection(Players.PlayerRemoving:Connect(refreshPlayerTargets))
+
+    local function makePlayerTargetButton(text,primary)
+        local btn=Instance.new("TextButton")
+        btn.Size=UDim2.new(1,-4,0,32)
+        btn.Font=Enum.Font.GothamBold
+        btn.TextSize=11
+        btn.Text=text
+        btn.Parent=QuestPage
+        styleActionButton(btn,primary)
+        return btn
+    end
+    local sendStandTargetButton=makePlayerTargetButton("SEND STAND TO PLAYER",true)
+    trackConnection(sendStandTargetButton.MouseButton1Click:Connect(function()
+        if not selectedPlayerTarget then
+            UI:ShowPopup("Select an online player first.",5)
+            return
+        end
+        if not _combatFarm then
+            UI:ShowPopup("CombatFarm unavailable.",5)
+            return
+        end
+        if not stopPrestigeForSwitch("Player Target") then return end
+        if _standFarm and _standFarm:IsRunning() then
+            _standFarm:Stop()
+            UI:SetToggleValue("Stand Farm (BETA)",false)
+        end
+        if _community and _community.IsPiloting and _community:IsPiloting() then
+            _community:StopPilot()
+        end
+        local running,mode=_combatFarm:IsRunning()
+        if running then _combatFarm:Stop() end
+        if _config then
+            _config:SetMany({
+                QuestFarmEnabled=false,NPCFarmEnabled=false,
+                EventItemsFarmEnabled=false,AutoPrestige=false
+            })
+        end
+        getgenv().AutoPrestigeEnabled=false
+        UI:SetToggleValue("Quest Farm",false)
+        UI:SetToggleValue("NPC Farm",false)
+        UI:SetToggleValue("Events Items Farm",false)
+        UI:SetToggleValue("Auto Prestige",false)
+        local ok,reason=_combatFarm:StartPlayerTarget(selectedPlayerTarget)
+        if not ok then
+            UI:ShowPopup(tostring(reason),6)
+        else
+            UI:ShowPopup("Stand-only target lock started: "..selectedPlayerTarget,5)
+        end
+    end))
+    local stopStandTargetButton=makePlayerTargetButton("STOP PLAYER TARGET",false)
+    trackConnection(stopStandTargetButton.MouseButton1Click:Connect(function()
+        local running,mode=_combatFarm and _combatFarm:IsRunning()
+        if running and mode=="PlayerTarget" then
+            _combatFarm:Stop()
+            UI:ShowPopup("Player Target stopped.",4)
+        else
+            UI:ShowPopup("No Player Target is running.",4)
+        end
+    end))
+
     MakeSection(QuestPage, "AUTO SKILLS")
     local skillsLabel = UI:AddLabel(QuestPage, "Skills: None")
     
