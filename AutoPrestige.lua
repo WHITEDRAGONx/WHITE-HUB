@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.8-MONOTONIC-STORY; reject stale #4-#9 checkpoint at Level13+ and resume Trish #11")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.9-EARLY-STORY-RESUME; clear stale #4-#9 checkpoint before objective mapping at Level13+")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -434,6 +434,20 @@ local function autoStoryStep()
     -- first Security Guard mission is the known 5-step objective; use the
     -- replicated quest counter instead of scanning the entire PlayerGui.
     local genericPatchActive=hasOnlyGenericPatchRow(questPanel) and questMaxProgress>0
+
+    -- Reconcile the saved checkpoint BEFORE reading/mapping dialogue objectives.
+    -- Otherwise an old visible Giorno/Lighter label could be mistaken for the
+    -- active stage and reopen a completed earlier Storyline after rejoin.
+    local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
+    local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
+    local savedStoryIndex=tonumber(tostring(ctx.storySource or ""):match("^Storyline #(%d+)$"))
+    if storyPrestige==0 and storyLevel>=13 and storyLevel<15
+        and savedStoryIndex and savedStoryIndex>=4 and savedStoryIndex<10 then
+        moduleLog("WARN","[AutoPrestige] Ignoring stale saved Storyline #"..tostring(savedStoryIndex)
+            .." checkpoint at Level "..tostring(storyLevel).." before objective mapping; resuming from live progression/Trish #11")
+        ctx.storySource=nil
+    end
+
     local storyObjective,mappedStorySource=ctx:StoryObjective()
     local koichiSuitcaseQuest=storyObjective=="Return Koichi's Suitcase"
         or hasQuest(questPanel,"Return Koichi's Suitcase")
@@ -558,20 +572,6 @@ local function autoStoryStep()
         storyDialogue(mappedStorySource)
         ctx:Wait(0.2)
         return true
-    end
-
-    -- Reconcile a stale saved checkpoint against the live progression level.
-    -- At Level 13-14 (Prestige 0), the player has already passed Bruno #4 and
-    -- the gang handoffs. A persisted #4-#9 value is older than the live stage;
-    -- discard it before any dialogue-to-dialogue handoff can rewind the story.
-    local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
-    local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
-    local savedStoryIndex=tonumber(tostring(ctx.storySource or ""):match("^Storyline #(%d+)$"))
-    if storyPrestige==0 and storyLevel>=13 and storyLevel<15
-        and savedStoryIndex and savedStoryIndex>=4 and savedStoryIndex<10 then
-        moduleLog("WARN","[AutoPrestige] Ignoring stale saved Storyline #"..tostring(savedStoryIndex)
-            .." checkpoint at Level "..tostring(storyLevel).."; preserving live progression and resuming from Trish #11")
-        ctx.storySource=nil
     end
 
     -- Continue only known dialogue-to-dialogue handoffs; never guess a boss or
