@@ -248,7 +248,7 @@ local function selectFastOption(token, button, gui)
     return false, "callback-mismatch"
 end
 
-local function dispatchBoundSignal(token, button, gui)
+local function dispatchBoundSignal(token, button, gui, kind)
     if callbackInFlight > 0 then return false, "callback-pending" end
     local signal = button.MouseButton1Click
     local call, method
@@ -272,7 +272,11 @@ local function dispatchBoundSignal(token, button, gui)
     end
     if not call then return false, "signal-unsupported" end
     if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
-    hideOwnedDialogue(gui)
+    -- Keep Continue pages mounted while their own handler runs. Hiding the
+    -- ScreenGui before ClickContinue can prevent the dialogue controller from
+    -- finishing its transition/close sequence. Option selections keep the
+    -- existing hidden fast path.
+    if kind ~= "ClickContinue" then hideOwnedDialogue(gui) end
     callbackInFlight = callbackInFlight + 1
     local requestContext=token
     requestContext.calls=requestContext.calls+1
@@ -289,7 +293,7 @@ end
 local function advanceDialogue(token, button, gui, kind, attempt, renderedReady)
     if not active(token) or dialogueGui() ~= gui then return false, "Stopped" end
     if not visible(button, gui) then
-        if kind == "ClickContinue" then return dispatchBoundSignal(token, button, gui) end
+        if kind == "ClickContinue" then return dispatchBoundSignal(token, button, gui, kind) end
         return false, "hidden-option"
     end
     local reason = "continue"
@@ -301,7 +305,7 @@ local function advanceDialogue(token, button, gui, kind, attempt, renderedReady)
     if callbackInFlight > 0 then return false, "callback-pending" end
     -- Quest TEST ALL route: if selection did not advance, dispatch ONLY
     -- this button's actual connected handler, not an unrelated game closure.
-    local ok, method = dispatchBoundSignal(token, button, gui)
+    local ok, method = dispatchBoundSignal(token, button, gui, kind)
     if ok then return true, method end
     if not active(token) or method == "callback-pending" then return false, method end
     -- Verified internal handlers need no rendered-page settling delay. Keep
@@ -406,7 +410,13 @@ function Driver:Drive(ctx,confirmed,label)
 
         if os.clock()>=lastStatusAt then
             lastStatusAt=os.clock()+30
-            ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks))
+            local objective, mappedSource = ctx:StoryObjective()
+            local currentGui = dialogueGui()
+            local guiState = currentGui and (currentGui.Enabled and "enabled" or "disabled") or "closed"
+            ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks)
+                .."; GUI="..guiState.."; callback="..tostring(callbackInFlight)
+                .."; objective="..tostring(objective or "none")
+                .."; source="..tostring(mappedSource or "none"))
         end
         ctx:Wait(0.05)
     end
@@ -1330,7 +1340,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261127-R8-KOICHI-STORY; persistent restock + server-hop resume')
+    log('INFO','Build AP-COMPAT-20261128-R9-CLICKCONTINUE; mounted Continue callback + dialogue-state diagnostics')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
