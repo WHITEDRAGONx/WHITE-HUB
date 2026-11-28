@@ -1,7 +1,8 @@
 -- =====================
 -- CombatFarm.lua
 -- Unified combat: NPC and Quest farming.
--- QUEST/COMBAT BUILD: R15-COMBAT-STABLE-LOCAL-DIALOGUE + PLAYER TARGET R1
+-- QUEST/COMBAT BUILD: R15-COMBAT-STABLE-LOCAL-DIALOGUE
+-- PLAYER TARGET BUILD: PLAYER-TARGET-20261127-R1
 -- Logic identical to Xenon V5 (stand positioning, attacks, death detection).
 -- FIXED: player positioned underground (yOffset -35) with noclip for safety.
 -- =====================
@@ -591,7 +592,7 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
     local previousHp = lastKnownHp
     local missingPartsSince = nil
     local attackBusy = false
-    local playerMeleeFallback = targetKind == "Player" and false or not hasStand
+    local playerMeleeFallback = targetKind ~= "Player" and not hasStand
     local nextSkillAt = 0
     local skillIndex = 1
     local perSkillLastUse = {}
