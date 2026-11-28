@@ -382,6 +382,7 @@ function Driver:Drive(ctx,confirmed,label)
                     lastAt=os.clock()
                     if ok then
                         clicks=clicks+1
+                        unsupportedReleasedGui=nil
                         if kind=="MistaSafeOption2" then
                             mistaTrapHandled=true
                             ctx:Log("INFO",label.." selected safe second answer to the 2+2 question; fatal Option1 was not selected")
