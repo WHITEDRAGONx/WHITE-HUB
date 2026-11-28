@@ -460,8 +460,7 @@ local function autoStoryStep()
     if advanceKnownStoryDialogue() then return true end
 
     -- Storyline #4 hands over the lighter; #5 is the Giorno hand-in/recruit step.
-    if hasLighter and ctx.storySource~="Storyline #5"
-        and not hasKnownStoryQuest(questPanel) then
+    if hasLighter and (ctx.storySource==nil or ctx.storySource=="Storyline #4") then
         moduleLog("INFO","[AutoPrestige] Lighter detected; opening Giorno Storyline #5")
         storyDialogue("Storyline #5")
         return true
@@ -476,7 +475,7 @@ local function autoStoryStep()
         return true
     end
 
-    if questComplete or (not questIncomplete and not knownStoryQuest) then
+    if not ctx.storyFinalComplete and (questComplete or (not questIncomplete and not knownStoryQuest)) then
         storyDialogue()
         ctx:Wait(0.2)
         return true
@@ -621,6 +620,8 @@ local function autoStoryStep()
             task.wait(1)
             moduleLog("INFO","[AutoPrestige] Diavolo defeated; opening Giorno Storyline #17 reward dialogue")
             storyDialogue("Storyline #17")
+            ctx.storyFinalComplete=true
+            moduleLog("INFO","[AutoPrestige] Storyline #17 reward dialogue confirmed; story chain marked complete for this runtime")
         end
         return true
 
