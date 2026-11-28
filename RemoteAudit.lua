@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RemoteAudit = {}
 RemoteAudit.Build = "REMOTE-AUDIT-20261128-R1"
 RemoteAudit._records = {}
+RemoteAudit._coalesced = {}
 RemoteAudit._catalog = {}
 RemoteAudit._connections = {}
 RemoteAudit._runtimeLog = nil
@@ -137,11 +138,10 @@ function RemoteAudit:Scan()
 
     self._catalog = {}
     local player = Players.LocalPlayer
-    local roots = {
-        ReplicatedStorage,
-        workspace:FindFirstChild("Dialogues"),
-        player and player.Character,
-    }
+    local roots = {ReplicatedStorage}
+    local dialogueRoot = workspace:FindFirstChild("Dialogues")
+    if dialogueRoot then roots[#roots + 1] = dialogueRoot end
+    if player and player.Character then roots[#roots + 1] = player.Character end
     local scanned = 0
     for _, root in ipairs(roots) do
         if root then
@@ -176,12 +176,22 @@ end
 
 function RemoteAudit:_append(record, signature, logToRuntime)
     local now = os.clock()
-    local previous = self._records[#self._records]
-    if previous and previous.Signature == signature and now - (previous.LastAt or 0) <= 1.25 then
+    local previous = self._coalesced[signature]
+    if previous and now - (previous.LastAt or 0) <= 1.25 then
         previous.Count = (previous.Count or 1) + 1
         previous.LastAt = now
         previous.Status = record.Status or previous.Status
         previous.Return = record.Return or previous.Return
+        previous.Error = record.Error or previous.Error
+
+        -- Move the coalesced item to the end so reports remain ordered by
+        -- most recent activity even when M1 calls are interleaved with skills.
+        local previousIndex = table.find(self._records, previous)
+        if previousIndex and previousIndex < #self._records then
+            table.remove(self._records, previousIndex)
+            table.insert(self._records, previous)
+        end
+
         if logToRuntime and previous.Count % 20 == 0 then
             self:_write("INFO", record.Module, "[RemoteAudit] " .. record.Kind
                 .. " repeated " .. tostring(previous.Count) .. "x | " .. tostring(record.Detail))
@@ -194,6 +204,7 @@ function RemoteAudit:_append(record, signature, logToRuntime)
     record.LastAt = now
     record.Count = 1
     record.Signature = signature
+    self._coalesced[signature] = record
     table.insert(self._records, record)
     while #self._records > self._maxRecords do
         table.remove(self._records, 1)
@@ -380,6 +391,7 @@ end
 function RemoteAudit:Init(Modules)
     self._runtimeLog = Modules and Modules.RuntimeLog
     self._records = {}
+    self._coalesced = {}
     self._catalog = {}
     self._connections = {}
     self._running = true
