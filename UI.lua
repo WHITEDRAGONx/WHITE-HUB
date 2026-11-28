@@ -105,6 +105,7 @@ local _halloween = nil
 local _catalog, _choices = nil, nil
 local _serverHop   = nil
 local _runtimeLog   = nil
+local _remoteAudit = nil
 
 local toggleObjects = {}
 local dropdownContainer = nil
@@ -136,6 +137,7 @@ function UI:Init(Modules)
     _catalog, _choices = Modules.GameCatalog, Modules.UIComponents.Choice
     _serverHop   = Modules.ServerHop
     _runtimeLog  = Modules.RuntimeLog
+    _remoteAudit = Modules.RemoteAudit
 end
 
 local function stopPrestigeForSwitch(label)
@@ -1890,8 +1892,9 @@ function UI:Create()
         return btn
     end
 
-    local followLogBtn = makeConsoleTool("Follow: ON", 0.00, 0.50)
-    local copySaleBtn = makeConsoleTool("Copy SALE", 0.50, 0.50)
+    local followLogBtn = makeConsoleTool("Follow: ON", 0.00, 0.34)
+    local copySaleBtn = makeConsoleTool("Copy SALE", 0.34, 0.33)
+    local copyAuditBtn = makeConsoleTool("Copy AUDIT", 0.67, 0.33)
     local followConsole = not _config or _config:Get("ConsoleFollow") ~= false
     followLogBtn.Text = followConsole and "Follow: ON" or "Follow: OFF"
 
@@ -2085,6 +2088,12 @@ function UI:Create()
 
     copySaleBtn.MouseButton1Click:Connect(function()
         copyConsoleReport(copySaleBtn, "Copy SALE", buildSaleRuntimeLog(), "Auto Sell diagnostic report copied to clipboard.")
+    end)
+
+    copyAuditBtn.MouseButton1Click:Connect(function()
+        local report = _remoteAudit and _remoteAudit:GetReport()
+            or "WHITE HUB V5 - RemoteAudit unavailable"
+        copyConsoleReport(copyAuditBtn, "Copy AUDIT", report, "Remote map and stage audit copied to clipboard.")
     end)
 
     followLogBtn.MouseButton1Click:Connect(function()
