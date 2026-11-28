@@ -517,6 +517,14 @@ local function SetupWebhookListener()
     table.insert(runtimeConnections, connection)
 end
 
+local function startupFarmActive()
+    if eventModeEnabled() then return eventModeReady() end
+    return _config:Get("FarmEnabled") == true and not stopRequested
+        and not _config:Get("AutoPrestige") and not _config:Get("StandFarmEnabled")
+        and not _config:Get("QuestFarmEnabled") and not _config:Get("NPCFarmEnabled")
+        and not prestigePending()
+end
+
 local function Startup()
     SkipLoadingScreen()
 
@@ -535,9 +543,14 @@ local function Startup()
         _movement:GetCharacter("RemoteEvent"):FireServer("PressedPlay")
     end)
 
+    if not startupFarmActive() then
+        moduleLog("INFO", "[Farm] Skipping startup movement while item collection is inactive.")
+        return
+    end
     moduleLog("INFO", "[Farm] Teleporting to safe spot...")
     _movement:Teleport(SAFE_SPOT)
     task.wait(1)
+    if not startupFarmActive() then return end
     _movement:FixCamera()
 
     local hrp = _movement:GetCharacter("HumanoidRootPart")

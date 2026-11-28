@@ -551,15 +551,21 @@ function Context:QuestEntries(panel)
         end
     end
     if #entries == 1 and entries[1].Name:lower() == 'patch' then
+        local progress, maximum = stat('QuestProgress'), stat('QuestMaxProgress')
+        if progress ~= nil and maximum ~= nil then
+            self:Log('INFO', ('Generic Patch row; objective counter %s/%s'):format(tostring(progress), tostring(maximum)))
+        end
         error('Quest status unknown. Check the in-game quest tracker.', 0)
     end
     return entries
 end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
-    local candidates={}; local any=false; local questNames={}
+    local candidates, questNames = {}, {}
+    local hasQuestRow = false
     for _,quest in ipairs(self:QuestEntries(panel)) do
-        any=true; questNames[#questNames+1]=quest.Name:sub(1,100)
+        questNames[#questNames+1] = quest.Name:sub(1,100)
+        if quest.Name:lower() ~= 'sample' then hasQuestRow = true end
         for _,key in ipairs({'NPC','NPCName','QuestGiver','DialogueNPC','Source'}) do
             local attr=quest.GetAttribute and quest:GetAttribute(key)
             local object=quest:FindFirstChild(key,true); local stored
@@ -575,14 +581,12 @@ function Context:StorySource()
         if source and source~=name then error('AP_STORY_SOURCE_AMBIGUOUS',0) end
         source=name
     end
-    if source then return source end
-    if not any then return 'Storyline #1' end
-    if self.storySource then return self.storySource end
-
-    if #questNames==1 and questNames[1]:lower()=='sample' then
-        self:Log('INFO','Quest panel contains only the '..questNames[1]..' placeholder; starting Storyline #1 for a fresh account')
-        return 'Storyline #1'
+    source = source or self.storySource
+    -- An empty quest list can also mean the player is between missions.
+    if #questNames == 0 or (not hasQuestRow and (not source or source == 'Storyline #1')) then
+        error('AP_STORY_SOURCE_UNKNOWN: No active quest is visible. Check the quest panel before restarting Auto Prestige.',0)
     end
+    if source then return source end
 
     self:Log('WARN','Story quest source not identified; active quests: '..table.concat(questNames,' | '):sub(1,500))
     error('AP_STORY_SOURCE_UNKNOWN: export quest/NPC runtime log; no blind dialogue sweep',0)
@@ -759,11 +763,10 @@ function Runtime:Stop(reason)
         for _,c in ipairs(ctx.connections) do pcall(function() c:Disconnect() end) end; ctx.connections={}
         for _,o in ipairs(ctx.objects) do pcall(function() o:Destroy() end) end; ctx.objects={}
         Dialogue:Restore()
-        pcall(function() modules.Movement:SetNoclip(false); modules.Movement:ClearFocus(); modules.Movement:FixCamera()
-            if ctx.runtime==env.__WhiteHubRuntimeId then
-                local char=player().Character; local hum=char and char:FindFirstChildOfClass('Humanoid')
-                if hum and hum.Health>0 then modules.Movement:Teleport(CFrame.new(978,-42,-49)) end
-            end
+        pcall(function()
+            modules.Movement:SetNoclip(false)
+            modules.Movement:ClearFocus()
+            modules.Movement:FixCamera()
         end)
         log('INFO','Stopped: '..ctx.reason..'; pending tasks/results remain fenced')
     end
