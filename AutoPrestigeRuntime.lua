@@ -558,7 +558,7 @@ function Driver:HasStoryDefinition(npc)
     return target~=nil,target and "exact ReplicatedStorage.Dialogue target found" or "exact Storyline definition is not replicated"
 end
 
-function Driver:Run(ctx,npc,options,confirmed,label)
+function Driver:Run(ctx,npc,options,confirmed,label,returnOnUnconfirmedClose)
     if dialogueGui() or callbackInFlight>0 then return false,"existing dialogue/callback" end
     if type(npc)~="string" or type(confirmed)~="function" then return false,"invalid dialogue request" end
     for _,option in ipairs(options or {"Option1"}) do
@@ -654,7 +654,8 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     end
 
     local retryTrishAfterFugo=(npc=="Storyline #11" and label=="Story Trish after Fugo")
-    local ok,info=self:Drive(ctx,confirmed,label or npc,retryTrishAfterFugo)
+    local closeUnconfirmed=retryTrishAfterFugo or returnOnUnconfirmedClose==true
+    local ok,info=self:Drive(ctx,confirmed,label or npc,closeUnconfirmed)
     local retryNumber=0
     while retryTrishAfterFugo and not ok
         and (info=="dialogue-closed-unconfirmed" or info=="dialogue-not-opened")
@@ -878,12 +879,23 @@ function Context:Invoke(remote,...)
     self:Check(); if not remote then error('AP_REMOTE_MISSING',0) end
     if remote.Name=='RemoteFunction' and remote.Parent~=player().Character then error('AP_STALE_CHARACTER_REMOTE',0) end
     self.calls=self.calls+1
-    local result=table.pack(pcall(remote.InvokeServer,remote,...)); self.calls=self.calls-1
+    local audit=modules and modules.RemoteAudit
+    local result
+    if audit and type(audit.Invoke)=='function' then
+        result=table.pack(pcall(audit.Invoke,audit,"AutoPrestige",remote,...))
+    else
+        result=table.pack(pcall(remote.InvokeServer,remote,...))
+    end
+    self.calls=self.calls-1
     self:Check(); if not result[1] then error('AP_REMOTE_FAILED',0) end
     return table.unpack(result,2,result.n)
 end
 function Context:Fire(remote,...)
     self:Check(); if not remote then error('AP_REMOTE_MISSING',0) end
+    local audit=modules and modules.RemoteAudit
+    if audit and type(audit.Fire)=='function' then
+        return audit:Fire("AutoPrestige",remote,...)
+    end
     remote:FireServer(...)
 end
 function Context:Spawn(callback,...)
@@ -1125,11 +1137,18 @@ function Context:HasStoryDefinition(npc)
     self:Check()
     return Dialogue:HasStoryDefinition(npc)
 end
-function Context:Dialogue(npc,options,confirm,label)
+function Context:Dialogue(npc,options,confirm,label,returnOnUnconfirmedClose)
     self:Check(); if self.pending then error('AP_RESULT_PENDING',0) end
     self:QuestEntries(player().PlayerGui:FindFirstChild('Quests',true))
-    local ok,reason=Dialogue:Run(self,npc,options,confirm,label)
-    if not ok then error('AP_DIALOGUE:'..tostring(reason),0) end
+    local audit=modules and modules.RemoteAudit
+    if audit then audit:Stage("AutoPrestige","DIALOGUE_BEGIN",{npc=npc,label=label}) end
+    local ok,reason=Dialogue:Run(self,npc,options,confirm,label,returnOnUnconfirmedClose)
+    if not ok then
+        self.pending=nil
+        if audit then audit:Stage("AutoPrestige","DIALOGUE_UNCONFIRMED",{npc=npc,reason=reason}) end
+        error('AP_DIALOGUE:'..tostring(reason),0)
+    end
+    if audit then audit:Stage("AutoPrestige","DIALOGUE_CONFIRMED",{npc=npc,label=label}) end
     if label and label:sub(1,6)=='Story ' then
         self.storySource=npc
         local storyIndex=tonumber(tostring(npc):match("^Storyline #(%d+)$"))
@@ -1148,7 +1167,7 @@ function Context:Dialogue(npc,options,confirm,label)
             saved[accountKey]={
                 source=npc,index=storyIndex,prestige=prestige,
                 highestIndex=highestIndex,highestSource=highestSource,
-                completed=(type(previous)=='table' and previous.completed==true) or highestIndex>=17
+                completed=(type(previous)=='table' and previous.completed==true)
             }
             self.storyHighWaterIndex=highestIndex
             self.storyResumeSource=highestSource
@@ -1165,6 +1184,39 @@ function Context:Dialogue(npc,options,confirm,label)
         end
     end
     log('INFO',(label or npc)..' confirmed by player state')
+    return true
+end
+function Context:MarkStoryCompleted()
+    self:Check()
+    local accountKey=tostring(player().UserId)
+    local saved=modules.Config:Get('AutoPrestigeStoryProgress')
+    if type(saved)~='table' then saved={} end
+    local previous=saved[accountKey]
+    local previousHigh=type(previous)=='table' and tonumber(previous.highestIndex) or 0
+    local record={
+        source='Storyline #17',
+        index=17,
+        prestige=tonumber(stat('Prestige')) or 0,
+        highestIndex=math.max(previousHigh or 0,17),
+        highestSource='Storyline #17',
+        completed=true
+    }
+    saved[accountKey]=record
+    local persisted,persistErr=pcall(function()
+        modules.Config:Set('AutoPrestigeStoryProgress',saved)
+    end)
+    if not persisted then
+        log('ERROR','[SessionResume] Diavolo reward dialogue was seen, but final completion could not be saved: '..tostring(persistErr))
+        return false
+    end
+    self.storySource='Storyline #17'
+    self.storyHighWaterIndex=record.highestIndex
+    self.storyResumeSource='Storyline #17'
+    self.storyPreviouslyCompleted=true
+    self.storyFinalComplete=true
+    log('INFO','[SessionResume] Storyline marked complete only after the post-Diavolo Giorno reward dialogue.')
+    local audit=modules and modules.RemoteAudit
+    if audit then audit:Stage("AutoPrestige","STORY_COMPLETED",{source="Storyline #17",prestige=record.prestige}) end
     return true
 end
 function Context:Consume(name)
@@ -1461,8 +1513,8 @@ function Runtime:Start()
             ctx.storySource=restoreSource
             ctx.storyHighWaterIndex=highestIndex or restoreIndex
             ctx.storyResumeSource=restoreSource
-            ctx.storyResumeAfterPrestige=not samePrestige and not (savedRecord.completed==true or (highestIndex or 0)>=17)
-            ctx.storyPreviouslyCompleted=savedRecord.completed==true or (highestIndex or 0)>=17
+            ctx.storyResumeAfterPrestige=not samePrestige and savedRecord.completed~=true
+            ctx.storyPreviouslyCompleted=savedRecord.completed==true
             ctx.storyPreviousPrestige=savedPrestige
             if samePrestige then
                 log('INFO','[SessionResume] Restored story progress '..restoreSource
