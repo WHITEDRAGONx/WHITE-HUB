@@ -734,8 +734,9 @@ function Context:QuestEntries(panel)
     return entries
 end
 local function normalizeStoryObjective(value)
-    return tostring(value or ''):lower():gsub("[’‘%z]", "'")
-        :gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+    local text=tostring(value or ''):lower()
+    text=text:gsub("’","'"):gsub("‘","'")
+    return text:gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 end
 function Context:StoryObjective()
     local p=player()
