@@ -51,13 +51,30 @@ local function buttonText(object, gui)
     return normalized:gsub("%s+", " ")
 end
 
-local function dialogueButton(gui, npc)
+local function visibleOptionButtons(options, gui)
+    local buttons = {}
+    for _, object in ipairs(options and options:GetDescendants() or {}) do
+        if object:IsA("GuiButton") and visible(object, gui)
+            and object.AbsoluteSize.X > 0 and object.AbsoluteSize.Y > 0 then
+            buttons[#buttons + 1] = object
+        end
+    end
+    table.sort(buttons, function(a, b)
+        if a.AbsolutePosition.Y == b.AbsolutePosition.Y then
+            return a.AbsolutePosition.X < b.AbsolutePosition.X
+        end
+        return a.AbsolutePosition.Y < b.AbsolutePosition.Y
+    end)
+    return buttons
+end
+
+local function dialogueButton(gui, npc, clicks, mistaTrapHandled)
     local options = gui:FindFirstChild("Options", true)
 
     -- Mista #7 has a lethal trap: Option1 ("It's four") shoots the player.
-    -- Prefer Option2 ("I actually don't know") whenever the math question or
-    -- its answer pair is visible. If the page looks dangerous but cannot be
-    -- parsed, fail closed instead of ever defaulting to Option1.
+    -- The exact transcript has two normal choices before the math question.
+    -- On the third choice page (five accepted inputs so far), choose the
+    -- second visible option if the UI uses unexpected instance names.
     if npc == "Storyline #7" and options then
         local pageText = buttonText(gui, gui)
         local optionOneText = buttonText(options:FindFirstChild("Option1"), gui)
@@ -75,9 +92,17 @@ local function dialogueButton(gui, npc)
             or optionTwoText:find("do not know", 1, true) ~= nil
             or optionTwoText:find("not sure", 1, true) ~= nil
             or optionTwoText:find("idk", 1, true) ~= nil
-        if asksTwoPlusTwo or (optionOneIsFour and optionTwoIsSafe) then
+        local transcriptQuestionStage = not mistaTrapHandled and clicks == 5
+
+        if asksTwoPlusTwo or (optionOneIsFour and optionTwoIsSafe) or transcriptQuestionStage then
             local safe = resolveButton(options:FindFirstChild("Option2"), gui)
-            if safe then return safe, "Option2" end
+            if not safe then
+                local visibleButtons = visibleOptionButtons(options, gui)
+                if #visibleButtons == 2 then
+                    safe = visibleButtons[2]
+                end
+            end
+            if safe then return safe, "MistaSafeOption2" end
             return nil, "unsupported-options"
         end
         if optionOneIsFour then
@@ -302,6 +327,8 @@ function Driver:Drive(ctx,confirmed,label)
     local lastStatusAt=os.clock()+30
     local lastUnsupportedLogAt=0
     local ownedGui=nil
+    local unsupportedReleasedGui=nil
+    local mistaTrapHandled=false
 
     -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
     -- game to render the dialogue and keep checking the authoritative player
@@ -325,11 +352,19 @@ function Driver:Drive(ctx,confirmed,label)
         end
 
         if gui and not result then
-            local button,kind=dialogueButton(gui,ctx.pending and ctx.pending.npc)
+            local button,kind=dialogueButton(gui,ctx.pending and ctx.pending.npc,clicks,mistaTrapHandled)
             if kind=="unsupported-options" then
+                -- dispatchBoundSignal hides the owned ScreenGui while handlers run.
+                -- If an option page is still unreadable, restore it immediately
+                -- so the player is never left with an invisible modal trapping input.
+                if hiddenDialogues[gui] ~= nil and unsupportedReleasedGui ~= gui then
+                    cleanupDialogue(true)
+                    unsupportedReleasedGui=gui
+                    ctx:Log("WARN",label.." option layout unreadable; DialogueGui restored for manual choice. Automation will resume after the quest state changes.")
+                end
                 if os.clock()>=lastUnsupportedLogAt then
                     lastUnsupportedLogAt=os.clock()+30
-                    ctx:Log("WARN",label.." dialogue is present but its option layout is unsupported; waiting for a readable state")
+                    ctx:Log("WARN",label.." dialogue option layout is unsupported; refusing to guess a choice")
                 end
             elseif button and callbackInFlight==0 then
                 local stage=stageSignature(gui,kind)
@@ -347,7 +382,12 @@ function Driver:Drive(ctx,confirmed,label)
                     lastAt=os.clock()
                     if ok then
                         clicks=clicks+1
-                        ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending")
+                        if kind=="MistaSafeOption2" then
+                            mistaTrapHandled=true
+                            ctx:Log("INFO",label.." selected safe second answer to the 2+2 question; fatal Option1 was not selected")
+                        else
+                            ctx:Log("INFO",label.." input "..kind.." via "..tostring(method).."; result pending")
+                        end
                     elseif attempts%8==0 then
                         ctx:Log("WARN",label.." dialogue action still unconfirmed; retrying without a timeout")
                     end
