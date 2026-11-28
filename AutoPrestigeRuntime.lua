@@ -1045,7 +1045,30 @@ function Context:Dialogue(npc,options,confirm,label)
     self:QuestEntries(player().PlayerGui:FindFirstChild('Quests',true))
     local ok,reason=Dialogue:Run(self,npc,options,confirm,label)
     if not ok then error('AP_DIALOGUE:'..tostring(reason),0) end
-    if label and label:sub(1,6)=='Story ' then self.storySource=npc end
+    if label and label:sub(1,6)=='Story ' then
+        self.storySource=npc
+        local storyIndex=tonumber(tostring(npc):match("^Storyline #(%d+)$"))
+        if storyIndex then
+            local accountKey=tostring(player().UserId)
+            local prestige=tonumber(stat('Prestige')) or 0
+            local saved=modules.Config:Get('AutoPrestigeStoryProgress')
+            if type(saved)~='table' then saved={} end
+            local previous=saved[accountKey]
+            local previousPrestige=type(previous)=='table' and tonumber(previous.prestige) or nil
+            local previousIndex=type(previous)=='table' and tonumber(previous.index) or nil
+            if previousPrestige~=prestige or not previousIndex or storyIndex>=previousIndex then
+                saved[accountKey]={source=npc,index=storyIndex,prestige=prestige}
+                local persisted,persistErr=pcall(function()
+                    modules.Config:Set('AutoPrestigeStoryProgress',saved)
+                end)
+                if persisted then
+                    log('INFO','[SessionResume] Saved confirmed story progress '..npc..' for this player/prestige')
+                else
+                    log('WARN','[SessionResume] Could not persist Storyline progress: '..tostring(persistErr))
+                end
+            end
+        end
+    end
     log('INFO',(label or npc)..' confirmed by player state')
     return true
 end
@@ -1327,6 +1350,20 @@ function Runtime:Start()
     local ctx=current
     ctx.Task={wait=function(seconds) return ctx:Wait(seconds) end,
         spawn=function(fn,...) return ctx:Spawn(fn,...) end}
+    local accountKey=tostring(player().UserId)
+    local savedProgress=modules.Config:Get('AutoPrestigeStoryProgress')
+    local savedRecord=type(savedProgress)=='table' and savedProgress[accountKey] or nil
+    local currentPrestige=tonumber(stat('Prestige')) or 0
+    if type(savedRecord)=='table' and tonumber(savedRecord.prestige)==currentPrestige
+        and type(savedRecord.source)=='string'
+        and savedRecord.source:match("^Storyline #(%d+)$") then
+        local savedIndex=tonumber(savedRecord.index)
+        if savedIndex and savedIndex>=4 and savedIndex<=17 then
+            ctx.storySource=savedRecord.source
+            log('INFO','[SessionResume] Restored story progress '..savedRecord.source
+                ..' for this player at Prestige '..tostring(currentPrestige))
+        end
+    end
     ctx:Spawn(function()
         registered(ctx)
         if ctx:Active() then self:Stop('completed') end
