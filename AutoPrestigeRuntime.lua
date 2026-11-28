@@ -329,6 +329,8 @@ function Driver:Drive(ctx,confirmed,label)
     local ownedGui=nil
     local unsupportedReleasedGui=nil
     local mistaTrapHandled=false
+    local dialogueSeen=false
+    local confirmedWhileOpenLogged=false
 
     -- AFK progression has no dialogue deadline or retry ceiling. Wait for the
     -- game to render the dialogue and keep checking the authoritative player
@@ -336,13 +338,14 @@ function Driver:Drive(ctx,confirmed,label)
     while ctx:Active() do
         local gui=dialogueGui()
         local result=confirmed()
-        if result and callbackInFlight==0 then
+        if result and callbackInFlight==0 and dialogueSeen and not gui then
             cleanupDialogue(true)
-            ctx:Log("INFO",label.." confirmed by game state after "..tostring(clicks).." dialogue input(s)")
+            ctx:Log("INFO",label.." confirmed by game state after "..tostring(clicks).." dialogue input(s); dialogue GUI closed")
             return true
         end
 
         if gui then
+            dialogueSeen=true
             if ownedGui~=gui then
                 ownedGui=gui
                 signature=nil
@@ -351,7 +354,12 @@ function Driver:Drive(ctx,confirmed,label)
             end
         end
 
-        if gui and not result then
+        if result and gui and not confirmedWhileOpenLogged then
+            confirmedWhileOpenLogged=true
+            ctx:Log("INFO",label.." quest state changed while dialogue remained open; finishing the visible dialogue before advancing")
+        end
+
+        if gui then
             local button,kind=dialogueButton(gui,ctx.pending and ctx.pending.npc,clicks,mistaTrapHandled)
             if kind=="unsupported-options" then
                 -- dispatchBoundSignal hides the owned ScreenGui while handlers run.
@@ -645,7 +653,7 @@ local HttpService=game:GetService('HttpService')
 local TeleportService=game:GetService('TeleportService')
 local AP_TRANSFER_FILE='WHITE_AUTOPRESTIGE_TRANSFER.json'
 local AP_TRANSFER_MARKER='WHITE_HUB_AUTOPRESTIGE_TRANSFER_V1'
-local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/dev/2026-11-27-koichi-story-r8/'
+local AP_TRANSFER_BASE='https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/'
 
 local function transferQueueFunction()
     local fn=queue_on_teleport or queueonteleport
