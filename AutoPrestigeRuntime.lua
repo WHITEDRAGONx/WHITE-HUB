@@ -1254,7 +1254,7 @@ function Context:MarkStoryCompleted()
     self.storyDiavoloDefeated=true
     self.storyPreviouslyCompleted=true
     self.storyFinalComplete=true
-    log('INFO','[SessionResume] Storyline marked complete after the final Storyline #14 dialogue closed following Diavolo defeat.')
+    log('INFO','[SessionResume] Storyline #14 completion confirmed and persisted; main-story recovery is disabled.')
     local audit=modules and modules.RemoteAudit
     if audit then audit:Stage("AutoPrestige","STORY_COMPLETED",{source="Storyline #14",prestige=record.prestige}) end
     return true
