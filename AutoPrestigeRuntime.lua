@@ -36,8 +36,42 @@ local function resolveButton(object, gui)
     return nil
 end
 
-local function dialogueButton(gui)
+local function buttonText(object, gui)
+    if not object then return "" end
+    local parts = {}
+    if (object:IsA("TextLabel") or object:IsA("TextButton")) and visible(object, gui) then
+        parts[#parts + 1] = tostring(object.Text or "")
+    end
+    for _, child in ipairs(object:GetDescendants()) do
+        if (child:IsA("TextLabel") or child:IsA("TextButton")) and visible(child, gui) then
+            parts[#parts + 1] = tostring(child.Text or "")
+        end
+    end
+    return table.concat(parts, " "):lower():gsub("%s+", " ")
+end
+
+local function dialogueButton(gui, npc)
     local options = gui:FindFirstChild("Options", true)
+
+    -- The Trello's Mista #7 dialogue asks "What is two plus two?".
+    -- Option1 ("It's four") kills the player; fail closed unless Option2
+    -- ("I actually don't know") is visible on that exact question page.
+    if npc == "Storyline #7" and options then
+        local pageText = buttonText(gui, gui)
+        local optionOneText = buttonText(options:FindFirstChild("Option1"), gui)
+        local optionTwoText = buttonText(options:FindFirstChild("Option2"), gui)
+        local isFatalQuestion = pageText:find("two plus two", 1, true)
+            or pageText:find("2 + 2", 1, true)
+            or ((optionOneText:find("four", 1, true) ~= nil)
+                and (optionTwoText:find("don't know", 1, true) ~= nil
+                    or optionTwoText:find("dont know", 1, true) ~= nil))
+        if isFatalQuestion then
+            local safe = resolveButton(options:FindFirstChild("Option2"), gui)
+            if safe then return safe, "Option2" end
+            return nil, "unsupported-options"
+        end
+    end
+
     local first = options and resolveButton(options:FindFirstChild("Option1"), gui)
     if first then return first, "Option1" end
     -- An unsupported visible option page must not be skipped by Continue.
@@ -278,7 +312,7 @@ function Driver:Drive(ctx,confirmed,label)
         end
 
         if gui and not result then
-            local button,kind=dialogueButton(gui)
+            local button,kind=dialogueButton(gui,ctx.pending and ctx.pending.npc)
             if kind=="unsupported-options" then
                 if os.clock()>=lastUnsupportedLogAt then
                     lastUnsupportedLogAt=os.clock()+30
@@ -421,7 +455,7 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     local prompt,reason=findPrompt(npc)
     if reason then return false,reason end
     currentContext=ctx; ctx:Check()
-    ctx.pending={name=label or npc,confirmed=confirmed}
+    ctx.pending={name=label or npc,npc=npc,confirmed=confirmed}
     if prompt and type(fireproximityprompt)=="function" then
         fireproximityprompt(prompt)
     else
@@ -754,10 +788,20 @@ function Context:StoryObjective()
     local p=player()
     local pg=p and p:FindFirstChild('PlayerGui')
     if not pg then return nil,nil end
+    local lastSource=tostring(self.storySource or "")
+    local function hasAny(value,terms)
+        for _,term in ipairs(terms) do
+            if value:find(term,1,true) then return true end
+        end
+        return false
+    end
+    local function hasTalkVerb(value)
+        return hasAny(value,{"talk to","meet ","speak to","go see","visit "})
+    end
     for _,object in ipairs(pg:GetDescendants()) do
         if object:IsA('TextLabel') or object:IsA('TextButton') then
             local value=normalizeStoryObjective(object.Text)
-            if value:find("return koichi's suitcase",1,true) then
+            if value~="" then
                 local node=object
                 local isVisible=true
                 while node and node~=pg do
@@ -765,7 +809,55 @@ function Context:StoryObjective()
                     if node:IsA('ScreenGui') and not node.Enabled then isVisible=false; break end
                     node=node.Parent
                 end
-                if isVisible then return "Return Koichi's Suitcase","Storyline #2" end
+                if isVisible then
+                    if value:find("return koichi's suitcase",1,true)
+                        or value:find("koichi's suitcase",1,true) and hasAny(value,{"return","deliver","give"}) then
+                        return "Return Koichi's Suitcase","Storyline #2"
+                    end
+                    if value:find("lighter",1,true) and value:find("giorno",1,true)
+                        and hasAny(value,{"give","bring","take","deliver","return"}) then
+                        return "Deliver Lighter to Giorno","Storyline #5"
+                    end
+
+                    if value:find("talk to the members of bucciarati's gang",1,true)
+                        or value:find("meet the members of bucciarati's gang",1,true) then
+                        return "Meet Bucciarati's gang","Storyline #6"
+                    end
+
+                    if hasTalkVerb(value) then
+                        if value:find("fugo",1,true) then
+                            return "Talk to Fugo","Storyline #6"
+                        elseif value:find("narancia",1,true) then
+                            return "Talk to Narancia","Storyline #8"
+                        elseif value:find("abbacchio",1,true) then
+                            return "Talk to Abbacchio","Storyline #9"
+                        elseif value:find("mista",1,true) then
+                            if value:find("ghiaccio",1,true) or lastSource=="Storyline #13" then
+                                return "Talk to Mista about Ghiaccio","Storyline #14"
+                            end
+                            return "Talk to Mista","Storyline #7"
+                        elseif value:find("bruno",1,true) then
+                            if lastSource=="Storyline #15" or hasAny(value,{"castle","trish","diavolo","the boss"}) then
+                                return "Talk to Bruno at the castle","Storyline #16"
+                            end
+                            return "Talk to Bruno","Storyline #10"
+                        elseif value:find("trish",1,true) then
+                            if lastSource=="Storyline #11" then
+                                return "Talk to Trish after Fugo","Storyline #12"
+                            elseif lastSource=="Storyline #12" then
+                                return "Talk to Trish after Pesci","Storyline #13"
+                            end
+                            return "Talk to Trish","Storyline #11"
+                        elseif value:find("giorno",1,true) then
+                            if lastSource=="Storyline #16" or value:find("diavolo",1,true) then
+                                return "Talk to Giorno about Diavolo","Storyline #17"
+                            elseif lastSource=="Storyline #4" or value:find("lighter",1,true) then
+                                return "Deliver Lighter to Giorno","Storyline #5"
+                            end
+                            return "Talk to Giorno","Storyline #3"
+                        end
+                    end
+                end
             end
         end
     end
