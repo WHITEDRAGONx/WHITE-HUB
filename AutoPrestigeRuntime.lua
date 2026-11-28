@@ -761,9 +761,11 @@ function Context:StoryObjective()
 end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
-    local candidates={}; local any=false; local questNames={}
+    local candidates, questNames = {}, {}
+    local hasQuestRow = false
     for _,quest in ipairs(self:QuestEntries(panel)) do
-        any=true; questNames[#questNames+1]=quest.Name:sub(1,100)
+        questNames[#questNames+1] = quest.Name:sub(1,100)
+        if quest.Name:lower() ~= 'sample' then hasQuestRow = true end
         for _,key in ipairs({'NPC','NPCName','QuestGiver','DialogueNPC','Source'}) do
             local attr=quest.GetAttribute and quest:GetAttribute(key)
             local object=quest:FindFirstChild(key,true); local stored
@@ -788,14 +790,12 @@ function Context:StorySource()
         if source and source~=name then error('AP_STORY_SOURCE_AMBIGUOUS',0) end
         source=name
     end
-    if source then return source end
-    if not any then return 'Storyline #1' end
-    if self.storySource then return self.storySource end
-
-    if #questNames==1 and questNames[1]:lower()=='sample' then
-        self:Log('INFO','Quest panel contains only the '..questNames[1]..' placeholder; starting Storyline #1 for a fresh account')
-        return 'Storyline #1'
+    source = source or self.storySource
+    -- An empty quest list can also mean the player is between missions.
+    if #questNames == 0 or (not hasQuestRow and (not source or source == 'Storyline #1')) then
+        error('AP_STORY_SOURCE_UNKNOWN: No active quest is visible. Check the quest panel before restarting Auto Prestige.',0)
     end
+    if source then return source end
 
     local progress=stat('QuestProgress')
     local maximum=stat('QuestMaxProgress')
