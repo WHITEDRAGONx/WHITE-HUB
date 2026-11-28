@@ -1449,7 +1449,7 @@ function UI:Create()
         if _community and _community.IsPiloting and _community:IsPiloting() then
             _community:StopPilot()
         end
-        local running,mode=_combatFarm:IsRunning()
+        local running=_combatFarm:IsRunning()
         if running then _combatFarm:Stop() end
         if _config then
             _config:SetMany({
@@ -1462,11 +1462,30 @@ function UI:Create()
         UI:SetToggleValue("NPC Farm",false)
         UI:SetToggleValue("Events Items Farm",false)
         UI:SetToggleValue("Auto Prestige",false)
-        local ok,reason=_combatFarm:StartPlayerTarget(selectedPlayerTarget)
-        if not ok then
-            UI:ShowPopup(tostring(reason),6)
+        local targetName=selectedPlayerTarget
+        local function beginPlayerTarget()
+            local ok,reason=_combatFarm:StartPlayerTarget(targetName)
+            if not ok then
+                UI:ShowPopup(tostring(reason),6)
+            else
+                UI:ShowPopup("Stand-only target lock started: "..targetName,5)
+            end
+        end
+        if _combatFarm:IsBusy() then
+            UI:ShowPopup("Waiting for the previous combat worker to stop...",4)
+            task.spawn(function()
+                local deadline=tick()+4
+                while _combatFarm and _combatFarm:IsBusy() and tick()<deadline do
+                    task.wait(0.05)
+                end
+                if not _combatFarm or _combatFarm:IsBusy() then
+                    UI:ShowPopup("Previous combat worker is still stopping. Try again.",6)
+                    return
+                end
+                beginPlayerTarget()
+            end)
         else
-            UI:ShowPopup("Stand-only target lock started: "..selectedPlayerTarget,5)
+            beginPlayerTarget()
         end
     end))
     local stopStandTargetButton=makePlayerTargetButton("STOP PLAYER TARGET",false)
