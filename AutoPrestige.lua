@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R10.1-BRUNO-REMOTE; ignore unrelated Sample/Thug counter, open Bruno #4 through exact Dialogue remote")
+    moduleLog("INFO","Build AP-AFK-20261127-R10.2-BRUNO-CONFIRM; exact Bruno #4 remote + lighter/objective confirmation")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -145,7 +145,19 @@ local function storyDialogue(sourceOverride)
         end
     end
     local before=ctx:QuestFingerprint()
-    return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
+    local function confirmed()
+        if source=="Storyline #4" then
+            local backpack=LocalPlayer:FindFirstChildOfClass("Backpack")
+            local character=LocalPlayer.Character
+            local lighterPresent=(backpack and backpack:FindFirstChild("Lighter")~=nil)
+                or (character and character:FindFirstChild("Lighter")~=nil)
+            if lighterPresent then return true end
+            local objective=ctx:StoryObjective()
+            return objective=="Deliver Lighter to Giorno"
+        end
+        return ctx:QuestFingerprint()~=before
+    end
+    return ctx:Dialogue(source,{"Option1"},confirmed,"Story "..source)
 end
 
 -- These are dialogue-only transitions documented by the YBA Story/Trello route.
