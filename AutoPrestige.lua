@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.12-TRISH-L11-CHECKPOINT; return to Trish Storyline #11 after Fugo and preserve prestige checkpoint")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.13-TRISH-L11-CREDIT-GUARD; confirm Pesci handoff after Fugo recovery")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -601,7 +601,11 @@ local function autoStoryStep()
         end
         if turnInSource then
             moduleLog("INFO","[AutoPrestige] Completed story objective detected; resuming turn-in at "..turnInSource)
-            storyDialogue(turnInSource)
+            if isFugoQuest then
+                storyDialogue(turnInSource,"Defeat Pesci")
+            else
+                storyDialogue(turnInSource)
+            end
             if isDiavoloQuest then
                 ctx.storyFinalComplete=true
                 moduleLog("INFO","[AutoPrestige] Final Storyline #17 turn-in confirmed after recovery")
