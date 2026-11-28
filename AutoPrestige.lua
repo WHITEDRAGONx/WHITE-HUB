@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.10-TRISH-PESCI-GUARD; confirm Trish #12 only after Pesci quest appears")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.11-TRISH-RETRY-L16; resume Trish #12 after Fugo and retry unconfirmed dialogue")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -630,6 +630,27 @@ local function autoStoryStep()
     elseif resumeTrishFromLevel and moneyNow<5000 then
         moduleLog("INFO","[AutoPrestige] Trish rejoin checkpoint detected, waiting until wallet reaches $5,000 (current $"
             ..tostring(moneyNow)..")")
+    end
+
+    -- Post-Fugo rejoin checkpoint: Level 16 is the observed stage after Fugo.
+    -- A generic Sample row can hide the story quest title after restart, so
+    -- resume at Trish #12 rather than requiring an old saved checkpoint.
+    local resumeTrishAfterFugoFromSaved=(ctx.storySource=="Storyline #11"
+        or ctx.storySource=="Storyline #12")
+    local resumeTrishAfterFugoFromLevel=(ctx.storySource==nil and storyPrestige==0
+        and storyLevel>=16 and storyLevel<=17)
+    if not knownStoryQuest and not talkObjective
+        and (resumeTrishAfterFugoFromSaved or resumeTrishAfterFugoFromLevel) then
+        local trishAfterFugoAvailable,trishAfterFugoInfo=ctx:HasStoryDefinition("Storyline #12")
+        if trishAfterFugoAvailable then
+            moduleLog("INFO","[AutoPrestige] Post-Fugo checkpoint detected; returning to Trish Storyline #12 (Level="
+                ..tostring(storyLevel)..", source="..tostring(ctx.storySource or "live-level")..")")
+            storyDialogue("Storyline #12")
+            return true
+        else
+            moduleLog("WARN","[AutoPrestige] Trish Storyline #12 unavailable during post-Fugo recovery: "
+                ..tostring(trishAfterFugoInfo))
+        end
     end
 
     if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
