@@ -368,18 +368,20 @@ local function findPrompt(npc)
     local definition=ReplicatedStorage:FindFirstChild("Dialogue") or ReplicatedStorage:FindFirstChild("NewDialogue")
     if definition then roots[#roots+1]=definition end
 
-    -- Storyline #1 is the story-dialogue key used by AutoPrestige, not the
-    -- physical NPC prompt name on a fresh YBA account. Resolve it to Giorno.
+    -- Storyline keys are stable indices; live models can expose display names.
+    local storyIndex=npc:match("^Storyline #(%d+)$")
+    local storyAliases={["1"]="Giorno Giovanna",["2"]="Koichi"}
+    local storyAlias=storyIndex and storyAliases[storyIndex]
     local names={npc}
-    if npc=="Storyline #1" then names[#names+1]="Giorno Giovanna" end
+    if storyAlias then names[#names+1]=storyAlias end
     local function matches(value)
         for _,name in ipairs(names) do
             if value==name then return true end
         end
         -- Live story NPC models use display names such as
-        -- "Storyline #1 (Giorno)", while the quest key is "Storyline #1".
-        if npc=="Storyline #1" and type(value)=="string"
-            and value:match("^Storyline #1 %([^%)]+%)$") then
+        -- "Storyline #2 (Koichi)", while the quest key remains "Storyline #2".
+        if storyIndex and type(value)=="string"
+            and value:match("^Storyline #"..storyIndex.." %([^%)]+%)$") then
             return true
         end
         return false
@@ -425,19 +427,16 @@ function Driver:Run(ctx,npc,options,confirmed,label)
     else
         local root=ReplicatedStorage:FindFirstChild("NewDialogue")
         local target=root and root:FindFirstChild(npc)
-        if not target and npc=="Storyline #1" then target=root and root:FindFirstChild("Giorno Giovanna") end
-        -- YBA can replicate the physical storyline NPC under Workspace.Dialogues
-        -- without a ProximityPrompt or a ReplicatedStorage definition. Prefer that
-        -- live model as PromptTriggered's target before attempting any remote fallback.
-        if not target and npc=="Storyline #1" then
+        if not target and storyAlias then target=root and root:FindFirstChild(storyAlias) end
+        -- Prefer the exact live Storyline index; do not choose another NPC that
+        -- happens to share a display-name fragment.
+        if not target and storyIndex then
             local liveDialogues=workspace:FindFirstChild("Dialogues")
             if liveDialogues then
-                target=liveDialogues:FindFirstChild("Storyline #1")
-                    or liveDialogues:FindFirstChild("Storyline #1 (Giorno)")
-                -- Prefer the exact storyline index, not any Giorno NPC.
+                target=liveDialogues:FindFirstChild(npc)
                 if not target then
                     for _,candidate in ipairs(liveDialogues:GetChildren()) do
-                        if candidate.Name:match("^Storyline #1 %([^%)]+%)$") then
+                        if candidate.Name:match("^Storyline #"..storyIndex.." %([^%)]+%)$") then
                             target=candidate
                             break
                         end
@@ -579,7 +578,7 @@ local function buildQueuedTransferLoader(record)
         'local service=game:GetService("TeleportService")',
         'local markerOk,marker=pcall(function() return service:GetTeleportSetting(MARKER) end); if not markerOk or marker~=EXPECTED_ID then return end',
         'local mainOk,main=pcall(function() return game:HttpGet(BASE.."Main.lua") end); if not mainOk or type(main)~="string" then return end',
-        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261124-R7-GENERIC-PATCH-ADVANCE",1,true) then return end',
+        'local runtimeOk,runtime=pcall(function() return game:HttpGet(BASE.."AutoPrestigeRuntime.lua") end); if not runtimeOk or not runtime:find("AP-COMPAT-20261127-R8-KOICHI-STORY",1,true) then return end',
         'local farmOk,farm=pcall(function() return game:HttpGet(BASE.."Farm.lua") end); if not farmOk or not farm:find("WHITEHUB_AUTOPRESTIGE_NO_SPAWN_HOP_AFTER",1,true) then return end',
         'local oldBase='..q('%q','local BASE_URL = "https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/main/"'),
         'local newBase='..q('%q','local BASE_URL = "'..AP_TRANSFER_BASE..'"'),
@@ -734,6 +733,31 @@ function Context:QuestEntries(panel)
     end
     return entries
 end
+local function normalizeStoryObjective(value)
+    return tostring(value or ''):lower():gsub("[’‘%z]", "'")
+        :gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+end
+function Context:StoryObjective()
+    local p=player()
+    local pg=p and p:FindFirstChild('PlayerGui')
+    if not pg then return nil,nil end
+    for _,object in ipairs(pg:GetDescendants()) do
+        if object:IsA('TextLabel') or object:IsA('TextButton') then
+            local value=normalizeStoryObjective(object.Text)
+            if value:find("return koichi's suitcase",1,true) then
+                local node=object
+                local isVisible=true
+                while node and node~=pg do
+                    if node:IsA('GuiObject') and not node.Visible then isVisible=false; break end
+                    if node:IsA('ScreenGui') and not node.Enabled then isVisible=false; break end
+                    node=node.Parent
+                end
+                if isVisible then return "Return Koichi's Suitcase","Storyline #2" end
+            end
+        end
+    end
+    return nil,nil
+end
 function Context:StorySource()
     local panel=player().PlayerGui:FindFirstChild('Quests',true)
     local candidates={}; local any=false; local questNames={}
@@ -749,6 +773,15 @@ function Context:StorySource()
         local id=quest.Name:match('Storyline%s*(#%d+)')
         if id then candidates['Storyline '..id]=true end
     end
+    local objective,mappedSource=self:StoryObjective()
+    if mappedSource then
+        if self.storyObjective~=objective then
+            self:Log('INFO','Story objective "'..objective..'" mapped to '..mappedSource)
+        end
+        self.storyObjective=objective
+        return mappedSource
+    end
+    self.storyObjective=nil
     local source=nil
     for name in pairs(candidates) do
         if source and source~=name then error('AP_STORY_SOURCE_AMBIGUOUS',0) end
@@ -766,9 +799,9 @@ function Context:StorySource()
     local progress=stat('QuestProgress')
     local maximum=stat('QuestMaxProgress')
     if #questNames==1 and questNames[1]:lower()=='patch' and (tonumber(maximum) or 0)>0 then
-        self:Log('WARN',('Generic Patch row has active objective counter %s/%s; using the first Giorno storyline source.')
+        self:Log('WARN',('Generic Patch row has active objective counter %s/%s but no recognized objective title; refusing blind Storyline selection.')
             :format(tostring(progress or 0),tostring(maximum or 0)))
-        return 'Storyline #1'
+        error('AP_STORY_SOURCE_UNKNOWN: generic Patch objective title not readable; no blind Storyline fallback',0)
     end
 
     self:Log('WARN','Story quest source not identified; active quests: '..table.concat(questNames,' | '):sub(1,500))
@@ -1041,7 +1074,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261124-R7-GENERIC-PATCH-ADVANCE; persistent restock + server-hop resume')
+    log('INFO','Build AP-COMPAT-20261127-R8-KOICHI-STORY; persistent restock + server-hop resume')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
