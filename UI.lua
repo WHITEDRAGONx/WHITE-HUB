@@ -1471,7 +1471,8 @@ function UI:Create()
     end))
     local stopStandTargetButton=makePlayerTargetButton("STOP PLAYER TARGET",false)
     trackConnection(stopStandTargetButton.MouseButton1Click:Connect(function()
-        local running,mode=_combatFarm and _combatFarm:IsRunning()
+        local running,mode=false,nil
+        if _combatFarm then running,mode=_combatFarm:IsRunning() end
         if running and mode=="PlayerTarget" then
             _combatFarm:Stop()
             UI:ShowPopup("Player Target stopped.",4)
