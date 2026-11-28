@@ -765,8 +765,8 @@ end
 
 -- AutoPrestige is a standalone worker rather than a table module. Download and
 -- compile it during boot so a missing/broken file aborts before the main UI starts.
-local AUTO_PRESTIGE_REVISION = "84ca8741e36c0cc3cf5c8a666f36a0eba955f67d"
-local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.10-TRISH-PESCI-GUARD"
+local AUTO_PRESTIGE_REVISION = "afd558f05321dbefb7e2dee2440bf7f0da72e59d"
+local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.11-TRISH-RETRY-L16"
 local autoPrestigeSource, autoPrestigeFetchErr = fetchSource("AutoPrestige.lua", AUTO_PRESTIGE_REVISION)
 if not autoPrestigeSource then
     abortBoot("AutoPrestige", "DOWNLOAD", autoPrestigeFetchErr, autoPrestigeFetchErr)
@@ -777,7 +777,7 @@ if not autoPrestigeSource:find(EXPECTED_AUTO_PRESTIGE_BUILD, 1, true) then
     abortBoot("AutoPrestige", "VERSION CHECK", reason, reason)
     return
 end
-LOG("DOWNLOAD", "AutoPrestige build marker verified: R10.10-TRISH-PESCI-GUARD")
+LOG("DOWNLOAD", "AutoPrestige build marker verified: R10.11-TRISH-RETRY-L16")
 
 local compiler = loadstring or load
 if type(compiler) ~= "function" then
