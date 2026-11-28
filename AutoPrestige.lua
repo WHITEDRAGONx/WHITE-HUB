@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R10-BRUNO-BOOTSTRAP; ignore unrelated Sample/Thug counter, open live Bruno #4 cafe stage")
+    moduleLog("INFO","Build AP-AFK-20261127-R10.1-BRUNO-REMOTE; ignore unrelated Sample/Thug counter, open Bruno #4 through exact Dialogue remote")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -531,7 +531,7 @@ local function autoStoryStep()
     if not knownStoryQuest and not talkObjective and not hasLighter
         and ctx.storySource==nil
         and storyPrestige==0 and storyLevel>=10 and storyLevel<15 then
-        local brunoAvailable,brunoInfo=ctx:HasStoryPrompt("Storyline #4")
+        local brunoAvailable,brunoInfo=ctx:HasStoryDefinition("Storyline #4")
         if brunoAvailable then
             moduleLog("INFO","[AutoPrestige] No active Storyline objective; detected live Bruno Bucciarati #4 at Cafeteria. Starting lighter handoff.")
             storyDialogue("Storyline #4")
