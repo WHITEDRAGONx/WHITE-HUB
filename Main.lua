@@ -767,15 +767,15 @@ end
 
 -- AutoPrestige is a standalone worker rather than a table module. Download and
 -- compile it during boot so a missing/broken file aborts before the main UI starts.
-local AUTO_PRESTIGE_REVISION = "8a732d3fb051041f0bcb6ed3b593751054e76bee"
-local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.17-POST-GHIACCIO-STORYLINE14"
+local AUTO_PRESTIGE_REVISION = "0df2530f124e790964200921f3a55a251f79ab06"
+local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.18-POST-DIAVOLO-STORYLINE14-END"
 local autoPrestigeSource, autoPrestigeFetchErr = fetchSource("AutoPrestige.lua", AUTO_PRESTIGE_REVISION)
 if not autoPrestigeSource then
     abortBoot("AutoPrestige", "DOWNLOAD", autoPrestigeFetchErr, autoPrestigeFetchErr)
     return
 end
 if not autoPrestigeSource:find(EXPECTED_AUTO_PRESTIGE_BUILD, 1, true) then
-    local reason = "Pinned AutoPrestige source does not match expected build R10.16; refusing stale source."
+    local reason = "Pinned AutoPrestige source does not match expected build R10.18; refusing stale source."
     abortBoot("AutoPrestige", "VERSION CHECK", reason, reason)
     return
 end
