@@ -607,10 +607,12 @@ end
 -- ============================================================
 -- MODULE DOWNLOAD / COMPILE / EXECUTE / VALIDATE
 -- ============================================================
-local function fetchSource(file)
-    -- Cache-bust every module request so Delta/GitHub raw cannot serve an older revision.
-    local url = BASE_URL .. file .. "?whv3=" .. tostring(runtimeId)
-    LOG("DOWNLOAD", "Fetching " .. file)
+local function fetchSource(file, revision)
+    -- Pin critical standalone sources to immutable commits when requested.
+    -- Other modules continue following main with a per-runtime cache-buster.
+    local sourceBase = revision and ("https://raw.githubusercontent.com/WHITEDRAGONx/WHITE-HUB/" .. revision .. "/") or BASE_URL
+    local url = sourceBase .. file .. "?whv3=" .. tostring(runtimeId)
+    LOG("DOWNLOAD", "Fetching " .. file .. (revision and (" @ " .. revision:sub(1, 7)) or ""))
 
     local response, fetchError, done = nil, nil, false
     task.spawn(function()
@@ -763,11 +765,19 @@ end
 
 -- AutoPrestige is a standalone worker rather than a table module. Download and
 -- compile it during boot so a missing/broken file aborts before the main UI starts.
-local autoPrestigeSource, autoPrestigeFetchErr = fetchSource("AutoPrestige.lua")
+local AUTO_PRESTIGE_REVISION = "a333a67442592d3d4f55a8997c6a05a5b1354ea5"
+local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.9-EARLY-STORY-RESUME"
+local autoPrestigeSource, autoPrestigeFetchErr = fetchSource("AutoPrestige.lua", AUTO_PRESTIGE_REVISION)
 if not autoPrestigeSource then
     abortBoot("AutoPrestige", "DOWNLOAD", autoPrestigeFetchErr, autoPrestigeFetchErr)
     return
 end
+if not autoPrestigeSource:find(EXPECTED_AUTO_PRESTIGE_BUILD, 1, true) then
+    local reason = "Pinned AutoPrestige source does not match expected build R10.9; refusing stale source."
+    abortBoot("AutoPrestige", "VERSION CHECK", reason, reason)
+    return
+end
+LOG("DOWNLOAD", "AutoPrestige build marker verified: R10.9-EARLY-STORY-RESUME")
 
 local compiler = loadstring or load
 if type(compiler) ~= "function" then
