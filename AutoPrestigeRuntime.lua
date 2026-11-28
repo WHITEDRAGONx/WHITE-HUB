@@ -353,9 +353,9 @@ function Driver:Drive(ctx,confirmed,label,reopenOnClose)
         if reopenOnClose and not result and not gui then
             if dialogueSeen then
                 closedSince=closedSince or os.clock()
-                if os.clock()-closedSince>=2.5 and callbackInFlight==0 then
+                if os.clock()-closedSince>=6.0 and callbackInFlight==0 then
                     cleanupDialogue(true)
-                    ctx:Log("WARN",label.." dialogue closed without the Pesci quest; returning control to Trish retry handler")
+                    ctx:Log("WARN",label.." dialogue closed before expected quest replication; returning control to Trish retry handler")
                     return false,"dialogue-closed-unconfirmed"
                 end
             elseif os.clock()-driveStartedAt>=5 then
@@ -432,7 +432,7 @@ function Driver:Drive(ctx,confirmed,label,reopenOnClose)
             local currentGui = dialogueGui()
             local guiState = currentGui and (currentGui.Enabled and "enabled" or "disabled") or "closed"
             local nextQuestState="n/a"
-            if ctx.pending and ctx.pending.npc=="Storyline #12" then
+            if ctx.pending and ctx.pending.npc=="Storyline #11" then
                 nextQuestState=ctx:HasQuestTitle("Defeat Pesci") and "Defeat Pesci visible" or "Defeat Pesci missing"
             end
             ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks)
@@ -653,7 +653,7 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         return false,"NPC prompt/definition not found: "..npc
     end
 
-    local retryTrishAfterFugo=(npc=="Storyline #12")
+    local retryTrishAfterFugo=(npc=="Storyline #11" and label=="Story Trish after Fugo")
     local ok,info=self:Drive(ctx,confirmed,label or npc,retryTrishAfterFugo)
     local retryNumber=0
     while retryTrishAfterFugo and not ok
@@ -664,7 +664,7 @@ function Driver:Run(ctx,npc,options,confirmed,label)
             break
         end
         retryNumber=retryNumber+1
-        ctx:Log("WARN",(label or npc).." did not activate Pesci yet; reopening Trish Storyline #12 (retry "
+        ctx:Log("WARN",(label or npc).." did not activate Pesci yet; reopening Trish Storyline #11 (retry "
             ..tostring(retryNumber)..")")
         ctx:Wait(1.25)
         if confirmed() then
@@ -1044,7 +1044,7 @@ function Context:StoryObjective()
                             return "Talk to Bruno","Storyline #10"
                         elseif value:find("trish",1,true) then
                             if value:find("after fugo",1,true) or lastSource=="Storyline #11" then
-                                return "Talk to Trish after Fugo","Storyline #12"
+                                return "Talk to Trish after Fugo","Storyline #11"
                             elseif value:find("after pesci",1,true) or lastSource=="Storyline #12" then
                                 return "Talk to Trish after Pesci","Storyline #13"
                             end
@@ -1139,18 +1139,28 @@ function Context:Dialogue(npc,options,confirm,label)
             local saved=modules.Config:Get('AutoPrestigeStoryProgress')
             if type(saved)~='table' then saved={} end
             local previous=saved[accountKey]
-            local previousPrestige=type(previous)=='table' and tonumber(previous.prestige) or nil
             local previousIndex=type(previous)=='table' and tonumber(previous.index) or nil
-            if previousPrestige~=prestige or not previousIndex or storyIndex>=previousIndex then
-                saved[accountKey]={source=npc,index=storyIndex,prestige=prestige}
-                local persisted,persistErr=pcall(function()
-                    modules.Config:Set('AutoPrestigeStoryProgress',saved)
-                end)
-                if persisted then
-                    log('INFO','[SessionResume] Saved confirmed story progress '..npc..' for this player/prestige')
-                else
-                    log('WARN','[SessionResume] Could not persist Storyline progress: '..tostring(persistErr))
-                end
+            local previousHigh=type(previous)=='table' and tonumber(previous.highestIndex) or previousIndex
+            local previousHighSource=type(previous)=='table' and (previous.highestSource or previous.source) or nil
+            local previousHighValue=tonumber(previousHigh) or 0
+            local highestIndex=math.max(previousHighValue,storyIndex)
+            local highestSource=storyIndex>=previousHighValue and npc or (previousHighSource or npc)
+            saved[accountKey]={
+                source=npc,index=storyIndex,prestige=prestige,
+                highestIndex=highestIndex,highestSource=highestSource,
+                completed=(type(previous)=='table' and previous.completed==true) or highestIndex>=17
+            }
+            self.storyHighWaterIndex=highestIndex
+            self.storyResumeSource=highestSource
+            self.storyPreviouslyCompleted=saved[accountKey].completed
+            local persisted,persistErr=pcall(function()
+                modules.Config:Set('AutoPrestigeStoryProgress',saved)
+            end)
+            if persisted then
+                log('INFO','[SessionResume] Saved Storyline checkpoint '..npc..'; highest confirmed stage='
+                    ..tostring(highestIndex)..' (account-wide, retained across Prestige)')
+            else
+                log('WARN','[SessionResume] Could not persist Storyline progress: '..tostring(persistErr))
             end
         end
     end
@@ -1415,7 +1425,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261128-R11-TRISH-RETRY; reopen Trish #12 when dialogue closes without Pesci quest')
+    log('INFO','Build AP-COMPAT-20261128-R12-TRISH-L11-CHECKPOINT; confirm Trish #11 handoff and carry story checkpoint across prestige')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
@@ -1439,14 +1449,31 @@ function Runtime:Start()
     local savedProgress=modules.Config:Get('AutoPrestigeStoryProgress')
     local savedRecord=type(savedProgress)=='table' and savedProgress[accountKey] or nil
     local currentPrestige=tonumber(stat('Prestige')) or 0
-    if type(savedRecord)=='table' and tonumber(savedRecord.prestige)==currentPrestige
-        and type(savedRecord.source)=='string'
-        and savedRecord.source:match("^Storyline #(%d+)$") then
+    if type(savedRecord)=='table' and type(savedRecord.source)=='string' then
         local savedIndex=tonumber(savedRecord.index)
-        if savedIndex and savedIndex>=4 and savedIndex<=17 then
-            ctx.storySource=savedRecord.source
-            log('INFO','[SessionResume] Restored story progress '..savedRecord.source
-                ..' for this player at Prestige '..tostring(currentPrestige))
+        local highestIndex=tonumber(savedRecord.highestIndex) or savedIndex
+        local savedPrestige=tonumber(savedRecord.prestige)
+        local samePrestige=savedPrestige==currentPrestige
+        local restoreSource=samePrestige and savedRecord.source or (savedRecord.highestSource or savedRecord.source)
+        local restoreIndex=samePrestige and savedIndex or highestIndex
+        if restoreIndex and restoreIndex>=4 and restoreIndex<=17
+            and type(restoreSource)=='string' and restoreSource:match("^Storyline #(%d+)$") then
+            ctx.storySource=restoreSource
+            ctx.storyHighWaterIndex=highestIndex or restoreIndex
+            ctx.storyResumeSource=restoreSource
+            ctx.storyResumeAfterPrestige=not samePrestige and not (savedRecord.completed==true or (highestIndex or 0)>=17)
+            ctx.storyPreviouslyCompleted=savedRecord.completed==true or (highestIndex or 0)>=17
+            ctx.storyPreviousPrestige=savedPrestige
+            if samePrestige then
+                log('INFO','[SessionResume] Restored story progress '..restoreSource
+                    ..' for this player at Prestige '..tostring(currentPrestige))
+            elseif ctx.storyPreviouslyCompleted then
+                log('INFO','[SessionResume] Storyline #17 was already confirmed on an earlier Prestige; repeat Storyline disabled')
+            else
+                log('WARN','[SessionResume] Prestige changed from '..tostring(savedPrestige)
+                    ..' to '..tostring(currentPrestige)..'; preserving highest Storyline checkpoint '
+                    ..restoreSource..' (#'..tostring(restoreIndex)..') for the shortened repeat route')
+            end
         end
     end
     ctx:Spawn(function()
