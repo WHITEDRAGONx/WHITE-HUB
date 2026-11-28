@@ -559,7 +559,7 @@ local Modules = { RuntimeLog = RuntimeLog }
 local function cleanupLoadedModules()
     env.AutoPrestigeEnabled = false
 
-    for _, name in ipairs({"HalloweenExchange", "CommunityFeatures", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
+    for _, name in ipairs({"RemoteAudit", "HalloweenExchange", "CommunityFeatures", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "UI", "StandFarm", "CombatFarm", "Farm", "ServerHop", "Movement", "Inventory", "Webhook", "Config"}) do
         local module = Modules[name]
         if module then
             if type(module.Destroy) == "function" then
@@ -653,6 +653,7 @@ end
 
 local moduleRequirements = {
     Config     = {"Load", "Get", "Set"},
+    RemoteAudit = {"Init", "Destroy", "Scan", "Fire", "Invoke", "Stage", "GetReport"},
     Webhook    = {"Init"},
     Movement   = {"Init"},
     ServerHop  = {"Init"},
@@ -737,6 +738,7 @@ end
 
 local moduleFiles = {
     { key = "Config",     file = "Config.lua" },
+    { key = "RemoteAudit", file = "RemoteAudit.lua" },
     { key = "Webhook",    file = "Webhook.lua" },
     { key = "Movement",   file = "Movement.lua" },
     { key = "ServerHop",  file = "ServerHop.lua" },
@@ -765,19 +767,19 @@ end
 
 -- AutoPrestige is a standalone worker rather than a table module. Download and
 -- compile it during boot so a missing/broken file aborts before the main UI starts.
-local AUTO_PRESTIGE_REVISION = "b42faf69f5afbb0d8bd11feba5401d05e11daa66"
-local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.15-GHIACCIO-GIORNO"
+local AUTO_PRESTIGE_REVISION = "342a4aca1152127ec9f49c663168daba75f49b6d"
+local EXPECTED_AUTO_PRESTIGE_BUILD = "Build AP-AFK-20261128-R10.16-POST-GHIACCIO-MISTA"
 local autoPrestigeSource, autoPrestigeFetchErr = fetchSource("AutoPrestige.lua", AUTO_PRESTIGE_REVISION)
 if not autoPrestigeSource then
     abortBoot("AutoPrestige", "DOWNLOAD", autoPrestigeFetchErr, autoPrestigeFetchErr)
     return
 end
 if not autoPrestigeSource:find(EXPECTED_AUTO_PRESTIGE_BUILD, 1, true) then
-    local reason = "Pinned AutoPrestige source does not match expected build R10.9; refusing stale source."
+    local reason = "Pinned AutoPrestige source does not match expected build R10.16; refusing stale source."
     abortBoot("AutoPrestige", "VERSION CHECK", reason, reason)
     return
 end
-LOG("DOWNLOAD", "AutoPrestige build marker verified: R10.11-TRISH-RETRY-L16")
+LOG("DOWNLOAD", "AutoPrestige build marker verified: " .. EXPECTED_AUTO_PRESTIGE_BUILD:gsub("^Build ", ""))
 
 local compiler = loadstring or load
 if type(compiler) ~= "function" then
@@ -804,7 +806,7 @@ if not okConfig then
 end
 LOG("CONFIG", "Config loaded")
 
-local initOrder = {"Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandFarm", "Farm", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "CommunityFeatures", "HalloweenExchange", "UI"}
+local initOrder = {"RemoteAudit", "Webhook", "Movement", "ServerHop", "Inventory", "CombatFarm", "StandTransfer", "StandFarm", "Farm", "AutoPrestigeRuntime", "Settings", "GameCatalog", "UIComponents", "CommunityFeatures", "HalloweenExchange", "UI"}
 for _, name in ipairs(initOrder) do
     local module = Modules[name]
     local ok, initResult = xpcall(function()
