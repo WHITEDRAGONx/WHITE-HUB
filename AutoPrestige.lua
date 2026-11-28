@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.6-STORY-RESUME; persist Storyline progress + Level10-only Bruno bootstrap")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.7-TRISH-RESUME; resume Trish #11 after rejoin at Level13+")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -589,6 +589,29 @@ local function autoStoryStep()
         else
             moduleLog("WARN","[AutoPrestige] Waiting for Bruno Bucciarati #4 Cafeteria prompt: "..tostring(brunoInfo))
         end
+    end
+
+    -- Rejoin recovery for the observed Level 13 stage: the earlier gang arc
+    -- has ended and Trish #11 is the next dialogue once the player has $5,000.
+    -- This path is also used when the quest UI only exposes a generic Sample row.
+    local moneyNow=tonumber(LocalPlayer.PlayerStats.Money.Value) or 0
+    local resumeTrishFromSaved=(ctx.storySource=="Storyline #10")
+    local resumeTrishFromLevel=(ctx.storySource==nil and storyPrestige==0
+        and storyLevel>=13 and storyLevel<15)
+    if not knownStoryQuest and not talkObjective and not hasLighter
+        and (resumeTrishFromSaved or resumeTrishFromLevel) and moneyNow>=5000 then
+        local trishAvailable,trishInfo=ctx:HasStoryDefinition("Storyline #11")
+        if trishAvailable then
+            moduleLog("INFO","[AutoPrestige] Rejoin recovery: resuming Trish Una Storyline #11 automatically (Level="
+                ..tostring(storyLevel)..", Money="..tostring(moneyNow).."); no manual quest acceptance required")
+            storyDialogue("Storyline #11")
+            return true
+        else
+            moduleLog("WARN","[AutoPrestige] Trish Storyline #11 definition unavailable during rejoin recovery: "..tostring(trishInfo))
+        end
+    elseif resumeTrishFromLevel and moneyNow<5000 then
+        moduleLog("INFO","[AutoPrestige] Trish rejoin checkpoint detected, waiting until wallet reaches $5,000 (current $"
+            ..tostring(moneyNow)..")")
     end
 
     if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
