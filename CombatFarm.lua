@@ -715,6 +715,9 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
         local standCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 1.1
         if standPart and standPart.Parent then
             standPart.CFrame = standCF
+            if activeMode == "AutoPrestige" and focusCam and focusCam.Parent then
+                focusCam.Value = standPart
+            end
             focusStandCamera()
         end
 
@@ -894,6 +897,9 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
             local nextStandCF = nextHRP.CFrame - nextHRP.CFrame.LookVector * 1.1
             if standPart and standPart.Parent then
                 standPart.CFrame = nextStandCF
+                if activeMode == "AutoPrestige" and focusCam and focusCam.Parent then
+                    focusCam.Value = standPart
+                end
                 focusStandCamera()
             end
 
