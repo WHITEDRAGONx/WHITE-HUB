@@ -455,12 +455,12 @@ local function findLiveStoryModel(npc)
     return nil
 end
 
-function Driver:HasLivePrompt(npc)
-    local model=findLiveStoryModel(npc)
-    if not model then return false,"live Storyline NPC is not present" end
-    local prompt=model:FindFirstChildWhichIsA("ProximityPrompt",true)
-    if not prompt or not prompt.Enabled then return false,"live Storyline prompt is unavailable or disabled" end
-    return true,model
+function Driver:HasStoryDefinition(npc)
+    local index=tostring(npc):match("^Storyline #(%d+)$")
+    if not index then return false,"invalid Storyline index" end
+    local root=ReplicatedStorage:FindFirstChild("Dialogue")
+    local target=root and root:FindFirstChild(npc)
+    return target~=nil,target and "exact ReplicatedStorage.Dialogue target found" or "exact Storyline definition is not replicated"
 end
 
 function Driver:Run(ctx,npc,options,confirmed,label)
@@ -523,8 +523,15 @@ function Driver:Run(ctx,npc,options,confirmed,label)
         if type(fireproximityprompt)=="function" then
             fireproximityprompt(prompt)
         else
-            ctx.pending=nil
-            return false,"fireproximityprompt unavailable for "..npc
+            local char=player.Character
+            local remote=char and char:FindFirstChild("RemoteEvent")
+            local root=ReplicatedStorage:FindFirstChild("Dialogue") or ReplicatedStorage:FindFirstChild("NewDialogue")
+            local target=root and root:FindFirstChild(npc)
+            if not remote or not target then
+                ctx.pending=nil
+                return false,"prompt found but PromptTriggered target/RemoteEvent is unavailable for "..npc
+            end
+            ctx:Fire(remote,"PromptTriggered",target)
         end
     elseif npc=="Storyline #1" then
         -- Compatibility for fresh accounts whose first Giorno definition is not replicated.
@@ -967,9 +974,9 @@ function Context:TryStorySource()
     self:Log("WARN","No Storyline source inferred from current quest UI: "..reason)
     return nil,reason
 end
-function Context:HasStoryPrompt(npc)
+function Context:HasStoryDefinition(npc)
     self:Check()
-    return Dialogue:HasLivePrompt(npc)
+    return Dialogue:HasStoryDefinition(npc)
 end
 function Context:Dialogue(npc,options,confirm,label)
     self:Check(); if self.pending then error('AP_RESULT_PENDING',0) end
