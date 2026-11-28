@@ -181,23 +181,40 @@ local function storyDialogue(sourceOverride,expectedQuest)
         end
         return ctx:QuestFingerprint()~=before
     end
+    ctx.storyDialogueRetryAfter=ctx.storyDialogueRetryAfter or {}
+    ctx.storyDialogueCooldownLogged=ctx.storyDialogueCooldownLogged or {}
+    local retryAt=tonumber(ctx.storyDialogueRetryAfter[source]) or 0
+    if os.clock()<retryAt then
+        if not ctx.storyDialogueCooldownLogged[source] then
+            ctx.storyDialogueCooldownLogged[source]=true
+            moduleLog("INFO","[AutoPrestige] "..tostring(source).." retry paused briefly after an unconfirmed dialogue; next attempt in "
+                ..string.format("%.1f",retryAt-os.clock()).."s")
+        end
+        return false,"retry cooldown"
+    end
+
     local label="Story "..source
     if source=="Storyline #11" and expectedQuest=="Defeat Pesci" then
         label="Story Trish after Fugo"
     end
     local retryOnClose=expectedQuest=="Post-Ghiaccio handoff"
         or expectedQuest=="Post-Bruno handoff"
+        or expectedQuest=="Defeat Diavolo"
         or expectedQuest=="Final story reward"
     auditStage("STORY_DIALOGUE_REQUEST",{source=source,expected=expectedQuest or "quest fingerprint"})
     local ok,result=pcall(function()
         return ctx:Dialogue(source,{"Option1"},confirmed,label,retryOnClose)
     end)
     if not ok then
+        ctx.storyDialogueRetryAfter[source]=os.clock()+10
+        ctx.storyDialogueCooldownLogged[source]=nil
         auditStage("STORY_DIALOGUE_FAILED",{source=source,error=tostring(result)})
         moduleLog("WARN","[AutoPrestige] "..label.." did not confirm: "..tostring(result))
         if ctx.pending then ctx.pending=nil end
         return false,tostring(result)
     end
+    ctx.storyDialogueRetryAfter[source]=nil
+    ctx.storyDialogueCooldownLogged[source]=nil
     auditStage("STORY_DIALOGUE_CONFIRMED",{source=source,expected=expectedQuest or "quest fingerprint"})
     return result
 end
