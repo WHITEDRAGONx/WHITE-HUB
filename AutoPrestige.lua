@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R10.2-BRUNO-CONFIRM; exact Bruno #4 remote + lighter/objective confirmation")
+    moduleLog("INFO","Build AP-AFK-20261127-R10.3-MISTA-SAFE; stale objective guard + fail-closed 2+2 selection")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -443,6 +443,28 @@ local function autoStoryStep()
         or storyObjective:lower():find("meet ",1,true)
         or storyObjective:lower():find("deliver lighter",1,true)
     )
+
+    -- Quest UI can retain the previous talk objective for a few frames after
+    -- a dialogue is credited. Never rewind to an earlier Storyline once this
+    -- runtime has confirmed a later one (e.g. stale Giorno #5 after Fugo #6).
+    local function storyIndex(source)
+        return tonumber(tostring(source or ""):match("^Storyline #(%d+)$"))
+    end
+    local activeStoryIndex=storyIndex(ctx.storySource)
+    local objectiveStoryIndex=storyIndex(mappedStorySource)
+    if talkObjective and activeStoryIndex and objectiveStoryIndex
+        and objectiveStoryIndex<activeStoryIndex then
+        local staleKey=tostring(mappedStorySource).."<"..tostring(ctx.storySource)
+        if ctx.lastIgnoredStoryObjective~=staleKey then
+            ctx.lastIgnoredStoryObjective=staleKey
+            moduleLog("INFO","[AutoPrestige] Ignoring stale Storyline objective "
+                ..tostring(mappedStorySource).." because progression is already at "..tostring(ctx.storySource))
+        end
+        talkObjective=false
+        mappedStorySource=nil
+    elseif not talkObjective then
+        ctx.lastIgnoredStoryObjective=nil
+    end
     local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
     local isSecurityQuest=(genericPatchActive and questMaxProgress==5)
