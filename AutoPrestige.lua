@@ -425,7 +425,7 @@ local function autoStoryStep()
     )
     local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
-    local isSecurityQuest=genericGiornoGuardQuest
+    local isSecurityQuest=(genericPatchActive and questMaxProgress==5)
         or storyObjective=="Help Giorno by Defeating Security Guards"
         or hasQuest(questPanel,"Help Giorno by Defeating Security Guards")
     local isLucaQuest=storyObjective=="Defeat Leaky Eye Luca"
