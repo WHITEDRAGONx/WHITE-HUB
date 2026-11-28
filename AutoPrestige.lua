@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.5-FUGO-DIALOGUE; finish visible dialogue + no duplicate Trish + faster scan")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.6-STORY-RESUME; persist Storyline progress + Level10-only Bruno bootstrap")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -574,11 +574,13 @@ local function autoStoryStep()
     -- The user's current progression is post-Bruno-boss: Bruno #4 at the
     -- Cafeteria gives the lighter. A generic Sample "KILL 5 THUGS" side quest
     -- and PlayerStats.QuestProgress 1/1 must never be mistaken for a Storyline.
+    -- This bootstrap is only for the original Level 10 handoff; a rejoin at
+    -- Level 11+ must resume from its saved Storyline, never restart at Bruno.
     local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
     local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
     if not knownStoryQuest and not talkObjective and not hasLighter
         and ctx.storySource==nil
-        and storyPrestige==0 and storyLevel>=10 and storyLevel<15 then
+        and storyPrestige==0 and storyLevel==10 then
         local brunoAvailable,brunoInfo=ctx:HasStoryDefinition("Storyline #4")
         if brunoAvailable then
             moduleLog("INFO","[AutoPrestige] No active Storyline objective; detected live Bruno Bucciarati #4 at Cafeteria. Starting lighter handoff.")
