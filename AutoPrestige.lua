@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.14-ACTIVE-QUEST-PRIORITY; active story quests block dialogue handoffs and save accepted Ghiaccio checkpoint")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.15-GHIACCIO-GIORNO; use Storyline #14 after Ghiaccio and confirm Diavolo quest")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -150,6 +150,8 @@ local function storyDialogue(sourceOverride,expectedQuest)
             return ctx:HasQuestTitle("Defeat Pesci")
         elseif expectedQuest=="Defeat Fugo" then
             return ctx:HasQuestTitle("Defeat Fugo")
+        elseif expectedQuest=="Defeat Diavolo" then
+            return ctx:HasQuestTitle("Defeat Diavolo")
         elseif source=="Storyline #4" then
             local backpack=LocalPlayer:FindFirstChildOfClass("Backpack")
             local character=LocalPlayer.Character
@@ -643,7 +645,7 @@ local function autoStoryStep()
         elseif isPesciQuest then
             turnInSource="Storyline #13"
         elseif isGhiaccioQuest then
-            turnInSource="Storyline #15"
+            turnInSource="Storyline #14"
         elseif isDiavoloQuest then
             turnInSource="Storyline #17"
         end
@@ -911,7 +913,8 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Ghiaccio")
         if killNPC("Ghiaccio", 15) then
             task.wait(1)
-            storyDialogue("Storyline #15")
+            moduleLog("INFO","[AutoPrestige] Ghiaccio defeated; opening Giorno Storyline #14 and requiring Defeat Diavolo confirmation")
+            storyDialogue("Storyline #14","Defeat Diavolo")
             return true
         else
             return true
