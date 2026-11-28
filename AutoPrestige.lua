@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.7-TRISH-RESUME; resume Trish #11 after rejoin at Level13+")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.8-MONOTONIC-STORY; reject stale #4-#9 checkpoint at Level13+ and resume Trish #11")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -560,12 +560,27 @@ local function autoStoryStep()
         return true
     end
 
+    -- Reconcile a stale saved checkpoint against the live progression level.
+    -- At Level 13-14 (Prestige 0), the player has already passed Bruno #4 and
+    -- the gang handoffs. A persisted #4-#9 value is older than the live stage;
+    -- discard it before any dialogue-to-dialogue handoff can rewind the story.
+    local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
+    local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
+    local savedStoryIndex=tonumber(tostring(ctx.storySource or ""):match("^Storyline #(%d+)$"))
+    if storyPrestige==0 and storyLevel>=13 and storyLevel<15
+        and savedStoryIndex and savedStoryIndex>=4 and savedStoryIndex<10 then
+        moduleLog("WARN","[AutoPrestige] Ignoring stale saved Storyline #"..tostring(savedStoryIndex)
+            .." checkpoint at Level "..tostring(storyLevel).."; preserving live progression and resuming from Trish #11")
+        ctx.storySource=nil
+    end
+
     -- Continue only known dialogue-to-dialogue handoffs; never guess a boss or
     -- bypass a combat/money gate. The next dialogue must change the quest state.
     if advanceKnownStoryDialogue() then return true end
 
     -- Storyline #4 hands over the lighter; #5 is the Giorno hand-in/recruit step.
-    if hasLighter and (ctx.storySource==nil or ctx.storySource=="Storyline #4") then
+    if hasLighter and storyLevel<=10
+        and (ctx.storySource==nil or ctx.storySource=="Storyline #4") then
         moduleLog("INFO","[AutoPrestige] Lighter detected; opening Giorno Storyline #5")
         storyDialogue("Storyline #5")
         return true
@@ -576,9 +591,7 @@ local function autoStoryStep()
     -- and PlayerStats.QuestProgress 1/1 must never be mistaken for a Storyline.
     -- This bootstrap is only for the original Level 10 handoff; a rejoin at
     -- Level 11+ must resume from its saved Storyline, never restart at Bruno.
-    local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
-    local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
-    if not knownStoryQuest and not talkObjective and not hasLighter
+    if not knownStoryQuest and not talkObjective
         and ctx.storySource==nil
         and storyPrestige==0 and storyLevel==10 then
         local brunoAvailable,brunoInfo=ctx:HasStoryDefinition("Storyline #4")
@@ -598,7 +611,7 @@ local function autoStoryStep()
     local resumeTrishFromSaved=(ctx.storySource=="Storyline #10")
     local resumeTrishFromLevel=(ctx.storySource==nil and storyPrestige==0
         and storyLevel>=13 and storyLevel<15)
-    if not knownStoryQuest and not talkObjective and not hasLighter
+    if not knownStoryQuest and not talkObjective
         and (resumeTrishFromSaved or resumeTrishFromLevel) and moneyNow>=5000 then
         local trishAvailable,trishInfo=ctx:HasStoryDefinition("Storyline #11")
         if trishAvailable then
