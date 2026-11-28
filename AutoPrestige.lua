@@ -13,7 +13,7 @@ local function auditStage(stage,details)
     end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.16-POST-GHIACCIO-MISTA; resume Storyline #15 after Ghiaccio; confirm Diavolo quest")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.17-POST-GHIACCIO-STORYLINE14; use observed Storyline #14 direct handoff and confirm Defeat Diavolo")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -718,7 +718,7 @@ local function autoStoryStep()
         elseif isPesciQuest then
             turnInSource="Storyline #13"
         elseif isGhiaccioQuest then
-            turnInSource="Storyline #15"
+            turnInSource="Storyline #14"
         elseif isDiavoloQuest then
             turnInSource="Storyline #17"
         end
@@ -728,7 +728,7 @@ local function autoStoryStep()
             if isFugoQuest then
                 turnInConfirmed=storyDialogue(turnInSource,"Defeat Pesci")
             elseif isGhiaccioQuest then
-                turnInConfirmed=storyDialogue(turnInSource,"Post-Ghiaccio handoff")
+                turnInConfirmed=storyDialogue(turnInSource,"Defeat Diavolo")
             elseif isDiavoloQuest then
                 turnInConfirmed=storyDialogue(turnInSource,"Final story reward")
             else
@@ -792,13 +792,13 @@ local function autoStoryStep()
         local retryAt=tonumber(ctx.lastPostGhiaccioRecoveryAt) or 0
         if os.clock()-retryAt>=12 then
             ctx.lastPostGhiaccioRecoveryAt=os.clock()
-            local available,reason=ctx:HasStoryDefinition("Storyline #15")
+            local available,reason=ctx:HasStoryDefinition("Storyline #14")
             if available then
-                moduleLog("INFO","[AutoPrestige] Post-Ghiaccio recovery: checkpoint #14 found with no active story quest; opening Mista Storyline #15")
-                auditStage("POST_GHIACCIO_RECOVERY",{checkpoint="Storyline #14",next="Storyline #15"})
-                storyDialogue("Storyline #15","Post-Ghiaccio handoff")
+                moduleLog("INFO","[AutoPrestige] Post-Ghiaccio recovery: checkpoint #14 found with no active story quest; reopening the observed Storyline #14 direct handoff and requiring Defeat Diavolo")
+                auditStage("POST_GHIACCIO_RECOVERY",{checkpoint="Storyline #14",next="Defeat Diavolo"})
+                storyDialogue("Storyline #14","Defeat Diavolo")
             else
-                moduleLog("WARN","[AutoPrestige] Mista Storyline #15 is not replicated yet: "..tostring(reason))
+                moduleLog("WARN","[AutoPrestige] Giorno Storyline #14 definition is not replicated yet: "..tostring(reason))
             end
         end
         return true
@@ -1017,9 +1017,9 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Ghiaccio")
         if killNPC("Ghiaccio", 15) then
             task.wait(1)
-            moduleLog("INFO","[AutoPrestige] Ghiaccio defeated; returning to Mista Storyline #15 before Bruno #16 and Giorno #17")
-            auditStage("GHIACCIO_DEFEATED",{next="Storyline #15",target="Mista"})
-            storyDialogue("Storyline #15","Post-Ghiaccio handoff")
+            moduleLog("INFO","[AutoPrestige] Ghiaccio defeated; using observed Storyline #14 direct handoff and requiring Defeat Diavolo")
+            auditStage("GHIACCIO_DEFEATED",{source="Storyline #14",expected="Defeat Diavolo"})
+            storyDialogue("Storyline #14","Defeat Diavolo")
             return true
         else
             return true
