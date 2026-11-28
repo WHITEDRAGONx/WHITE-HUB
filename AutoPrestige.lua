@@ -13,7 +13,7 @@ local function auditStage(stage,details)
     end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.18-POST-DIAVOLO-STORYLINE14-END; finish the story through observed Storyline #14 dialogue")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.19-MANUAL-STORY-COMPLETE-VAMPIRE; recognize completed #14 route and farm Hamon vampire quests")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -575,6 +575,34 @@ local function autoStoryStep()
         or hasQuest(questPanel,"Defeat Ghiaccio")
     local isDiavoloQuest=storyObjective=="Defeat Diavolo"
         or hasQuest(questPanel,"Defeat Diavolo")
+    local hasHamonSpec=LocalPlayer.PlayerStats.Spec.Value=="Hamon (William Zeppeli)"
+    local function vampireQuestIsActive()
+        local livePanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true) or questPanel
+        local progress,maxProgress=questProgressState()
+        return hasQuest(livePanel,"Take down 3 vampires")
+            or (hasHamonSpec and maxProgress==3 and progress<maxProgress)
+    end
+
+    -- This account may finish the last Giorno dialogue manually. A Level 25+
+    -- player with Hamon, a confirmed #14 checkpoint and no remaining main-story
+    -- objective has moved to the Vampire/Hamon prestige loop; never reopen #14.
+    local currentStoryIndex=tonumber(tostring(ctx.storySource or ""):match("^Storyline #(%d+)$")) or 0
+    local storyCheckpointIndex=math.max(tonumber(ctx.storyHighWaterIndex) or 0,currentStoryIndex)
+    local noMainStoryObjective=not koichiSuitcaseQuest and not genericGiornoGuardQuest
+        and not isSecurityQuest and not isLucaQuest and not isBucciaratiQuest
+        and not isMoneyQuest and not isFugoQuest and not isPesciQuest
+        and not isGhiaccioQuest and not isDiavoloQuest and not talkObjective
+    if not ctx.storyPreviouslyCompleted and not ctx.storyDiavoloDefeated
+        and hasHamonSpec and storyLevel>=25 and storyCheckpointIndex>=14
+        and noMainStoryObjective then
+        moduleLog("INFO","[AutoPrestige] Recognized completed main Storyline from Level 25+, Hamon and cleared #14 checkpoint; switching to Vampire prestige route")
+        local markedOk,marked=pcall(function() return ctx:MarkStoryCompleted() end)
+        if not markedOk or marked~=true then
+            moduleLog("WARN","[AutoPrestige] Could not persist manually completed Storyline checkpoint: "..tostring(marked))
+        else
+            auditStage("MANUAL_STORY_COMPLETION",{source="Storyline #14",reason="Hamon + Level 25+ + no main-story objective"})
+        end
+    end
     local auditStoryState=table.concat({
         tostring(storyObjective or "none"),
         tostring(mappedStorySource or "none"),
@@ -1087,13 +1115,33 @@ local function autoStoryStep()
             return
         end
 
-    elseif hasQuest(questPanel, "Take down 3 vampires")
-    and LocalPlayer.PlayerStats.Spec.Value ~= "None"
+    elseif ctx.storyPreviouslyCompleted and hasHamonSpec
     and LocalPlayer.PlayerStats.Level.Value >= 25
     and LocalPlayer.PlayerStats.Level.Value ~= 50 then
-        moduleLog("INFO", "[AutoPrestige] Quest: Vampires")
         getgenv().HamonCharge = 10
+
+        if not vampireQuestIsActive() then
+            local retryAt=tonumber(ctx.lastVampireQuestAttemptAt) or 0
+            if os.clock()>=retryAt then
+                ctx.lastVampireQuestAttemptAt=os.clock()+8
+                moduleLog("INFO","[AutoPrestige] No active Vampire quest; opening William Zeppeli to accept 'Take down 3 vampires'")
+                local opened,accepted=pcall(function()
+                    return ctx:Dialogue("William Zeppeli",{"Option1"},function()
+                        return vampireQuestIsActive()
+                    end,"Vampire quest acceptance",true)
+                end)
+                if opened and accepted then
+                    moduleLog("INFO","[AutoPrestige] William Zeppeli Vampire quest accepted; starting XenonLock farm")
+                else
+                    moduleLog("WARN","[AutoPrestige] Vampire quest acceptance not confirmed; will retry safely: "..tostring(accepted))
+                end
+            end
+            return true
+        end
+
+        moduleLog("INFO", "[AutoPrestige] Quest: Vampires (Hamon) — farming three kills")
         local vampireDialogueAttempted=false
+        local nextVampireDialogueAt=0
         local function vampire()
             local living=workspace:FindFirstChild("Living")
             local vampireNPC=living and living:FindFirstChild("Vampire")
@@ -1102,11 +1150,20 @@ local function autoStoryStep()
             if vampireRoot and character and character.PrimaryPart then
                 character.PrimaryPart.CFrame=vampireRoot.CFrame-Vector3.new(0,15,0)
             end
-            if not hasQuest(questPanel,"Take down 3 vampires") and not vampireDialogueAttempted then
-                vampireDialogueAttempted=true
-                if (tick()-lastTick)>=5 then lastTick=tick() end
-                endDialogue("William Zeppeli","Dialogue4","Option1")
-                return true
+            if not vampireQuestIsActive() and not vampireDialogueAttempted
+                and os.clock()>=nextVampireDialogueAt then
+                nextVampireDialogueAt=os.clock()+8
+                moduleLog("INFO","[AutoPrestige] Vampire quest completed; asking William Zeppeli for the next cycle")
+                local opened,accepted=pcall(function()
+                    return ctx:Dialogue("William Zeppeli",{"Option1"},function()
+                        return vampireQuestIsActive()
+                    end,"Vampire quest renewal",true)
+                end)
+                if opened and accepted then
+                    vampireDialogueAttempted=true
+                    return true
+                end
+                moduleLog("WARN","[AutoPrestige] Vampire quest renewal not confirmed; retrying during the next target step: "..tostring(accepted))
             end
         end
         killNPC("Vampire", 15, false, vampire)
