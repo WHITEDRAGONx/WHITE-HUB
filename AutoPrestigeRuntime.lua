@@ -368,6 +368,7 @@ function Driver:Drive(ctx,confirmed,label,reopenOnClose)
         if gui then
             closedSince=nil
             dialogueSeen=true
+            if ctx.pending then ctx.pending.dialogueSeen=true end
             if ownedGui~=gui then
                 ownedGui=gui
                 signature=nil
@@ -1167,7 +1168,8 @@ function Context:Dialogue(npc,options,confirm,label,returnOnUnconfirmedClose)
             saved[accountKey]={
                 source=npc,index=storyIndex,prestige=prestige,
                 highestIndex=highestIndex,highestSource=highestSource,
-                completed=(type(previous)=='table' and previous.completed==true)
+                completed=(type(previous)=='table' and previous.completed==true),
+                diavoloDefeated=(type(previous)=='table' and previous.diavoloDefeated==true)
             }
             self.storyHighWaterIndex=highestIndex
             self.storyResumeSource=highestSource
@@ -1186,6 +1188,42 @@ function Context:Dialogue(npc,options,confirm,label,returnOnUnconfirmedClose)
     log('INFO',(label or npc)..' confirmed by player state')
     return true
 end
+function Context:MarkDiavoloDefeated()
+    self:Check()
+    local accountKey=tostring(player().UserId)
+    local saved=modules.Config:Get('AutoPrestigeStoryProgress')
+    if type(saved)~='table' then saved={} end
+    local previous=saved[accountKey]
+    local previousHigh=type(previous)=='table' and tonumber(previous.highestIndex) or 0
+    local highestIndex=math.max(previousHigh or 0,14)
+    local record={
+        source='Storyline #14',
+        index=14,
+        prestige=tonumber(stat('Prestige')) or 0,
+        highestIndex=highestIndex,
+        highestSource='Storyline #14',
+        completed=(type(previous)=='table' and previous.completed==true),
+        diavoloDefeated=true
+    }
+    saved[accountKey]=record
+    local persisted,persistErr=pcall(function()
+        modules.Config:Set('AutoPrestigeStoryProgress',saved)
+    end)
+    self.storySource='Storyline #14'
+    self.storyHighWaterIndex=record.highestIndex
+    self.storyResumeSource='Storyline #14'
+    self.storyDiavoloDefeated=true
+    if not persisted then
+        log('ERROR','[SessionResume] Diavolo defeat was confirmed, but recovery state could not be saved: '..tostring(persistErr))
+        local audit=modules and modules.RemoteAudit
+        if audit then audit:Stage("AutoPrestige","DIAVOLO_DEFEATED_SAVE_FAILED",{source="Storyline #14",error=tostring(persistErr)}) end
+        return false
+    end
+    log('INFO','[SessionResume] Diavolo defeat saved; next recovery step is the final Storyline #14 dialogue.')
+    local audit=modules and modules.RemoteAudit
+    if audit then audit:Stage("AutoPrestige","DIAVOLO_DEFEATED",{source="Storyline #14",prestige=record.prestige}) end
+    return true
+end
 function Context:MarkStoryCompleted()
     self:Check()
     local accountKey=tostring(player().UserId)
@@ -1194,29 +1232,31 @@ function Context:MarkStoryCompleted()
     local previous=saved[accountKey]
     local previousHigh=type(previous)=='table' and tonumber(previous.highestIndex) or 0
     local record={
-        source='Storyline #17',
-        index=17,
+        source='Storyline #14',
+        index=14,
         prestige=tonumber(stat('Prestige')) or 0,
-        highestIndex=math.max(previousHigh or 0,17),
-        highestSource='Storyline #17',
-        completed=true
+        highestIndex=math.max(previousHigh or 0,14),
+        highestSource='Storyline #14',
+        completed=true,
+        diavoloDefeated=true
     }
     saved[accountKey]=record
     local persisted,persistErr=pcall(function()
         modules.Config:Set('AutoPrestigeStoryProgress',saved)
     end)
     if not persisted then
-        log('ERROR','[SessionResume] Diavolo reward dialogue was seen, but final completion could not be saved: '..tostring(persistErr))
+        log('ERROR','[SessionResume] Final Storyline #14 dialogue closed, but story completion could not be saved: '..tostring(persistErr))
         return false
     end
-    self.storySource='Storyline #17'
+    self.storySource='Storyline #14'
     self.storyHighWaterIndex=record.highestIndex
-    self.storyResumeSource='Storyline #17'
+    self.storyResumeSource='Storyline #14'
+    self.storyDiavoloDefeated=true
     self.storyPreviouslyCompleted=true
     self.storyFinalComplete=true
-    log('INFO','[SessionResume] Storyline marked complete only after the post-Diavolo Giorno reward dialogue.')
+    log('INFO','[SessionResume] Storyline marked complete after the final Storyline #14 dialogue closed following Diavolo defeat.')
     local audit=modules and modules.RemoteAudit
-    if audit then audit:Stage("AutoPrestige","STORY_COMPLETED",{source="Storyline #17",prestige=record.prestige}) end
+    if audit then audit:Stage("AutoPrestige","STORY_COMPLETED",{source="Storyline #14",prestige=record.prestige}) end
     return true
 end
 function Context:Consume(name)
@@ -1508,6 +1548,9 @@ function Runtime:Start()
         local samePrestige=savedPrestige==currentPrestige
         local restoreSource=samePrestige and savedRecord.source or (savedRecord.highestSource or savedRecord.source)
         local restoreIndex=samePrestige and savedIndex or highestIndex
+        if restoreSource=="Storyline #17" and savedRecord.completed~=true then
+            restoreSource="Storyline #14"
+        end
         if restoreIndex and restoreIndex>=4 and restoreIndex<=17
             and type(restoreSource)=='string' and restoreSource:match("^Storyline #(%d+)$") then
             ctx.storySource=restoreSource
@@ -1515,12 +1558,13 @@ function Runtime:Start()
             ctx.storyResumeSource=restoreSource
             ctx.storyResumeAfterPrestige=not samePrestige and savedRecord.completed~=true
             ctx.storyPreviouslyCompleted=savedRecord.completed==true
+            ctx.storyDiavoloDefeated=savedRecord.diavoloDefeated==true
             ctx.storyPreviousPrestige=savedPrestige
             if samePrestige then
                 log('INFO','[SessionResume] Restored story progress '..restoreSource
                     ..' for this player at Prestige '..tostring(currentPrestige))
             elseif ctx.storyPreviouslyCompleted then
-                log('INFO','[SessionResume] Storyline #17 was already confirmed on an earlier Prestige; repeat Storyline disabled')
+                log('INFO','[SessionResume] Storyline #14 final dialogue was already confirmed on an earlier Prestige; repeat Storyline disabled')
             else
                 log('WARN','[SessionResume] Prestige changed from '..tostring(savedPrestige)
                     ..' to '..tostring(currentPrestige)..'; preserving highest Storyline checkpoint '
