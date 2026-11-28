@@ -413,10 +413,15 @@ function Driver:Drive(ctx,confirmed,label)
             local objective, mappedSource = ctx:StoryObjective()
             local currentGui = dialogueGui()
             local guiState = currentGui and (currentGui.Enabled and "enabled" or "disabled") or "closed"
+            local nextQuestState="n/a"
+            if ctx.pending and ctx.pending.npc=="Storyline #12" then
+                nextQuestState=ctx:HasQuestTitle("Defeat Pesci") and "Defeat Pesci visible" or "Defeat Pesci missing"
+            end
             ctx:Log("INFO",label.." still waiting for game confirmation; dialogue inputs="..tostring(clicks)
                 .."; GUI="..guiState.."; callback="..tostring(callbackInFlight)
                 .."; objective="..tostring(objective or "none")
-                .."; source="..tostring(mappedSource or "none"))
+                .."; source="..tostring(mappedSource or "none")
+                .."; nextQuest="..nextQuestState)
         end
         ctx:Wait(0.05)
     end
@@ -883,6 +888,23 @@ function Context:QuestEntries(panel)
     end
     return entries
 end
+function Context:HasQuestTitle(title)
+    if type(title)~='string' or title=='' then return false end
+    local p=player()
+    local pg=p and p:FindFirstChild('PlayerGui')
+    local panel=pg and pg:FindFirstChild('Quests',true)
+    if not panel then return false end
+    local wanted=tostring(title):lower():gsub("’","'"):gsub("‘","'")
+        :gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+    for _,object in ipairs(panel:GetDescendants()) do
+        if object:IsA('TextLabel') or object:IsA('TextButton') then
+            local value=tostring(object.Text or ''):lower():gsub("’","'"):gsub("‘","'")
+                :gsub("[%c]+"," "):gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+            if value~='' and value:find(wanted,1,true) then return true end
+        end
+    end
+    return false
+end
 local function normalizeStoryObjective(value)
     local text=tostring(value or ''):lower()
     text=text:gsub("’","'"):gsub("‘","'")
@@ -1340,7 +1362,7 @@ function Runtime:Init(all)
             log('WARN','[SessionResume] Transfer arrived but Config could not be saved; AutoPrestige remains dependent on the existing config file.')
         end
     end
-    log('INFO','Build AP-COMPAT-20261128-R9-CLICKCONTINUE; mounted Continue callback + dialogue-state diagnostics')
+    log('INFO','Build AP-COMPAT-20261128-R10-TRISH-PESCI-CONFIRM; verify next quest row after Trish dialogue')
 end
 function Runtime:Register(callback) registered=callback end
 function Runtime:Start()
