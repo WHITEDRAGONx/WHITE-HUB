@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R9-FULL-STORYLINE; indexed Storyline #1-#17 support + safe Mista choice; nonblocking skill allocation")
+    moduleLog("INFO","Build AP-AFK-20261127-R10-BRUNO-BOOTSTRAP; ignore unrelated Sample/Thug counter, open live Bruno #4 cafe stage")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -135,7 +135,15 @@ local function endDialogue(NPC, Dialogue, Option)
 end
 
 local function storyDialogue(sourceOverride)
-    local source=sourceOverride or ctx:StorySource()
+    local source=sourceOverride
+    if not source then
+        local reason
+        source,reason=ctx:TryStorySource()
+        if not source then
+            moduleLog("WARN","[AutoPrestige] Story dialogue skipped: no confirmed Storyline source ("..tostring(reason)..")")
+            return false,"story source unknown"
+        end
+    end
     local before=ctx:QuestFingerprint()
     return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
 end
@@ -447,10 +455,8 @@ local function autoStoryStep()
     local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest or mappedCombatQuest
     local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
 
-    -- Generic Patch rows with a non-five-step counter are not the Security
-    -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
-    -- Storyline #1 fallback for this active generic row and confirms dialogue
-    -- progress using the replicated quest fingerprint.
+    -- Generic Patch/Sample rows may be unrelated side quests. Only the confirmed
+    -- StoryObjective mapper or a live known Storyline NPC can authorize dialogue.
     -- A restart can happen after XenonLock has already defeated a boss.
     -- If the replicated objective counter is complete, go straight to its exact
     -- quest-giver dialogue instead of waiting for a boss that has already despawned.
@@ -517,20 +523,40 @@ local function autoStoryStep()
         return true
     end
 
+    -- The user's current progression is post-Bruno-boss: Bruno #4 at the
+    -- Cafeteria gives the lighter. A generic Sample "KILL 5 THUGS" side quest
+    -- and PlayerStats.QuestProgress 1/1 must never be mistaken for a Storyline.
+    local storyLevel=tonumber(LocalPlayer.PlayerStats.Level.Value) or 0
+    local storyPrestige=tonumber(LocalPlayer.PlayerStats.Prestige.Value) or 0
+    if not knownStoryQuest and not talkObjective and not hasLighter
+        and ctx.storySource==nil
+        and storyPrestige==0 and storyLevel>=10 and storyLevel<15 then
+        local brunoAvailable,brunoInfo=ctx:HasStoryPrompt("Storyline #4")
+        if brunoAvailable then
+            moduleLog("INFO","[AutoPrestige] No active Storyline objective; detected live Bruno Bucciarati #4 at Cafeteria. Starting lighter handoff.")
+            storyDialogue("Storyline #4")
+            return true
+        else
+            moduleLog("WARN","[AutoPrestige] Waiting for Bruno Bucciarati #4 Cafeteria prompt: "..tostring(brunoInfo))
+        end
+    end
+
     if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
-        local source=ctx:StorySource()
-        moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
-            ..tostring(questMaxProgress).." is not a mapped combat quest; requesting "..tostring(source))
-        storyDialogue()
+        local source,reason=ctx:TryStorySource()
+        if source then
+            moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
+                ..tostring(questMaxProgress).." has a Storyline source "..tostring(source).."; opening it")
+            storyDialogue(source)
+        else
+            moduleLog("WARN","[AutoPrestige] Generic Patch counter is not a Storyline objective; ignoring it and waiting for a mapped story task: "
+                ..tostring(reason))
+        end
         ctx:Wait(0.2)
         return true
     end
 
-    if not ctx.storyFinalComplete and not knownStoryQuest and (questComplete or not questIncomplete) then
-        storyDialogue()
-        ctx:Wait(0.2)
-        return true
-    end
+    -- A Sample/Thug quest counter is not proof that the Storyline itself is complete.
+    -- Never call StorySource solely because PlayerStats.QuestProgress says X/X.
 
     if genericGiornoGuardQuest then
         moduleLog("INFO","[AutoPrestige] Generic Patch + active 5-step counter identified as Giorno Security Guards")
