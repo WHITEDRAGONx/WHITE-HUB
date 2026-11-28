@@ -1,7 +1,7 @@
 -- =====================
 -- CombatFarm.lua
 -- Unified combat: NPC and Quest farming.
--- QUEST/COMBAT BUILD: R15-COMBAT-STABLE-LOCAL-DIALOGUE
+-- QUEST/COMBAT BUILD: R15-COMBAT-STABLE-LOCAL-DIALOGUE + PLAYER TARGET R1
 -- Logic identical to Xenon V5 (stand positioning, attacks, death detection).
 -- FIXED: player positioned underground (yOffset -35) with noclip for safety.
 -- =====================
@@ -539,8 +539,9 @@ end
 -- =============================================
 -- COMBAT CORE (Xenon V5 style)
 -- =============================================
-local function killTarget(targetName, token, onStep)
-    local target = getClosestNPC(targetName)
+local function killTarget(targetName, token, onStep, fixedTarget, targetKind, targetPlayer)
+    targetKind=targetKind or "NPC"
+    local target = fixedTarget or getClosestNPC(targetName)
     if not target then
         moduleLog("INFO", "[CombatFarm] No alive target found: " .. targetName)
         return false
@@ -554,6 +555,7 @@ local function killTarget(targetName, token, onStep)
     end
 
     local oldPos = hrp.CFrame
+    local trackedTargetHumanoid = target:FindFirstChildWhichIsA("Humanoid")
     local questProgressBefore, questMaxBefore = nil, nil
     if activeMode == "Quest" then
         questProgressBefore, questMaxBefore = readQuestState()
@@ -577,7 +579,9 @@ local function killTarget(targetName, token, onStep)
         createdFocusCam = true
     end
 
-    _movement:SetNoclip(true)
+    if targetKind ~= "Player" then
+        _movement:SetNoclip(true)
+    end
 
     local safeYOffset = (targetName == "The Idol") and 35 or -35
     local lastStatusLogAt=tick()+30
@@ -587,7 +591,7 @@ local function killTarget(targetName, token, onStep)
     local previousHp = lastKnownHp
     local missingPartsSince = nil
     local attackBusy = false
-    local playerMeleeFallback = not hasStand
+    local playerMeleeFallback = targetKind == "Player" and false or not hasStand
     local nextSkillAt = 0
     local skillIndex = 1
     local perSkillLastUse = {}
@@ -616,8 +620,16 @@ local function killTarget(targetName, token, onStep)
             moduleLog("INFO",("[CombatFarm][AutoPrestige] Still fighting %s | hp=%s source=%s; no combat timeout.")
                 :format(tostring(targetName),tostring(currentHp),tostring(currentSource)))
         end
+        if targetKind == "Player" and targetPlayer and targetPlayer.Character ~= target then
+            killed = trackedTargetHumanoid ~= nil and trackedTargetHumanoid.Health <= 0
+            break
+        end
         if not target or not target.Parent then
-            killed = true
+            if targetKind == "Player" then
+                killed = trackedTargetHumanoid ~= nil and trackedTargetHumanoid.Health <= 0
+            else
+                killed = true
+            end
             break
         end
 
@@ -646,7 +658,11 @@ local function killTarget(targetName, token, onStep)
                     killed = true
                     break
                 elseif not target.Parent then
-                    killed = true
+                    if targetKind == "Player" then
+                        killed = trackedTargetHumanoid ~= nil and trackedTargetHumanoid.Health <= 0
+                    else
+                        killed = true
+                    end
                     break
                 end
                 missingPartsSince = tick()
@@ -698,23 +714,21 @@ local function killTarget(targetName, token, onStep)
             meleeFallbackGraceUntil = tick() + 1.75
         end
         closeCastWasActive = closeCasting
-        if closeCasting or playerMeleeFallback then
-            -- Player-centered hitboxes/AOE need the character itself close to the
-            -- victim. Face the NPC from just behind it so short-radius moves land.
-            local nearCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 2.0
-            hrp.CFrame = CFrame.lookAt(nearCF.Position, enemyHRP.Position)
-        elseif standPart and standPart.Parent then
-            hrp.CFrame = standCF + standCF.LookVector * -2.5 + Vector3.new(0, safeYOffset, 0)
-        else
-            -- Stand exists in PlayerStats but is temporarily not materialized.
-            -- Keep the player safe while the summon cooldown tries again.
-            hrp.CFrame = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 2.3 + Vector3.new(0, safeYOffset, 0)
+        if targetKind ~= "Player" then
+            if closeCasting or playerMeleeFallback then
+                -- Player-centered hitboxes/AOE need the character itself close to an NPC.
+                local nearCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 2.0
+                hrp.CFrame = CFrame.lookAt(nearCF.Position, enemyHRP.Position)
+            elseif standPart and standPart.Parent then
+                hrp.CFrame = standCF + standCF.LookVector * -2.5 + Vector3.new(0, safeYOffset, 0)
+            else
+                hrp.CFrame = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 2.3 + Vector3.new(0, safeYOffset, 0)
+            end
+            pcall(function()
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end)
         end
-
-        pcall(function()
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-        end)
 
         -- Optional AutoPrestige-specific step hook, used only by progression
         -- branches that must service a quest giver while a target is alive.
@@ -760,12 +774,14 @@ local function killTarget(targetName, token, onStep)
                     lastDamageAt = tick()
                     playerMeleeFallback = not hasStand
                     meleeFallbackGraceUntil = closeCastUntil + 1.75
-                    local nearCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 1.8
-                    hrp.CFrame = CFrame.lookAt(nearCF.Position, enemyHRP.Position)
-                    pcall(function()
-                        hrp.AssemblyLinearVelocity = Vector3.zero
-                        hrp.AssemblyAngularVelocity = Vector3.zero
-                    end)
+                    if targetKind ~= "Player" then
+                        local nearCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 1.8
+                        hrp.CFrame = CFrame.lookAt(nearCF.Position, enemyHRP.Position)
+                        pcall(function()
+                            hrp.AssemblyLinearVelocity = Vector3.zero
+                            hrp.AssemblyAngularVelocity = Vector3.zero
+                        end)
+                    end
                 end
 
                 if not skillLogSeen[sk] then
@@ -832,7 +848,7 @@ local function killTarget(targetName, token, onStep)
         questFinishedNow = ((maxProgress or 0) > 0 and (progress or 0) >= (maxProgress or 0))
     end
 
-    if killed and token == runId and isTokenActive(token) and not questFinishedNow then
+    if killed and targetKind ~= "Player" and token == runId and isTokenActive(token) and not questFinishedNow then
         local nextTarget = getClosestNPC(targetName, target)
         local nextHRP = nextTarget and nextTarget:FindFirstChild("HumanoidRootPart")
         if nextTarget and nextHRP and hrp and hrp.Parent then
@@ -885,9 +901,11 @@ local function killTarget(targetName, token, onStep)
             end)
         end
         if token == runId then
-            _movement:SetNoclip(false)
-            if not killed and hrp and hrp.Parent then
-                pcall(function() hrp.CFrame = oldPos end)
+            if targetKind ~= "Player" then
+                _movement:SetNoclip(false)
+                if not killed and hrp and hrp.Parent then
+                    pcall(function() hrp.CFrame = oldPos end)
+                end
             end
         end
     end
@@ -1885,6 +1903,67 @@ function CombatFarm:StartQuest()
     startMode("Quest")
 end
 
+-- One-shot PvP target mode. It reuses XenonLock's Stand positioning and attack
+-- scheduler, but never moves the local player's character root toward the target.
+function CombatFarm:StartPlayerTarget(targetName)
+    if type(targetName)~="string" or targetName=="" then
+        return false,"Select a player first"
+    end
+    if targetName==Player.Name then return false,"Cannot target the local player" end
+    local targetPlayer=Players:FindFirstChild(targetName)
+    if not targetPlayer then return false,"Selected player is no longer in this server" end
+    if not _inventory or not _inventory:HasStand() then
+        return false,"Player Target requires an active Stand"
+    end
+    local targetCharacter=targetPlayer.Character
+    local targetHumanoid=targetCharacter and targetCharacter:FindFirstChildWhichIsA("Humanoid")
+    local targetRoot=targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
+    if not targetCharacter or not targetHumanoid or targetHumanoid.Health<=0 or not targetRoot then
+        return false,"Selected player has no living character"
+    end
+    local runtime=_G.WhiteHubModules and _G.WhiteHubModules.AutoPrestigeRuntime
+    if runtime and runtime.IsBusy and runtime:IsBusy() then
+        return false,"Auto Prestige is active"
+    end
+    if isRunning or activeMode~=nil or outstandingTasks>0 then
+        return false,("CombatFarm busy (mode=%s)"):format(tostring(activeMode))
+    end
+
+    runId=runId+1
+    local token=runId
+    stopRequested=false
+    activeMode="PlayerTarget"
+    isRunning=true
+    pauseItemFarmForCombat()
+    moduleLog("INFO","[CombatFarm][PlayerTarget] Selected "..targetName.."; Stand-only target lock starting.")
+
+    task.spawn(function()
+        if not waitToken(0.35,token,"PlayerTarget") then return end
+        local ok,result=pcall(function()
+            if targetPlayer.Parent~=Players or targetPlayer.Character~=targetCharacter then
+                return false,"Player changed character before lock"
+            end
+            return killTarget(targetName,token,nil,targetCharacter,"Player",targetPlayer)
+        end)
+        if not ok then
+            moduleLog("ERROR","[CombatFarm][PlayerTarget] "..tostring(result))
+        elseif result==true then
+            moduleLog("INFO","[CombatFarm][PlayerTarget] Target Humanoid reached 0 HP: "..targetName)
+        else
+            moduleLog("WARN","[CombatFarm][PlayerTarget] Lock ended without confirmed target death: "..tostring(result))
+        end
+        if token==runId then
+            isRunning=false
+            activeMode=nil
+            _movement:SetNoclip(false)
+            _movement:ClearFocus()
+            _movement:FixCamera()
+            resumeItemFarmAfterCombat()
+        end
+    end)
+    return true,"Stand-only target lock started for "..targetName
+end
+
 -- AutoPrestige reuses XenonLock instead of maintaining a second NPC combat loop.
 -- This synchronous, scoped entry point owns combat only for one progression step.
 function CombatFarm:DefeatTarget(targetName,onStep)
@@ -2000,6 +2079,7 @@ assert(type(CombatFarm.Init) == "function", "CombatFarm export missing Init")
 assert(type(CombatFarm.StartNPC) == "function", "CombatFarm export missing StartNPC")
 assert(type(CombatFarm.StartQuest) == "function", "CombatFarm export missing StartQuest")
 assert(type(CombatFarm.DefeatTarget) == "function", "CombatFarm export missing DefeatTarget")
+assert(type(CombatFarm.StartPlayerTarget) == "function", "CombatFarm export missing StartPlayerTarget")
 assert(type(CombatFarm.Stop) == "function", "CombatFarm export missing Stop")
 assert(type(CombatFarm.IsRunning) == "function", "CombatFarm export missing IsRunning")
 
