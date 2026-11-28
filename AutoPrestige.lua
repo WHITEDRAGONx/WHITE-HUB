@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R10.3-MISTA-SAFE; stale objective guard + fail-closed 2+2 selection")
+    moduleLog("INFO","Build AP-AFK-20261127-R10.4-MISTA-UI-RECOVERY; visual Option2 fallback + restore unsupported dialogue")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
