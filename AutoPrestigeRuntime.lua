@@ -47,27 +47,40 @@ local function buttonText(object, gui)
             parts[#parts + 1] = tostring(child.Text or "")
         end
     end
-    return table.concat(parts, " "):lower():gsub("%s+", " ")
+    local normalized=table.concat(parts, " "):lower():gsub("’","'"):gsub("‘","'")
+    return normalized:gsub("%s+", " ")
 end
 
 local function dialogueButton(gui, npc)
     local options = gui:FindFirstChild("Options", true)
 
-    -- The Trello's Mista #7 dialogue asks "What is two plus two?".
-    -- Option1 ("It's four") kills the player; fail closed unless Option2
-    -- ("I actually don't know") is visible on that exact question page.
+    -- Mista #7 has a lethal trap: Option1 ("It's four") shoots the player.
+    -- Prefer Option2 ("I actually don't know") whenever the math question or
+    -- its answer pair is visible. If the page looks dangerous but cannot be
+    -- parsed, fail closed instead of ever defaulting to Option1.
     if npc == "Storyline #7" and options then
         local pageText = buttonText(gui, gui)
         local optionOneText = buttonText(options:FindFirstChild("Option1"), gui)
         local optionTwoText = buttonText(options:FindFirstChild("Option2"), gui)
-        local isFatalQuestion = pageText:find("two plus two", 1, true)
+        local asksTwoPlusTwo = pageText:find("two plus two", 1, true)
+            or pageText:find("two and two", 1, true)
             or pageText:find("2 + 2", 1, true)
-            or ((optionOneText:find("four", 1, true) ~= nil)
-                and (optionTwoText:find("don't know", 1, true) ~= nil
-                    or optionTwoText:find("dont know", 1, true) ~= nil))
-        if isFatalQuestion then
+            or pageText:find("2+2", 1, true)
+        local optionOneIsFour = optionOneText:find("four", 1, true) ~= nil
+            or optionOneText:find("it's 4", 1, true) ~= nil
+            or optionOneText:find("its 4", 1, true) ~= nil
+            or optionOneText:match("%f[%w]4%f[%W]") ~= nil
+        local optionTwoIsSafe = optionTwoText:find("don't know", 1, true) ~= nil
+            or optionTwoText:find("dont know", 1, true) ~= nil
+            or optionTwoText:find("do not know", 1, true) ~= nil
+            or optionTwoText:find("not sure", 1, true) ~= nil
+            or optionTwoText:find("idk", 1, true) ~= nil
+        if asksTwoPlusTwo or (optionOneIsFour and optionTwoIsSafe) then
             local safe = resolveButton(options:FindFirstChild("Option2"), gui)
             if safe then return safe, "Option2" end
+            return nil, "unsupported-options"
+        end
+        if optionOneIsFour then
             return nil, "unsupported-options"
         end
     end
