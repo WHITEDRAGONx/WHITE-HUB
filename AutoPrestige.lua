@@ -134,8 +134,8 @@ local function endDialogue(NPC, Dialogue, Option)
     end,"NPC "..NPC)
 end
 
-local function storyDialogue()
-    local source=ctx:StorySource()
+local function storyDialogue(sourceOverride)
+    local source=sourceOverride or ctx:StorySource()
     local before=ctx:QuestFingerprint()
     return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
 end
@@ -468,7 +468,8 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Bucciarati")
         if killNPC("Bucciarati", 15) then
             task.wait(1)
-            storyDialogue()
+            moduleLog("INFO", "[AutoPrestige] Bucciarati defeated; opening Storyline #4 to accept the next mission")
+            storyDialogue("Storyline #4")
             return true
         else
             return true
