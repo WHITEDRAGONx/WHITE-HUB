@@ -33,6 +33,21 @@ local _inventory = nil
 local _movement  = nil
 local _serverHop = nil
 local _webhook   = nil
+local _remoteAudit = nil
+
+local function auditedInvoke(remote,...)
+    if _remoteAudit and type(_remoteAudit.Invoke)=="function" then
+        return _remoteAudit:Invoke("CombatFarm",remote,...)
+    end
+    return remote:InvokeServer(...)
+end
+
+local function auditedFire(remote,...)
+    if _remoteAudit and type(_remoteAudit.Fire)=="function" then
+        return _remoteAudit:Fire("CombatFarm",remote,...)
+    end
+    return remote:FireServer(...)
+end
 
 local activeMode = nil
 local isRunning = false
@@ -307,7 +322,7 @@ local function ensureStandSummoned(character)
             if summonPending==record then summonPending=nil end
             return
         end
-        local ok=pcall(function() remote:InvokeServer("ToggleStand","Toggle") end)
+        local ok=pcall(function() auditedInvoke(remote,"ToggleStand","Toggle") end)
         while ok and allowed(record.token) and tick()<record.deadline and not summonedState(character) do task.wait(0.05) end
         if summonPending==record then summonPending=nil end
         if not allowed(record.token) then return end
@@ -383,6 +398,7 @@ function CombatFarm:Init(Modules)
     _movement  = Modules.Movement
     _serverHop = Modules.ServerHop
     _webhook   = Modules.Webhook
+    _remoteAudit = Modules.RemoteAudit
 
     if questWatcherConnection then
         pcall(function() questWatcherConnection:Disconnect() end)
@@ -425,12 +441,12 @@ local function useMove(move)
     if move == "m1" or move == "m2" then
         local remoteFunc = char:FindFirstChild("RemoteFunction")
         if remoteFunc then
-            remoteFunc:InvokeServer("Attack", move)
+            auditedInvoke(remoteFunc, "Attack", move)
         end
     elseif typeof(move) == "Enum" then
         local remoteEvent = char:FindFirstChild("RemoteEvent")
         if remoteEvent then
-            remoteEvent:FireServer("InputBegan", { Input = move })
+            auditedFire(remoteEvent, "InputBegan", { Input = move })
         end
     end
 end
@@ -631,6 +647,15 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
     moduleLog("INFO", ("[CombatFarm][XenonLock] Locked %s | hp=%s source=%s stand=%s"):format(
         tostring(targetName), tostring(lastKnownHp), tostring(hpSource), tostring(getCurrentStandName())
     ))
+    if _remoteAudit then
+        _remoteAudit:Stage("CombatFarm","TARGET_LOCKED",{
+            target=tostring(targetName),
+            kind=tostring(targetKind),
+            hp=tostring(lastKnownHp),
+            hpSource=tostring(hpSource),
+            stand=tostring(getCurrentStandName())
+        })
+    end
 
     -- AutoPrestige combat has no elapsed-time kill deadline. Keep XenonLock
     -- attacking until death/despawn is confirmed or the user cancels the mode.
@@ -832,7 +857,7 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
                 nextM1At = tick() + 0.075
             end
             task.spawn(function()
-                pcall(function() remoteFunc:InvokeServer("Attack", "m1") end)
+                pcall(function() auditedInvoke(remoteFunc, "Attack", "m1") end)
                 attackBusy = false
             end)
         end
@@ -948,6 +973,13 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
         moduleLog("INFO", ("[CombatFarm][XenonLock] Confirmed death: %s | lastHp=%s source=%s"):format(
             tostring(targetName), tostring(lastKnownHp), tostring(hpSource)
         ))
+        if _remoteAudit then
+            _remoteAudit:Stage("CombatFarm","TARGET_DEFEATED",{
+                target=tostring(targetName),
+                lastHp=tostring(lastKnownHp),
+                hpSource=tostring(hpSource)
+            })
+        end
     else
         moduleLog("WARN", ("[CombatFarm][XenonLock] Target lock ended without confirmed death: %s | lastHp=%s source=%s"):format(
             tostring(targetName), tostring(lastKnownHp), tostring(hpSource)
