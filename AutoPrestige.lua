@@ -425,13 +425,64 @@ local function autoStoryStep()
     )
     local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
-    local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest
+    local isSecurityQuest=genericGiornoGuardQuest
+        or storyObjective=="Help Giorno by Defeating Security Guards"
+        or hasQuest(questPanel,"Help Giorno by Defeating Security Guards")
+    local isLucaQuest=storyObjective=="Defeat Leaky Eye Luca"
+        or hasQuest(questPanel,"Defeat Leaky Eye Luca")
+    local isBucciaratiQuest=storyObjective=="Defeat Bucciarati"
+        or hasQuest(questPanel,"Defeat Bucciarati")
+    local isMoneyQuest=storyObjective=="Collect $5,000 To Cover For Popo's Real Fortune"
+        or hasQuest(questPanel,"Collect $5,000 To Cover For Popo's Real Fortune")
+    local isFugoQuest=storyObjective=="Defeat Fugo And His Purple Haze"
+        or hasQuest(questPanel,"Defeat Fugo And His Purple Haze")
+    local isPesciQuest=storyObjective=="Defeat Pesci"
+        or hasQuest(questPanel,"Defeat Pesci")
+    local isGhiaccioQuest=storyObjective=="Defeat Ghiaccio"
+        or hasQuest(questPanel,"Defeat Ghiaccio")
+    local isDiavoloQuest=storyObjective=="Defeat Diavolo"
+        or hasQuest(questPanel,"Defeat Diavolo")
+    local mappedCombatQuest=isSecurityQuest or isLucaQuest or isBucciaratiQuest
+        or isMoneyQuest or isFugoQuest or isPesciQuest or isGhiaccioQuest or isDiavoloQuest
+    local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest or mappedCombatQuest
     local knownStoryQuest=genericGiornoGuardQuest or namedStoryQuest
 
     -- Generic Patch rows with a non-five-step counter are not the Security
     -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
     -- Storyline #1 fallback for this active generic row and confirms dialogue
     -- progress using the replicated quest fingerprint.
+    -- A restart can happen after XenonLock has already defeated a boss.
+    -- If the replicated objective counter is complete, go straight to its exact
+    -- quest-giver dialogue instead of waiting for a boss that has already despawned.
+    if questComplete and mappedCombatQuest then
+        local turnInSource=nil
+        if isSecurityQuest then
+            turnInSource="Storyline #1"
+        elseif isLucaQuest then
+            turnInSource="Storyline #3"
+        elseif isBucciaratiQuest then
+            turnInSource="Storyline #4"
+        elseif isFugoQuest then
+            turnInSource="Storyline #12"
+        elseif isPesciQuest then
+            turnInSource="Storyline #13"
+        elseif isGhiaccioQuest then
+            turnInSource="Storyline #15"
+        elseif isDiavoloQuest then
+            turnInSource="Storyline #17"
+        end
+        if turnInSource then
+            moduleLog("INFO","[AutoPrestige] Completed story objective detected; resuming turn-in at "..turnInSource)
+            storyDialogue(turnInSource)
+            if isDiavoloQuest then
+                ctx.storyFinalComplete=true
+                moduleLog("INFO","[AutoPrestige] Final Storyline #17 turn-in confirmed after recovery")
+            end
+            ctx:Wait(0.2)
+            return true
+        end
+    end
+
     if koichiSuitcaseQuest and ctx.storySource~="Storyline #2" then
         moduleLog("INFO","[AutoPrestige] Quest: Return Koichi's Suitcase; opening Storyline #2")
         storyDialogue("Storyline #2")
@@ -475,7 +526,7 @@ local function autoStoryStep()
         return true
     end
 
-    if not ctx.storyFinalComplete and (questComplete or (not questIncomplete and not knownStoryQuest)) then
+    if not ctx.storyFinalComplete and not knownStoryQuest and (questComplete or not questIncomplete) then
         storyDialogue()
         ctx:Wait(0.2)
         return true
@@ -485,7 +536,7 @@ local function autoStoryStep()
         moduleLog("INFO","[AutoPrestige] Generic Patch + active 5-step counter identified as Giorno Security Guards")
     end
 
-    if genericGiornoGuardQuest or hasQuest(questPanel, "Help Giorno by Defeating Security Guards") then
+    if isSecurityQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Security Guard")
         local progress,maxProgress=questProgressState()
         local goal=maxProgress>0 and maxProgress or 5
@@ -532,7 +583,7 @@ local function autoStoryStep()
         dontTPOnDeath = true
         return true
 
-    elseif hasQuest(questPanel, "Defeat Leaky Eye Luca") and getgenv().standList[LocalPlayer.PlayerStats.Stand.Value] then
+    elseif isLucaQuest and getgenv().standList[LocalPlayer.PlayerStats.Stand.Value] then
         moduleLog("INFO", "[AutoPrestige] Quest: Leaky Eye Luca")
         if killNPC("Leaky Eye Luca", 15) then
             task.wait(1)
@@ -542,7 +593,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif hasQuest(questPanel, "Defeat Bucciarati") then
+    elseif isBucciaratiQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Bucciarati")
         if killNPC("Bucciarati", 15) then
             task.wait(1)
@@ -553,7 +604,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif hasQuest(questPanel, "Collect $5,000 To Cover For Popo's Real Fortune") then
+    elseif isMoneyQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Collect $5,000")
         if LocalPlayer.PlayerStats.Money.Value >= 5000 then
             moduleLog("INFO","[AutoPrestige] $5,000 requirement confirmed; opening Trish Storyline #11")
@@ -584,7 +635,7 @@ local function autoStoryStep()
         end
         return true
 
-    elseif hasQuest(questPanel, "Defeat Fugo And His Purple Haze") then
+    elseif isFugoQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Fugo")
         if killNPC("Fugo", 15) then
             task.wait(1)
@@ -594,7 +645,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif hasQuest(questPanel, "Defeat Pesci") then
+    elseif isPesciQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Pesci")
         if killNPC("Pesci", 15) then
             task.wait(1)
@@ -604,7 +655,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif hasQuest(questPanel, "Defeat Ghiaccio") then
+    elseif isGhiaccioQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Ghiaccio")
         if killNPC("Ghiaccio", 15) then
             task.wait(1)
@@ -614,7 +665,7 @@ local function autoStoryStep()
             return true
         end
 
-    elseif hasQuest(questPanel, "Defeat Diavolo") then
+    elseif isDiavoloQuest then
         moduleLog("INFO", "[AutoPrestige] Quest: Diavolo")
         if killNPC("Diavolo", 15) then
             task.wait(1)
