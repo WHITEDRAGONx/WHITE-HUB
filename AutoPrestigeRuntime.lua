@@ -819,6 +819,28 @@ function Context:StoryObjective()
                         return "Deliver Lighter to Giorno","Storyline #5"
                     end
 
+                    -- Quest titles may render outside the Quests/Patch row. Map
+                    -- only exact story objective phrases so a reload can resume safely.
+                    if value:find("help giorno by defeating security guards",1,true) then
+                        return "Help Giorno by Defeating Security Guards","Storyline #1"
+                    elseif value:find("defeat leaky eye luca",1,true) then
+                        return "Defeat Leaky Eye Luca","Storyline #3"
+                    elseif value:find("defeat bucciarati",1,true) then
+                        return "Defeat Bucciarati","Storyline #4"
+                    elseif value:find("collect $5,000",1,true)
+                        and (value:find("popo",1,true) or value:find("fortune",1,true)) then
+                        return "Collect $5,000 To Cover For Popo's Real Fortune","Storyline #10"
+                    elseif value:find("defeat fugo",1,true)
+                        or (value:find("purple haze",1,true) and value:find("defeat",1,true)) then
+                        return "Defeat Fugo And His Purple Haze","Storyline #11"
+                    elseif value:find("defeat pesci",1,true) then
+                        return "Defeat Pesci","Storyline #12"
+                    elseif value:find("defeat ghiaccio",1,true) then
+                        return "Defeat Ghiaccio","Storyline #14"
+                    elseif value:find("defeat diavolo",1,true) then
+                        return "Defeat Diavolo","Storyline #17"
+                    end
+
                     if value:find("talk to the members of bucciarati's gang",1,true)
                         or value:find("meet the members of bucciarati's gang",1,true) then
                         return "Meet Bucciarati's gang","Storyline #6"
