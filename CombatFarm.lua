@@ -3,6 +3,7 @@
 -- Unified combat: NPC and Quest farming.
 -- QUEST/COMBAT BUILD: R15-COMBAT-STABLE-LOCAL-DIALOGUE
 -- PLAYER TARGET BUILD: PLAYER-TARGET-20261127-R1
+-- AUTOPRESTIGE FIX: AutoPrestige-owned Stand summon, Stand camera and safe body hold.
 -- Logic identical to Xenon V5 (stand positioning, attacks, death detection).
 -- FIXED: player positioned underground (yOffset -35) with noclip for safety.
 -- =====================
@@ -263,9 +264,12 @@ end
 local function ensureStandSummoned(character)
     if not character then return false,false end
     local function allowed(token)
+        local env=getgenv and getgenv() or _G
         return isRunning and not stopRequested and token==runId and Player.Character==character
             and (not _config or (activeMode=="NPC" and _config:Get("NPCFarmEnabled")==true)
-                or (activeMode=="Quest" and _config:Get("QuestFarmEnabled")==true))
+                or (activeMode=="Quest" and _config:Get("QuestFarmEnabled")==true)
+                or (activeMode=="AutoPrestige" and _config:Get("AutoPrestige")==true
+                    and env.AutoPrestigeEnabled==true))
     end
     if not allowed(runId) then return false,false end
     if summonCharacter~=character or summonRun~=runId then
@@ -568,7 +572,23 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
     end
 
     local standMorph = hasStand and character:FindFirstChild("StandMorph") or nil
-    local standPart = standMorph and standMorph.PrimaryPart or nil
+    local standPart = standMorph and (standMorph:FindFirstChild("HumanoidRootPart") or standMorph.PrimaryPart) or nil
+    local standCameraLogged = false
+    local function focusStandCamera()
+        if activeMode ~= "AutoPrestige" or not standPart or not standPart.Parent then return end
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        if camera.CameraSubject ~= standPart or camera.CameraType ~= Enum.CameraType.Custom then
+            local ok = pcall(function()
+                camera.CameraType = Enum.CameraType.Custom
+                camera.CameraSubject = standPart
+            end)
+            if ok and not standCameraLogged then
+                standCameraLogged = true
+                moduleLog("INFO", "[CombatFarm][AutoPrestige] Camera locked to Stand root.")
+            end
+        end
+    end
 
     local focusCam = character:FindFirstChild("FocusCam")
     local createdFocusCam = false
@@ -688,13 +708,14 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
             end
             if not standPart or not standPart.Parent then
                 standMorph = character:FindFirstChild("StandMorph")
-                standPart = standMorph and standMorph.PrimaryPart or nil
+                standPart = standMorph and (standMorph:FindFirstChild("HumanoidRootPart") or standMorph.PrimaryPart) or nil
             end
         end
 
         local standCF = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 1.1
         if standPart and standPart.Parent then
             standPart.CFrame = standCF
+            focusStandCamera()
         end
 
         -- IMPORTANT: do NOT move the player into melee range just because the
@@ -722,6 +743,9 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
                 hrp.CFrame = CFrame.lookAt(nearCF.Position, enemyHRP.Position)
             elseif standPart and standPart.Parent then
                 hrp.CFrame = standCF + standCF.LookVector * -2.5 + Vector3.new(0, safeYOffset, 0)
+            elseif hasStand then
+                -- Hold the real body at its saved safe position while Stand summon/replication is pending.
+                hrp.CFrame = oldPos
             else
                 hrp.CFrame = enemyHRP.CFrame - enemyHRP.CFrame.LookVector * 2.3 + Vector3.new(0, safeYOffset, 0)
             end
@@ -864,12 +888,13 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
                     standGraceUntil = tick() + 1.35
                 end
                 standMorph = character:FindFirstChild("StandMorph")
-                standPart = standMorph and standMorph.PrimaryPart or nil
+                standPart = standMorph and (standMorph:FindFirstChild("HumanoidRootPart") or standMorph.PrimaryPart) or nil
             end
 
             local nextStandCF = nextHRP.CFrame - nextHRP.CFrame.LookVector * 1.1
             if standPart and standPart.Parent then
                 standPart.CFrame = nextStandCF
+                focusStandCamera()
             end
 
             if playerMeleeFallback then
@@ -877,6 +902,8 @@ local function killTarget(targetName, token, onStep, fixedTarget, targetKind, ta
                 hrp.CFrame = CFrame.lookAt(nearCF.Position, nextHRP.Position)
             elseif standPart and standPart.Parent then
                 hrp.CFrame = nextStandCF + nextStandCF.LookVector * -2.5 + Vector3.new(0, safeYOffset, 0)
+            elseif hasStand then
+                hrp.CFrame = oldPos
             else
                 hrp.CFrame = nextHRP.CFrame - nextHRP.CFrame.LookVector * 2.3 + Vector3.new(0, safeYOffset, 0)
             end
