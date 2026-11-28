@@ -1142,10 +1142,6 @@ function Runtime:Stop(reason,preserveSavedToggle)
             modules.Movement:SetNoclip(false)
             modules.Movement:ClearFocus()
             modules.Movement:FixCamera()
-            if not keepEnabled and ctx.runtime==env.__WhiteHubRuntimeId then
-                local char=player().Character; local hum=char and char:FindFirstChildOfClass('Humanoid')
-                if hum and hum.Health>0 then modules.Movement:Teleport(CFrame.new(978,-42,-49)) end
-            end
         end)
         log('INFO','Stopped: '..ctx.reason..'; pending tasks/results remain fenced')
     end

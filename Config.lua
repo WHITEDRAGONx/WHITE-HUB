@@ -22,7 +22,7 @@ local Defaults = {
     WebhookURL = "",
     Phase1Notified = false,
     Phase3Notified = false,
-    FarmEnabled = true,
+    FarmEnabled = false,
     EventItemsFarmEnabled = false, -- Exclusive candy-only collection; separate from normal Item Farm.
     HalloweenAutoTurnIn = false, -- Opt-in conversion at serialized farm or idle checkpoints.
     HalloweenAutoBuy = false, -- Explicit opt-in per runtime, never resumed after hop.
@@ -125,6 +125,7 @@ local function ApplyDefaults(data)
         data.ArcadeTeleportPosition={}
     end
     -- Old or corrupt saves must never enable two item collection modes together.
+    if type(data.FarmEnabled) ~= "boolean" then data.FarmEnabled = false end
     if type(data.EventItemsFarmEnabled) ~= "boolean" then data.EventItemsFarmEnabled = false end
     if data.FarmEnabled == true or data.AutoPrestige == true or data.StandFarmEnabled == true
         or data.QuestFarmEnabled == true or data.NPCFarmEnabled == true then
