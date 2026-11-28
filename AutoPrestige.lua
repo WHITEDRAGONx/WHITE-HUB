@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261128-R10.9-EARLY-STORY-RESUME; clear stale #4-#9 checkpoint before objective mapping at Level13+")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.10-TRISH-PESCI-GUARD; confirm Trish #12 only after Pesci quest appears")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -154,6 +154,11 @@ local function storyDialogue(sourceOverride)
             if lighterPresent then return true end
             local objective=ctx:StoryObjective()
             return objective=="Deliver Lighter to Giorno"
+        elseif source=="Storyline #12" then
+            -- After Fugo, Storyline #12 is Trish's handoff to Pesci.
+            -- Require the new active Story quest row, not a closed dialogue
+            -- or a changed generic counter, before saving this checkpoint.
+            return ctx:HasQuestTitle("Defeat Pesci")
         end
         return ctx:QuestFingerprint()~=before
     end
