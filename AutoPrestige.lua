@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R8-KOICHI-STORY; generic Patch progression + nonblocking skill allocation")
+    moduleLog("INFO","Build AP-AFK-20261127-R9-FULL-STORYLINE; indexed Storyline #1-#17 support + safe Mista choice; nonblocking skill allocation")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -140,6 +140,31 @@ local function storyDialogue(sourceOverride)
     return ctx:Dialogue(source,{"Option1"},function() return ctx:QuestFingerprint()~=before end,"Story "..source)
 end
 
+-- These are dialogue-only transitions documented by the YBA Story/Trello route.
+-- Combat and money-gated steps are intentionally handled by their own branches below.
+local STORY_DIALOGUE_NEXT = {
+    ["Storyline #2"]="Storyline #3",
+    ["Storyline #4"]="Storyline #5",
+    ["Storyline #5"]="Storyline #6",
+    ["Storyline #6"]="Storyline #7",
+    ["Storyline #7"]="Storyline #8",
+    ["Storyline #8"]="Storyline #9",
+    ["Storyline #9"]="Storyline #10",
+    ["Storyline #13"]="Storyline #14",
+    ["Storyline #15"]="Storyline #16",
+    ["Storyline #16"]="Storyline #17",
+}
+
+local function advanceKnownStoryDialogue()
+    local current=tostring(ctx.storySource or "")
+    local nextSource=STORY_DIALOGUE_NEXT[current]
+    if not nextSource then return false end
+    moduleLog("INFO","[AutoPrestige] Storyline handoff "..current.." -> "..nextSource)
+    storyDialogue(nextSource)
+    ctx:Wait(0.2)
+    return true
+end
+
 -- Auto Prestige delegates NPC combat to the shared CombatFarm/XenonLock core.
 local function killNPC(npcName,playerDistance,dontDestroyOnKill,extraParameters)
     ctx:Check()
@@ -263,13 +288,29 @@ local function hasKnownStoryQuest(panel)
         "Help Giorno by Defeating Security Guards",
         "Defeat Leaky Eye Luca",
         "Defeat Bucciarati",
+        "Return Koichi's Suitcase",
+        "Deliver Lighter to Giorno",
+        "Bring the Lighter to Giorno",
+        "Talk to the members of Bucciarati's gang",
+        "Meet the members of Bucciarati's gang",
+        "Talk to Fugo",
+        "Meet Fugo",
+        "Talk to Mista",
+        "Meet Mista",
+        "Talk to Narancia",
+        "Meet Narancia",
+        "Talk to Abbacchio",
+        "Meet Abbacchio",
+        "Talk to Bruno",
+        "Meet Bruno",
+        "Talk to Trish",
+        "Meet Trish",
         "Collect $5,000 To Cover For Popo's Real Fortune",
         "Defeat Fugo And His Purple Haze",
         "Defeat Pesci",
         "Defeat Ghiaccio",
         "Defeat Diavolo",
         "Take down 3 vampires",
-        "Return Koichi's Suitcase",
     }) do
         if hasQuest(panel,name) then return true end
     end
@@ -368,9 +409,20 @@ local function autoStoryStep()
     -- first Security Guard mission is the known 5-step objective; use the
     -- replicated quest counter instead of scanning the entire PlayerGui.
     local genericPatchActive=hasOnlyGenericPatchRow(questPanel) and questMaxProgress>0
-    local storyObjective=ctx:StoryObjective()
+    local storyObjective,mappedStorySource=ctx:StoryObjective()
     local koichiSuitcaseQuest=storyObjective=="Return Koichi's Suitcase"
         or hasQuest(questPanel,"Return Koichi's Suitcase")
+    local backpack=LocalPlayer:FindFirstChildOfClass("Backpack")
+    local character=LocalPlayer.Character
+    local hasLighter=(backpack and backpack:FindFirstChild("Lighter")~=nil)
+        or (character and character:FindFirstChild("Lighter")~=nil)
+        or hasQuest(questPanel,"Deliver Lighter to Giorno")
+        or hasQuest(questPanel,"Bring the Lighter to Giorno")
+    local talkObjective=storyObjective and (
+        storyObjective:lower():find("talk to",1,true)
+        or storyObjective:lower():find("meet ",1,true)
+        or storyObjective:lower():find("deliver lighter",1,true)
+    )
     local genericGiornoGuardQuest=genericPatchActive
         and questMaxProgress==5 and questProgress<questMaxProgress
     local namedStoryQuest=hasKnownStoryQuest(questPanel) or koichiSuitcaseQuest
@@ -380,14 +432,41 @@ local function autoStoryStep()
     -- Guard objective. Do not sit idle: Runtime:StorySource has a guarded
     -- Storyline #1 fallback for this active generic row and confirms dialogue
     -- progress using the replicated quest fingerprint.
-    if koichiSuitcaseQuest then
-        local source=ctx:StorySource()
-        if source~="Storyline #2" then error("AP_KOICHI_STORY_SOURCE_MISMATCH",0) end
-        moduleLog("INFO","[AutoPrestige] Quest: Return Koichi's Suitcase; resolved NPC "..source)
-        storyDialogue()
+    if koichiSuitcaseQuest and ctx.storySource~="Storyline #2" then
+        moduleLog("INFO","[AutoPrestige] Quest: Return Koichi's Suitcase; opening Storyline #2")
+        storyDialogue("Storyline #2")
         ctx:Wait(0.2)
         return true
     end
+
+    -- Recover cleanly when the executor/runtime is restarted mid-story. Only
+    -- talk objectives get mapped here; combat targets remain handled by XenonLock.
+    if talkObjective and mappedStorySource and mappedStorySource~=ctx.storySource
+        and not hasQuest(questPanel,"Defeat Fugo And His Purple Haze")
+        and not hasQuest(questPanel,"Defeat Pesci")
+        and not hasQuest(questPanel,"Defeat Ghiaccio")
+        and not hasQuest(questPanel,"Defeat Diavolo")
+        and not hasQuest(questPanel,"Defeat Bucciarati")
+        and not hasQuest(questPanel,"Defeat Leaky Eye Luca") then
+        moduleLog("INFO","[AutoPrestige] Story talk objective mapped to "..mappedStorySource
+            .." ("..tostring(storyObjective)..")")
+        storyDialogue(mappedStorySource)
+        ctx:Wait(0.2)
+        return true
+    end
+
+    -- Continue only known dialogue-to-dialogue handoffs; never guess a boss or
+    -- bypass a combat/money gate. The next dialogue must change the quest state.
+    if advanceKnownStoryDialogue() then return true end
+
+    -- Storyline #4 hands over the lighter; #5 is the Giorno hand-in/recruit step.
+    if hasLighter and ctx.storySource~="Storyline #5"
+        and not hasKnownStoryQuest(questPanel) then
+        moduleLog("INFO","[AutoPrestige] Lighter detected; opening Giorno Storyline #5")
+        storyDialogue("Storyline #5")
+        return true
+    end
+
     if genericPatchActive and not genericGiornoGuardQuest and not namedStoryQuest then
         local source=ctx:StorySource()
         moduleLog("INFO","[AutoPrestige] Generic Patch objective "..tostring(questProgress).."/"
@@ -441,7 +520,7 @@ local function autoStoryStep()
         if progress>=goal then
             moduleLog("INFO","[AutoPrestige] Security Guard objective complete; returning to Giorno")
             ctx:Wait(1)
-            storyDialogue()
+            storyDialogue("Storyline #1")
         else
             moduleLog("WARN","[AutoPrestige] Security Guard loop reached its safety limit; rechecking quest state")
         end
@@ -458,7 +537,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Leaky Eye Luca")
         if killNPC("Leaky Eye Luca", 15) then
             task.wait(1)
-            storyDialogue()
+            storyDialogue("Storyline #3")
             return true
         else
             return true
@@ -477,13 +556,17 @@ local function autoStoryStep()
 
     elseif hasQuest(questPanel, "Collect $5,000 To Cover For Popo's Real Fortune") then
         moduleLog("INFO", "[AutoPrestige] Quest: Collect $5,000")
+        if LocalPlayer.PlayerStats.Money.Value >= 5000 then
+            moduleLog("INFO","[AutoPrestige] $5,000 requirement confirmed; opening Trish Storyline #11")
+            storyDialogue("Storyline #11")
+            return true
+        end
         if LocalPlayer.PlayerStats.Money.Value < 5000 then
             local function collectAndSell(toolName, amount)
                 if countItems(toolName) <= amount then
                     if LocalPlayer.PlayerStats.Money.Value>=5000 then return true end
                     farmItem(toolName, 1)
                     endDialogue("Merchant", "Dialogue5", "Option2")
-                    if LocalPlayer.PlayerStats.Money.Value>=5000 then storyDialogue() end
                     return true
                 end
 
@@ -506,7 +589,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Fugo")
         if killNPC("Fugo", 15) then
             task.wait(1)
-            storyDialogue()
+            storyDialogue("Storyline #12")
             return true
         else
             return true
@@ -516,7 +599,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Pesci")
         if killNPC("Pesci", 15) then
             task.wait(1)
-            storyDialogue()
+            storyDialogue("Storyline #13")
             return true
         else
             return true
@@ -526,7 +609,7 @@ local function autoStoryStep()
         moduleLog("INFO", "[AutoPrestige] Quest: Ghiaccio")
         if killNPC("Ghiaccio", 15) then
             task.wait(1)
-            storyDialogue()
+            storyDialogue("Storyline #15")
             return true
         else
             return true
@@ -534,13 +617,12 @@ local function autoStoryStep()
 
     elseif hasQuest(questPanel, "Defeat Diavolo") then
         moduleLog("INFO", "[AutoPrestige] Quest: Diavolo")
-        killNPC("Diavolo", 15)
-        endDialogue("Storyline #14", "Dialogue7", "Option1")
-        if LocalPlayer.Backpack:FindFirstChild("Requiem Arrow") or Character:FindFirstChild("Requiem Arrow") then
-            return true
-        else
-            return true
+        if killNPC("Diavolo", 15) then
+            task.wait(1)
+            moduleLog("INFO","[AutoPrestige] Diavolo defeated; opening Giorno Storyline #17 reward dialogue")
+            storyDialogue("Storyline #17")
         end
+        return true
 
     elseif LocalPlayer.PlayerStats.Level.Value >= 50 then
         if Character:FindFirstChild("FocusCam") then
