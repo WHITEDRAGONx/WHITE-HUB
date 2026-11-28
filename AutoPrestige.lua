@@ -7,7 +7,7 @@ local function moduleLog(level,...)
     if modules.RuntimeLog then modules.RuntimeLog:Write(level,"AutoPrestige",...) end
 end
 support:Register(function(ctx)
-    moduleLog("INFO","Build AP-AFK-20261127-R10.4-MISTA-UI-RECOVERY; visual Option2 fallback + restore unsupported dialogue")
+    moduleLog("INFO","Build AP-AFK-20261128-R10.5-FUGO-DIALOGUE; finish visible dialogue + no duplicate Trish + faster scan")
     local nativeTask=task
     local task=ctx.Task
     local function autoPrestigeActive() return ctx:Active() end
@@ -344,7 +344,12 @@ local function autoStoryStep()
     end
 
     local questPanel
+    local questPanelWaitStarted=os.clock()
     ctx:Until(function() questPanel=LocalPlayer.PlayerGui:FindFirstChild("Quests",true); return questPanel~=nil end,nil,"quest panel")
+    local questPanelWait=os.clock()-questPanelWaitStarted
+    if questPanelWait>1.5 then
+        moduleLog("INFO",("[AutoPrestige] Quest panel became available after %.1fs; continuing first objective scan"):format(questPanelWait))
+    end
     ctx:QuestEntries(questPanel)
     allocateSkills()
 
@@ -476,6 +481,15 @@ local function autoStoryStep()
         or hasQuest(questPanel,"Defeat Bucciarati")
     local isMoneyQuest=storyObjective=="Collect $5,000 To Cover For Popo's Real Fortune"
         or hasQuest(questPanel,"Collect $5,000 To Cover For Popo's Real Fortune")
+    if isMoneyQuest and ctx.storySource=="Storyline #11" then
+        if not ctx.lastMoneyQuestStaleLog then
+            ctx.lastMoneyQuestStaleLog=true
+            moduleLog("INFO","[AutoPrestige] Trish Storyline #11 already accepted; ignoring the stale $5,000 objective while the Fugo mission refreshes")
+        end
+        isMoneyQuest=false
+    elseif not isMoneyQuest then
+        ctx.lastMoneyQuestStaleLog=nil
+    end
     local isFugoQuest=storyObjective=="Defeat Fugo And His Purple Haze"
         or hasQuest(questPanel,"Defeat Fugo And His Purple Haze")
     local isPesciQuest=storyObjective=="Defeat Pesci"
@@ -804,9 +818,16 @@ local function autoStoryStep()
 end
 
 
+    moduleLog("INFO","[AutoPrestige] Story worker active; running first quest scan immediately")
     local lastProgressLogAt=os.clock()+30
     while ctx:Active() do
+        local characterReadyStarted=os.clock()
         refreshCharacter()
+        local characterReadyWait=os.clock()-characterReadyStarted
+        if characterReadyWait>1.5 and not ctx.characterReadyDelayLogged then
+            ctx.characterReadyDelayLogged=true
+            moduleLog("INFO",("[AutoPrestige] Character/remotes became ready after %.1fs; resuming quest scan"):format(characterReadyWait))
+        end
         if isMaxPrestige() then
             local config=modules.Config
             if not config:Get("PrestigeMaxNotified") then
@@ -822,7 +843,7 @@ end
             moduleLog("INFO","[AutoPrestige] Still progressing; no progress timeout. Current state: "
                 ..ctx:Fingerprint())
         end
-        ctx:Wait(0.5)
+        ctx:Wait(0.2)
     end
 end)
 support:Watch()
